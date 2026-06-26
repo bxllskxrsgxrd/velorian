@@ -1,0 +1,70 @@
+
+:root {
+	--text: #f5f0ea;
+	--bg: #3c2c2b;
+	--bg-prompt-bar: #4b403f;
+	--icon-btn-hover: #645352;
+
+	--border: #e5e4e7;
+	--code-bg: #f4f3ec;
+	--accent: #aa3bff;
+	--accent-bg: rgba(170, 59, 255, 0.1);
+	--accent-border: rgba(170, 59, 255, 0.5);
+
+	--font-base: 'Helvetica', system-ui, 'Segoe UI', Roboto, sans-serif;
+	--font-heading: Monospace, 'Helvetica', sans-serif, system-ui, 'Segoe UI';
+	--sans: var(--font-base);
+	--heading: var(--font-heading);
+
+	font-family: 'Helvetica';
+	line-height: 150%;
+	letter-spacing: 0.18px;
+
+	color: var(--text);
+	background: var(--bg);
+	font-synthesis: none;
+	text-rendering: optimizeLegibility;
+	-webkit-font-smoothing: antialiased;
+	-moz-osx-font-smoothing: grayscale;
+
+	@media (max-width: 1024px) {
+		font-size: 16px;
+	}
+}
+
+#root {
+	max-width: 100%;
+	margin: 0 auto;
+	padding: 0 1rem;
+	text-align: center;
+	min-height: 100svh;
+	display: flex;
+	flex-direction: column;
+	justify-content: center;
+	box-sizing: border-box;
+}
+
+body {
+	margin: 0;
+}
+
+p {
+	margin: 0;
+}
+
+h1,
+h2 {
+	font-family: var(--heading);
+	font-weight: 500;
+	color: var(--text-h);
+}
+
+h1 {
+	font-size: 56px;
+	letter-spacing: -1.68px;
+	margin: 32px 0;
+	@media (max-width: 1024px) {
+		font-size: 36px;
+		margin: 20px 0;
+	}
+}
