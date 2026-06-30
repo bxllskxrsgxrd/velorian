@@ -1,4 +1,5 @@
 import { useLayoutEffect, useRef } from "react";
+import './_autoResizeTextarea.scss'
 
 // Определяю типизированные пропсы
 type AutoResizeTextareaProps = {
@@ -34,7 +35,7 @@ export function AutoResizeTextarea({
       value={value}
       placeholder={placeholder}
       onChange={onChange}
-      className="min-h-[24px] h-full w-full resize-none bg-transparent outline-none px-2"
+      className="resizeTextarea"
     ></textarea>
   );
 }

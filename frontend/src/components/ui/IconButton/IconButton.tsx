@@ -1,14 +1,12 @@
-import type { PropsWithChildren } from "react";
+import type { ButtonHTMLAttributes, PropsWithChildren } from 'react';
+import './_iconButton.scss';
 
-interface IconButtonProps extends PropsWithChildren {}
+interface IconButtonProps extends PropsWithChildren, ButtonHTMLAttributes<HTMLButtonElement> {}
 
-export function IconButton({ children, ...props }: IconButtonProps) {
-  return (
-    <button
-      className="p-2 hover:bg-[var(--icon-btn-hover)] rounded-full items-center cursor-pointer"
-      {...props}
-    >
-      {children}
-    </button>
-  );
+export function IconButton({ children, className = '', type = 'button', ...props }: IconButtonProps) {
+	return (
+		<button type={type} className={`icon-button ${className}`} {...props}>
+			{children}
+		</button>
+	);
 }

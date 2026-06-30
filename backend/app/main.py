@@ -1,7 +1,10 @@
 import os
 from pathlib import Path
+from typing import Literal
 
 from fastapi import FastAPI, HTTPException
+from fastapi.middleware.cors import CORSMiddleware
+from enum import Enum
 from pydantic import BaseModel
 from dotenv import load_dotenv
 from groq import Groq
@@ -25,42 +28,63 @@ client = Groq(api_key=api_key)
 # создаю экземпляр приложения FastAPI
 app = FastAPI()
 
-# описываю схему тела запроса: клиент должен отправить поле prompt
-class PromptRequest(BaseModel):
-	prompt: str
+origins = [
+	"http://localhost",
+	"http://localhost:8080",
+	"http://localhost:5173",
+]
 
-# список для хранения истории сообщений между пользователем и моделью
-chat_history = []
+app.add_middleware(
+	CORSMiddleware,
+	allow_origins=origins,
+	allow_credentials=True,
+	allow_methods=["*"],
+	allow_headers=["*"],
+)
+
+# создаю переменные для переиспользования ролей с типизацией для защиты от изменений
+# Enum в Python — это специальный класс из встроенного модуля enum для создания перечислений, представляющих собой набор именованных констант
+class Role(str, Enum):
+	USER = "user"
+	ASSISTANT = "assistant"
+	SYSTEM = "system"
+
+# описываю схему тела сообщения, которое приходит с фронта. валидирую с помощью Literal
+class ChatMessage(BaseModel):
+	role: Literal[Role.USER, Role.ASSISTANT, Role.SYSTEM]
+	content: str
+
+# описываю в каком формате должны приходить данные
+class ChatRequest(BaseModel):
+	messages: list[ChatMessage]
+
 
 # GET-эндпоинт / для проверки, что API работает
 @app.get("/", tags=["ai-agent"])
 def root():
 	return {"status": "AI agent is running"}
 
-# POST-эндпоинт /generate: принимает prompt, отправляет его в Groq и возвращает ответ модели
+# POST-эндпоинт /generate: принимает messages, отправляет его в Groq и возвращает ответ модели
 @app.post("/generate", tags=["ai-agent"])
-def generate(request: PromptRequest):
+def generate(request: ChatRequest):
 	try:
-		chat_history.append({
-			"role": "user",
-			"content": request.prompt
-		})
+		messages = [
+			{
+				"role": Role.SYSTEM,
+				"content": "Отвечай коротко и понятно",
+			},
+			*[message.model_dump() for message in request.messages],
+		]
 
 		response = client.chat.completions.create(
 			model="llama-3.3-70b-versatile",
-			messages=chat_history
+			messages=messages,
 		)
 
 		answer = response.choices[0].message.content
 
-		chat_history.append({
-			"role": "assistant",
-			"content": answer
-		})
-
 		return {
 			"response": answer,
-			"history": chat_history
 		}
     
 	except Exception as e:

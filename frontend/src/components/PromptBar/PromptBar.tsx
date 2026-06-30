@@ -1,21 +1,26 @@
-import { useState } from "react";
-import { AutoResizeTextarea } from "../ui/AutoResizeTextarea/AutoResizeTextarea";
-import { PlusButton } from "../IconsButton/PlusButton";
-import { ButtonPromptBar } from "./ButtonPromptBar";
+import React from 'react';
+import { PromptActionsMenu } from '../PromptActionsMenu/PromptActionsMenu';
+import { AutoResizeTextarea } from '../ui/AutoResizeTextarea/AutoResizeTextarea';
+import './_promptBar.scss';
+import { IconButton } from '../ui/IconButton/IconButton';
+import { SendIconButton } from '../IconsButton/SendIconButton';
 
-export function PromptBar() {
-  const [open, setOpen] = useState(false);
-  const [value, setValue] = useState("");
+type PromptBarProps = {
+	value: string;
+	onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
+	onSubmit: () => void;
+};
 
-  return (
-    <div className="w-full max-w-2xl bg-[var(--bg-prompt-bar)] rounded-3xl p-2.5 flex items-center justify-center my-0 mx-auto">
-      <ButtonPromptBar onClick={() => setOpen((v) => !v)}>
-        <PlusButton />
-      </ButtonPromptBar>
-      <AutoResizeTextarea
-        value={value}
-        onChange={(e) => setValue(e.currentTarget.value)}
-      />
-    </div>
-  );
+export function PromptBar({ value, onChange, onSubmit }: PromptBarProps) {
+	return (
+		<div className="prompt-bar">
+			<PromptActionsMenu />
+			<AutoResizeTextarea value={value} onChange={onChange} />
+
+			<IconButton className='prompt-bar__button' onClick={onSubmit}>
+				<SendIconButton />
+			</IconButton>
+			
+		</div>
+	);
 }

@@ -1,0 +1,19 @@
+.icon-button {
+	display: flex;
+	align-items: center;
+	justify-content: center;
+	padding: 8px;
+	border: none;
+	border-radius: 999px;
+	background: none;
+	cursor: pointer;
+	line-height: 0;
+
+	& svg {
+		fill: var(--text);
+	}
+
+	&:hover {
+		background: var(--icon-btn-hover);
+	}
+}
