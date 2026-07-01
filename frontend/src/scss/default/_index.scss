@@ -4,6 +4,7 @@
 	--bg: #3c2c2b;
 	--bg-prompt-bar: #4b403f;
 	--icon-btn-hover: #645352;
+	--icon-btn-active: #5c4c4b;
 
 	--border: #e5e4e7;
 	--code-bg: #f4f3ec;
@@ -35,7 +36,7 @@
 #root {
 	max-width: 100%;
 	margin: 0 auto;
-	padding: 0 1rem;
+	padding: 0 16px;
 	text-align: center;
 	min-height: 100svh;
 	display: flex;
@@ -52,20 +53,3 @@ p {
 	margin: 0;
 }
 
-h1,
-h2 {
-	line-height: 1;
-	font-family: var(--heading);
-	font-weight: 500;
-	color: var(--text-h);
-}
-
-h1 {
-	font-size: 56px;
-	letter-spacing: -1.68px;
-	margin: 32px 0;
-	@media (max-width: 1024px) {
-		font-size: 36px;
-		margin: 20px 0;
-	}
-}

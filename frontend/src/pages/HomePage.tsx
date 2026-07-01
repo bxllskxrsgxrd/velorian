@@ -5,7 +5,39 @@ import './_homePage.scss';
 
 export function HomePage() {
 	const [value, setValue] = useState('');
+	const [isDragging, setIsDargging] = useState(false);
+	const [files, setFiles] = useState<File[]>([]);
 
+	// функция переноса файла
+	function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
+		e.preventDefault();
+		e.stopPropagation();
+
+		setIsDargging(true);
+	}
+
+	function handleDragLeave(e: React.DragEvent<HTMLDivElement>) {
+		e.preventDefault();
+		e.stopPropagation();
+
+		const currentTarget = e.currentTarget;
+		const relatedTarget = (e.relatedTarget as Node) || null;
+
+		if (!relatedTarget || !currentTarget.contains(relatedTarget)) {
+			setIsDargging(false);
+		}
+	}
+
+	function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+		e.preventDefault();
+		e.stopPropagation();
+
+		setIsDargging(false);
+
+		
+	}
+
+	// ОТПРАВЛЕНИЕ ЗАПРОСА \\
 	function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
 		setValue(e.currentTarget.value);
 	}
@@ -41,8 +73,13 @@ export function HomePage() {
 		}
 	}
 	return (
-		<div className="home-page">
-			<h1>Введи запрос</h1>
+		<div className="home-page" onDragOver={handleDragOver} onDragLeave={handleDragLeave}>
+			{isDragging && (
+				<div className="home-page__drop-overlay">
+					<div className="home-page__drop-overlay__content">Дропай деньги</div>
+				</div>
+			)}
+			<h1 className="home-page__heading">Введи запрос</h1>
 			<PromptBar value={value} onChange={handleChange} onSubmit={handleSubmit} />
 		</div>
 	);

@@ -8,7 +8,7 @@ export function PromptActionsMenu() {
 
 	return (
 		<div className="prompt-actions">
-			<IconButton className='prompt-bar__button' onClick={() => setOpen((v) => !v)}>
+			<IconButton onClick={() => setOpen((v) => !v)}>
 				<PlusIconButton />
 			</IconButton>
 

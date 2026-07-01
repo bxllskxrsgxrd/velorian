@@ -1,9 +1,9 @@
 import React from 'react';
+import { SendIconButton } from '../IconsButton/SendIconButton';
 import { PromptActionsMenu } from '../PromptActionsMenu/PromptActionsMenu';
 import { AutoResizeTextarea } from '../ui/AutoResizeTextarea/AutoResizeTextarea';
-import './_promptBar.scss';
 import { IconButton } from '../ui/IconButton/IconButton';
-import { SendIconButton } from '../IconsButton/SendIconButton';
+import './_promptBar.scss';
 
 type PromptBarProps = {
 	value: string;
@@ -17,10 +17,9 @@ export function PromptBar({ value, onChange, onSubmit }: PromptBarProps) {
 			<PromptActionsMenu />
 			<AutoResizeTextarea value={value} onChange={onChange} />
 
-			<IconButton className='prompt-bar__button' onClick={onSubmit}>
+			<IconButton onClick={onSubmit}>
 				<SendIconButton />
 			</IconButton>
-			
 		</div>
 	);
 }

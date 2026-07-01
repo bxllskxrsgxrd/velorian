@@ -1,6 +1,47 @@
 .home-page {
+	position: relative;
+
 	display: flex;
 	flex-direction: column;
 	justify-content: center;
 	background: var(--bg);
+
+	&__heading {
+		line-height: 1;
+		font-family: var(--heading);
+		font-weight: 500;
+		color: var(--text-h);
+
+		font-size: 56px;
+		letter-spacing: -1.68px;
+		margin: 32px 0;
+		
+		@include tablet {
+			font-size: 36px;
+			margin: 20px 0;
+		}
+	}
+
+	&__drop-overlay {
+		position: fixed;
+		inset: 0;
+		z-index: 100;
+		display: flex;
+		align-items: center;
+		justify-content: center;
+		background: rgba(0, 0, 0, 0.35);
+		backdrop-filter: blur(4px);
+		pointer-events: none;
+		&__content {
+			position: fixed;
+			inset: 0;
+			z-index: 100;
+			display: flex;
+			align-items: center;
+			justify-content: center;
+			background: rgba(0, 0, 0, 0.35);
+			backdrop-filter: blur(4px);
+			pointer-events: none;
+		}
+	}
 }
