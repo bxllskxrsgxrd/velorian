@@ -6,11 +6,21 @@
 	--icon-btn-hover: #645352;
 	--icon-btn-active: #5c4c4b;
 
-	--border: #e5e4e7;
-	--code-bg: #f4f3ec;
-	--accent: #aa3bff;
-	--accent-bg: rgba(170, 59, 255, 0.1);
-	--accent-border: rgba(170, 59, 255, 0.5);
+	/* прикреплённый файл */
+	--attachment-bg: #5a4a48;
+	--attachment-bg-hover: #645250;
+	--attachment-bg-active: #6d5956;
+	--attachment-border: #6f5c59;
+	--attachment-text: #f3ece9;
+
+	/* крестик */
+	--attachment-remove-color: #cdbfbc;
+	--attachment-remove-color-hover: #fff4f1;
+	--attachment-remove-bg-hover: #745a56;
+	--attachment-remove-bg-active: #835f5a;
+
+	/* focus */
+	--focus-ring: #d8b8b1;
 
 	--font-base: 'Helvetica', system-ui, 'Segoe UI', Roboto, sans-serif;
 	--font-heading: Monospace, 'Helvetica', sans-serif, system-ui, 'Segoe UI';
@@ -35,10 +45,7 @@
 
 #root {
 	max-width: 100%;
-	margin: 0 auto;
-	padding: 0 16px;
-	text-align: center;
-	min-height: 100svh;
+
 	display: flex;
 	flex-direction: column;
 	justify-content: center;

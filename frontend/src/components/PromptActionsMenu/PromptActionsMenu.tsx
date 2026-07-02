@@ -1,6 +1,7 @@
 import { useState } from 'react';
-import { PlusIconButton } from '../IconsButton/PlusIconButton';
+import { PlusIcon } from '../icons/PlusIcon';
 import { IconButton } from '../ui/IconButton/IconButton';
+
 import './_promptActionsMenu.scss';
 
 export function PromptActionsMenu() {
@@ -9,7 +10,7 @@ export function PromptActionsMenu() {
 	return (
 		<div className="prompt-actions">
 			<IconButton onClick={() => setOpen((v) => !v)}>
-				<PlusIconButton />
+				<PlusIcon />
 			</IconButton>
 
 			{open && (

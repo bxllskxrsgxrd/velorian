@@ -1,51 +1,27 @@
 import React, { useState } from 'react';
 import { PromptBar } from '../components/PromptBar/PromptBar';
+import { DropZone } from '../components/ui/DragAndDrop/DropZone';
+import { useDragAndDrop } from '../hooks/useDragAndDrop';
 import '../scss/default/_index.scss';
 import './_homePage.scss';
 
 export function HomePage() {
 	const [value, setValue] = useState('');
-	const [isDragging, setIsDargging] = useState(false);
-	const [files, setFiles] = useState<File[]>([]);
 
-	// функция переноса файла
-	function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
-		e.preventDefault();
-		e.stopPropagation();
-
-		setIsDargging(true);
-	}
-
-	function handleDragLeave(e: React.DragEvent<HTMLDivElement>) {
-		e.preventDefault();
-		e.stopPropagation();
-
-		const currentTarget = e.currentTarget;
-		const relatedTarget = (e.relatedTarget as Node) || null;
-
-		if (!relatedTarget || !currentTarget.contains(relatedTarget)) {
-			setIsDargging(false);
-		}
-	}
-
-	function handleDrop(e: React.DragEvent<HTMLDivElement>) {
-		e.preventDefault();
-		e.stopPropagation();
-
-		setIsDargging(false);
-
-		
-	}
+	const { isDragging, files, handleDragOver, handleDragLeave, handleDrop, removeFile, clearFiles } = useDragAndDrop();
 
 	// ОТПРАВЛЕНИЕ ЗАПРОСА \\
 	function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
 		setValue(e.currentTarget.value);
 	}
 
-	async function handleSubmit() {
+	async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
+		e.preventDefault();
+		e.stopPropagation();
+
 		const prompt = value.trim();
 
-		if (!prompt) return;
+		if (!prompt && files.length === 0) return;
 
 		try {
 			const response = await fetch('http://localhost:8000/generate', {
@@ -60,6 +36,11 @@ export function HomePage() {
 							content: prompt,
 						},
 					],
+					files: files.map((file) => ({
+						name: file.name,
+						size: file.size,
+						type: file.type,
+					})),
 				}),
 			});
 
@@ -68,19 +49,23 @@ export function HomePage() {
 			console.log(`Grok: ${data.response}`);
 
 			setValue('');
+			clearFiles();
 		} catch (error) {
 			console.error(`Ошибка запроса: ${error}`);
 		}
 	}
 	return (
-		<div className="home-page" onDragOver={handleDragOver} onDragLeave={handleDragLeave}>
-			{isDragging && (
-				<div className="home-page__drop-overlay">
-					<div className="home-page__drop-overlay__content">Дропай деньги</div>
-				</div>
-			)}
-			<h1 className="home-page__heading">Введи запрос</h1>
-			<PromptBar value={value} onChange={handleChange} onSubmit={handleSubmit} />
-		</div>
+		<DropZone isDragging={isDragging} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+			<div className="home-page">
+				<h1 className="home-page__heading">Введи запрос</h1>
+				<PromptBar
+					value={value}
+					files={files}
+					onChange={handleChange}
+					onSubmit={handleSubmit}
+					onRemoveFile={removeFile}
+				/>
+			</div>
+		</DropZone>
 	);
 }

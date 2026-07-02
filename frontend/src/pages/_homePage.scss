@@ -1,6 +1,11 @@
 .home-page {
 	position: relative;
 
+	margin: 0 auto;
+	padding: 0 16px;
+	text-align: center;
+	min-height: 100svh;
+
 	display: flex;
 	flex-direction: column;
 	justify-content: center;
@@ -15,33 +20,10 @@
 		font-size: 56px;
 		letter-spacing: -1.68px;
 		margin: 32px 0;
-		
+
 		@include tablet {
 			font-size: 36px;
 			margin: 20px 0;
-		}
-	}
-
-	&__drop-overlay {
-		position: fixed;
-		inset: 0;
-		z-index: 100;
-		display: flex;
-		align-items: center;
-		justify-content: center;
-		background: rgba(0, 0, 0, 0.35);
-		backdrop-filter: blur(4px);
-		pointer-events: none;
-		&__content {
-			position: fixed;
-			inset: 0;
-			z-index: 100;
-			display: flex;
-			align-items: center;
-			justify-content: center;
-			background: rgba(0, 0, 0, 0.35);
-			backdrop-filter: blur(4px);
-			pointer-events: none;
 		}
 	}
 }
