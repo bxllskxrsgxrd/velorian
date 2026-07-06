@@ -1,14 +1,21 @@
 .resizeTextarea {
+	--scroll-normal: var(--bg);
+	--scroll-field-hover: var(--attachment-remove-bg-hover);
+
 	flex: 1;
 
+	field-sizing: content;
+
+	display: block;
 	width: 100%;
 	min-height: 24px;
 	max-height: 320px;
+	resize: none;
 
-	padding: 0 8px;
+	grid-area: textarea;
+
 	border: none;
 	outline: none;
-	resize: none;
 
 	background: transparent;
 	color: var(--text);
@@ -16,7 +23,63 @@
 	font-size: 16px;
 	line-height: 24px;
 
-	overflow-y: hidden;
-	box-sizing: border-box;
-	display: block;
+	overflow-y: auto;
+	scrollbar-width: thin;
+	scrollbar-gutter: stable;
+	scrollbar-color: var(--scroll-normal) transparent;
+
+	-webkit-mask-image: linear-gradient(
+		to bottom,
+		var(--top-fade) 0%,
+		var(--color-black) 12px,
+		var(--color-black) calc(100% - 12px),
+		var(--bottom-fade) 100%
+	);
+	mask-image: linear-gradient(
+		to bottom,
+		var(--top-fade) 0%,
+		var(--color-black) 12px,
+		var(--color-black) calc(100% - 12px),
+		var(--bottom-fade) 100%
+	);
+
+	animation: shadow-mask linear both;
+	animation-timeline: scroll(self y);
+
+	&::-webkit-scrollbar {
+		width: 6px;
+	}
+
+	&::-webkit-scrollbar-track {
+		background: transparent;
+	}
+
+	&::-webkit-scrollbar-thumb {
+		background-color: var(--scroll-normal);
+		border-radius: 4px;
+	}
+
+	&:hover {
+		scrollbar-color: var(--scroll-field-hover) transparent;
+	}
+}
+
+@keyframes shadow-mask {
+	// Самое начало (скролл вверху): контент превысил 320px, верх четкий, низ размыт
+	0% {
+		--top-fade: var(--color-black);
+		--bottom-fade: transparent;
+	}
+	// Текст прокручивается: и верх, и низ плавно размыты
+	0.5%,
+	99.5% {
+		--top-fade: transparent;
+		--bottom-fade: transparent;
+	}
+	// Конец (скролл в самом низу): верх размыт, а последняя строчка четкая
+	100% {
+		--top-fade: transparent;
+		--black-fade: transparent;
+		--bottom-fade: var(--color-black);
+	}
 }

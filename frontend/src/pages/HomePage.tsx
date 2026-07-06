@@ -23,30 +23,31 @@ export function HomePage() {
 
 		if (!prompt && files.length === 0) return;
 
+		const formData = new FormData();
+
+		formData.append(
+			'messages',
+			JSON.stringify([
+				{
+					role: 'user',
+					content: prompt,
+				},
+			]),
+		);
+
+		files.forEach((file) => {
+			formData.append('files', file);
+		});
+
 		try {
 			const response = await fetch('http://localhost:8000/generate', {
 				method: 'POST',
-				headers: {
-					'Content-Type': 'application/json',
-				},
-				body: JSON.stringify({
-					messages: [
-						{
-							role: 'user',
-							content: prompt,
-						},
-					],
-					files: files.map((file) => ({
-						name: file.name,
-						size: file.size,
-						type: file.type,
-					})),
-				}),
+				body: formData,
 			});
 
 			const data = await response.json();
 
-			console.log(`Grok: ${data.response}`);
+			console.log(`User: ${prompt}\n\nGrok: ${data.response}`);
 
 			setValue('');
 			clearFiles();

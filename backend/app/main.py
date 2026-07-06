@@ -1,8 +1,9 @@
 import os
 from pathlib import Path
 from typing import Literal
+import json
 
-from fastapi import FastAPI, HTTPException
+from fastapi import FastAPI, HTTPException, UploadFile, File, Form
 from fastapi.middleware.cors import CORSMiddleware
 from enum import Enum
 from pydantic import BaseModel
@@ -54,39 +55,75 @@ class ChatMessage(BaseModel):
 	role: Literal[Role.USER, Role.ASSISTANT, Role.SYSTEM]
 	content: str
 
-# описываю в каком формате должны приходить данные
-class ChatRequest(BaseModel):
-	messages: list[ChatMessage]
-
-
 # GET-эндпоинт / для проверки, что API работает
 @app.get("/", tags=["ai-agent"])
 def root():
 	return {"status": "AI agent is running"}
 
-# POST-эндпоинт /generate: принимает messages, отправляет его в Groq и возвращает ответ модели
+# POST-эндпоинт /generate: принимает groq_messages, отправляет его в Groq и возвращает ответ модели
 @app.post("/generate", tags=["ai-agent"])
-def generate(request: ChatRequest):
+async def generate(
+	messages: str = Form(...),
+	files: list[UploadFile] = File(default=[])
+):
 	try:
-		messages = [
+		# с помощью json.loads(messages) превращаю json-строку в python-список, а ChatMessage(**item) - превращаю каждый словарь в объект
+		parsed_messages = [ChatMessage(**item) for item in json.loads(messages)]
+
+		# пустой список для дальнейшего заполнения текстом из файлов
+		file_texts = []
+
+		# Прохожусь по каждому файлу, который пришёл с фронта
+		for file in files:
+			# возвращаю байты
+			content = await file.read()
+
+			# пытаемся прочитать файл как текст в кодировке utf-8
+			try:
+				text = content.decode("utf-8")
+			except UnicodeDecodeError:
+				# errors="ignore" значит: Если встретились странные символы, просто пропусти их
+				text = content.decode("utf-8", errors="ignore")
+
+			# Добавляем текст файла в список file_texts
+			file_texts.append(f'Файл: {file.filename}\nСодержимое: {text}')
+
+		# соединяю все файлы в одну большую строку
+		extra_file_context = "\n\n".join(file_texts)
+
+		groq_messages = [
 			{
 				"role": Role.SYSTEM,
 				"content": "Отвечай коротко и понятно",
 			},
-			*[message.model_dump() for message in request.messages],
+			# message.model_dump() каждый объект превращает в словарь, тк Groq ждёт обычные словари, а * распаковывает список внутрь другого списка
+			*[message.model_dump() for message in parsed_messages],
 		]
 
+		# проверка, есть ли текст из файлов
+		if extra_file_context:
+			groq_messages.append(
+				{
+					'role': Role.USER,
+					"content": f"Проанализируй прикрпеленные файлы:\n\n{extra_file_context}",
+				}
+			)
+
+		# отправка запроса в Groq
 		response = client.chat.completions.create(
 			model="llama-3.3-70b-versatile",
-			messages=messages,
+			messages=groq_messages,
 		)
 
+		# Groq возвращает объект с ответом
 		answer = response.choices[0].message.content
 
+		# Отправляем ответ обратно на фронт
 		return {
 			"response": answer,
 		}
-    
+			
+	# обработка ошибки
 	except Exception as e:
 		print ("ERROR IN /generate", repr(e))
 		raise HTTPException(status_code=500, detail=str(e))

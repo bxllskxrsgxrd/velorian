@@ -1,4 +1,4 @@
-import React, { type SyntheticEvent } from 'react';
+import React, { useState, type SyntheticEvent } from 'react';
 import { SendIcon } from '../icons/SendIcon';
 import { PromptActionsMenu } from '../PromptActionsMenu/PromptActionsMenu';
 import { AutoResizeTextarea } from '../ui/AutoResizeTextarea/AutoResizeTextarea';
@@ -15,22 +15,47 @@ type PromptBarProps = {
 };
 
 export function PromptBar({ value, files, onChange, onSubmit, onRemoveFile }: PromptBarProps) {
+	const [isMultiline, setIsMultiline] = useState(false);
+
+	function handleEnterDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
+		if (e.key !== 'Enter') return;
+
+		if (e.shiftKey) return;
+
+		e.preventDefault();
+
+		e.currentTarget.form?.requestSubmit();
+	}
+
 	return (
-		<form className="prompt-bar" onSubmit={onSubmit}>
+		<form className={isMultiline ? 'prompt-bar prompt-bar-multiline' : 'prompt-bar'} onSubmit={onSubmit}>
 			{files.length > 0 && (
 				<div className="prompt-bar__attachments">
 					{files.map((file, index) => (
-						<AttachmentPreview file={file} onRemove={() => onRemoveFile(index)} />
+						<AttachmentPreview
+							key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
+							file={file}
+							onRemove={() => onRemoveFile(index)}
+						/>
 					))}
 				</div>
 			)}
 			<div className="prompt-bar__input-container">
-				<PromptActionsMenu />
-				<AutoResizeTextarea value={value} onChange={onChange} />
+				<div className="prompt-bar__actions">
+					<PromptActionsMenu />
+				</div>
+				<AutoResizeTextarea
+					value={value}
+					onChange={onChange}
+					onMultilineChange={setIsMultiline}
+					onKeyDown={handleEnterDown}
+				/>
 
-				<IconButton type="submit" aria-label="Отправить сообщение">
-					<SendIcon />
-				</IconButton>
+				<div className="prompt-bar__send">
+					<IconButton type="submit" aria-label="Отправить сообщение">
+						<SendIcon />
+					</IconButton>
+				</div>
 			</div>
 		</form>
 	);

@@ -5,6 +5,7 @@
 	--bg-prompt-bar: #4b403f;
 	--icon-btn-hover: #645352;
 	--icon-btn-active: #5c4c4b;
+	--color-black: #000000;
 
 	/* прикреплённый файл */
 	--attachment-bg: #5a4a48;
@@ -43,13 +44,16 @@
 	}
 }
 
+* {
+	box-sizing: border-box;
+}
+
 #root {
 	max-width: 100%;
 
 	display: flex;
 	flex-direction: column;
 	justify-content: center;
-	box-sizing: border-box;
 }
 
 body {

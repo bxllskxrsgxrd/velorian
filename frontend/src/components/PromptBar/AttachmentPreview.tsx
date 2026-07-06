@@ -46,7 +46,7 @@ export function AttachmentPreview({ file, onRemove }: AttachmentPreviewProps) {
 				</>
 			)}
 
-			<IconButton className="prompt-bar__attachments__delete-button" onClick={onRemove}>
+			<IconButton className="prompt-bar__attachments-delete-button" onClick={onRemove} aria-label="Удалить файл">
 				<DeleteAttachmentIcon />
 			</IconButton>
 		</div>

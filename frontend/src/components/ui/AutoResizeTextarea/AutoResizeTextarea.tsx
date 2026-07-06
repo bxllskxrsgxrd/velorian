@@ -1,4 +1,5 @@
-import { useAutoResizeTextarea } from '../../../hooks/useAutoResizeTextarea';
+import React, { useEffect } from 'react';
+import { useTextareaMultiline } from '../../../hooks/useTextareaMultiline';
 import './_autoResizeTextarea.scss';
 
 // Определяю типизированные пропсы
@@ -7,20 +8,25 @@ type AutoResizeTextareaProps = {
 	// Функция с событием "ChangeEvent" изменения HTML атрибута textarea, функция ничего не возвращает
 	onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
 	placeholder?: string;
-	maxHeight?: number;
+	onMultilineChange?: (isMultiline: boolean) => void;
+	onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
 };
 
 export function AutoResizeTextarea({
 	value,
 	onChange,
 	placeholder = 'Что Ищем?',
-	maxHeight = 320,
+	onMultilineChange,
+	onKeyDown
 }: AutoResizeTextareaProps) {
-	// Создаю переменную, в которую передаю ссылку на атрибут в DOM
-	const textareaRef = useAutoResizeTextarea({
+	// Создаю объект, в который передаю ссылки
+	const { textareaRef, isMultiline } = useTextareaMultiline({
 		value,
-		maxHeight,
 	});
+
+	useEffect(() => {
+		onMultilineChange?.(isMultiline);
+	}, [isMultiline, onMultilineChange]);
 
 	return (
 		<textarea
@@ -30,6 +36,7 @@ export function AutoResizeTextarea({
 			value={value}
 			placeholder={placeholder}
 			onChange={onChange}
+			onKeyDown={onKeyDown}
 			className="resizeTextarea"
 		></textarea>
 	);
