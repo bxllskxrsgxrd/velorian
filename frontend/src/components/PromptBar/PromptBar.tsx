@@ -5,6 +5,7 @@ import { AutoResizeTextarea } from '../ui/AutoResizeTextarea/AutoResizeTextarea'
 import { IconButton } from '../ui/IconButton/IconButton';
 import './_promptBar.scss';
 import { AttachmentPreview } from './AttachmentPreview';
+import { SubmitLoadingIcon } from '../icons/SubmitLoadingIcon/SubmitLoadingIcon';
 
 type PromptBarProps = {
 	value: string;
@@ -12,15 +13,18 @@ type PromptBarProps = {
 	onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
 	onSubmit: (e: SyntheticEvent<HTMLFormElement>) => void;
 	onRemoveFile: (index: number) => void;
+	isSubmit: boolean;
 };
 
-export function PromptBar({ value, files, onChange, onSubmit, onRemoveFile }: PromptBarProps) {
+export function PromptBar({ value, files, onChange, onSubmit, onRemoveFile, isSubmit }: PromptBarProps) {
 	const [isMultiline, setIsMultiline] = useState(false);
+
+	const isSendDisabled = isSubmit || (!value.trim() && files.length === 0);
 
 	function handleEnterDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
 		if (e.key !== 'Enter') return;
-
 		if (e.shiftKey) return;
+		if (isSubmit) return;
 
 		e.preventDefault();
 
@@ -44,6 +48,7 @@ export function PromptBar({ value, files, onChange, onSubmit, onRemoveFile }: Pr
 				<div className="prompt-bar__actions">
 					<PromptActionsMenu />
 				</div>
+
 				<AutoResizeTextarea
 					value={value}
 					onChange={onChange}
@@ -52,8 +57,8 @@ export function PromptBar({ value, files, onChange, onSubmit, onRemoveFile }: Pr
 				/>
 
 				<div className="prompt-bar__send">
-					<IconButton type="submit" aria-label="Отправить сообщение">
-						<SendIcon />
+					<IconButton disabled={isSendDisabled} type="submit" aria-label="Отправить сообщение">
+						{isSubmit ? <SubmitLoadingIcon /> : <SendIcon />}
 					</IconButton>
 				</div>
 			</div>

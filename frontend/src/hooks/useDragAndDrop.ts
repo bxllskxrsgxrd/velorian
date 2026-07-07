@@ -1,11 +1,18 @@
-import { useEffect, useState } from 'react';
+import React, { useEffect, useState } from 'react';
 
 export function useDragAndDrop() {
 	const [isDragging, setIsDragging] = useState(false);
 	const [files, setFiles] = useState<File[]>([]);
 
+	// функция проверяет перетягиваются файлы или нет
+	function isFilesDragging(e: React.DragEvent<HTMLElement>) {
+		return Array.from(e.dataTransfer.types).includes('Files');
+	}
+
 	// функция переноса файла в дроп зону
 	function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
+		if (!isFilesDragging(e)) return;
+
 		e.preventDefault();
 		e.stopPropagation();
 
@@ -14,6 +21,8 @@ export function useDragAndDrop() {
 
 	// функция для переключения на дефолтное состояние при отмене переноса файла
 	function handleDragLeave(e: React.DragEvent<HTMLDivElement>) {
+		if (!isFilesDragging(e)) return;
+
 		e.preventDefault();
 		e.stopPropagation();
 
@@ -32,6 +41,8 @@ export function useDragAndDrop() {
 
 	// функция поведения дроп-зоны
 	function handleDrop(e: React.DragEvent<HTMLDivElement>) {
+		if (!isFilesDragging(e)) return;
+
 		e.preventDefault();
 		e.stopPropagation();
 

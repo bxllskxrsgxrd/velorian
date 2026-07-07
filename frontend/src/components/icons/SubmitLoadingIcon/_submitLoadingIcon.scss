@@ -1,0 +1,26 @@
+.loader-icon {
+	width: 16px;
+	height: 16px;
+
+	fill: none;
+	stroke: currentColor;
+	stroke-width: 2;
+	stroke-linecap: round;
+
+	animation: loaderSpin 0.8s linear infinite;
+	transform-origin: center;
+
+	&__track {
+		opacity: 0.25;
+	}
+
+	&__line {
+		opacity: 1;
+	}
+}
+
+@keyframes loaderSpin {
+	to {
+		transform: rotate(360deg);
+	}
+}

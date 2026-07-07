@@ -7,6 +7,7 @@ import './_homePage.scss';
 
 export function HomePage() {
 	const [value, setValue] = useState('');
+	const [isSubmit, setIsSubmit] = useState(false);
 
 	const { isDragging, files, handleDragOver, handleDragLeave, handleDrop, removeFile, clearFiles } = useDragAndDrop();
 
@@ -16,6 +17,8 @@ export function HomePage() {
 	}
 
 	async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
+		if (isSubmit) return;
+
 		e.preventDefault();
 		e.stopPropagation();
 
@@ -40,19 +43,23 @@ export function HomePage() {
 		});
 
 		try {
+			setIsSubmit(true);
+
 			const response = await fetch('http://localhost:8000/generate', {
 				method: 'POST',
 				body: formData,
 			});
 
-			const data = await response.json();
+			const dataResponse = await response.json();
 
-			console.log(`User: ${prompt}\n\nGrok: ${data.response}`);
+			console.log(`User: ${prompt}\n\nGrok: ${dataResponse.response}`);
 
 			setValue('');
 			clearFiles();
 		} catch (error) {
 			console.error(`Ошибка запроса: ${error}`);
+		} finally {
+			setIsSubmit(false);
 		}
 	}
 	return (
@@ -62,6 +69,7 @@ export function HomePage() {
 				<PromptBar
 					value={value}
 					files={files}
+					isSubmit={isSubmit}
 					onChange={handleChange}
 					onSubmit={handleSubmit}
 					onRemoveFile={removeFile}

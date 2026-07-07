@@ -1,11 +1,15 @@
-
 :root {
+	color-scheme: light dark;
+
 	--text: #f5f0ea;
 	--bg: #3c2c2b;
 	--bg-prompt-bar: #4b403f;
+	--color-black: #000000;
+
+	--icon-btn-color: var(--text);
+	--icon-btn-color-dark: var(--bg);
 	--icon-btn-hover: #645352;
 	--icon-btn-active: #5c4c4b;
-	--color-black: #000000;
 
 	/* прикреплённый файл */
 	--attachment-bg: #5a4a48;
@@ -19,9 +23,6 @@
 	--attachment-remove-color-hover: #fff4f1;
 	--attachment-remove-bg-hover: #745a56;
 	--attachment-remove-bg-active: #835f5a;
-
-	/* focus */
-	--focus-ring: #d8b8b1;
 
 	--font-base: 'Helvetica', system-ui, 'Segoe UI', Roboto, sans-serif;
 	--font-heading: Monospace, 'Helvetica', sans-serif, system-ui, 'Segoe UI';
@@ -63,4 +64,3 @@ body {
 p {
 	margin: 0;
 }
-

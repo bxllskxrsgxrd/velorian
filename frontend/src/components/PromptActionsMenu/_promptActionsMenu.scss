@@ -1,6 +1,4 @@
 .prompt-actions {
-	--button-color: var(--text);
-
 	flex-shrink: 0;
 
 	&__menu {
@@ -35,7 +33,7 @@
 			border-radius: 16px;
 
 			background: transparent;
-			color: var(--text);
+			color: var(--button-color);
 
 			font: inherit;
 			text-align: start;
@@ -43,7 +41,16 @@
 			cursor: pointer;
 
 			&:hover {
-				background: rgba(255, 255, 255, 0.08);
+				background: var(--icon-btn-hover);
+			}
+
+			&:active {
+				background: var(--icon-btn-active);
+			}
+
+			&:focus-visible {
+				outline: 1px solid var(--icon-btn-color);
+				outline-offset: 2px;
 			}
 		}
 	}

@@ -22,11 +22,48 @@
 
 	font-size: 16px;
 	line-height: 24px;
+	padding: 0 8px;
 
 	overflow-y: auto;
-	scrollbar-width: thin;
 	scrollbar-gutter: stable;
-	scrollbar-color: var(--scroll-normal) transparent;
+
+	// Chrome / Edge / Safari
+	&::-webkit-scrollbar {
+		width: 6px;
+	}
+
+	&::-webkit-scrollbar-button {
+		display: none;
+		width: 0;
+		height: 0;
+		background: transparent;
+	}
+
+	&::-webkit-scrollbar-button:single-button {
+		display: none;
+		width: 0;
+		height: 0;
+		background: transparent;
+	}
+
+	&::-webkit-scrollbar-track {
+		background: transparent;
+	}
+
+	&::-webkit-scrollbar-thumb {
+		background-color: var(--scroll-normal);
+		border-radius: 4px;
+	}
+
+	&::-webkit-scrollbar-corner {
+		background: transparent;
+	}
+
+	&:hover {
+		&::-webkit-scrollbar-thumb {
+			background-color: var(--scroll-field-hover);
+		}
+	}
 
 	-webkit-mask-image: linear-gradient(
 		to bottom,
@@ -45,22 +82,17 @@
 
 	animation: shadow-mask linear both;
 	animation-timeline: scroll(self y);
+}
 
-	&::-webkit-scrollbar {
-		width: 6px;
-	}
+// Firefox
+@supports (-moz-appearance: none) {
+	.resizeTextarea {
+		scrollbar-width: thin;
+		scrollbar-color: var(--scroll-normal) transparent;
 
-	&::-webkit-scrollbar-track {
-		background: transparent;
-	}
-
-	&::-webkit-scrollbar-thumb {
-		background-color: var(--scroll-normal);
-		border-radius: 4px;
-	}
-
-	&:hover {
-		scrollbar-color: var(--scroll-field-hover) transparent;
+		&:hover {
+			scrollbar-color: var(--scroll-field-hover) transparent;
+		}
 	}
 }
 
