@@ -1,4 +1,4 @@
-import React, { useState, type SyntheticEvent } from 'react';
+import React, { useState } from 'react';
 import { SendIcon } from '../icons/SendIcon';
 import { PromptActionsMenu } from '../PromptActionsMenu/PromptActionsMenu';
 import { AutoResizeTextarea } from '../ui/AutoResizeTextarea/AutoResizeTextarea';
@@ -8,18 +8,22 @@ import { AttachmentPreview } from './AttachmentPreview';
 import { SubmitLoadingIcon } from '../icons/SubmitLoadingIcon/SubmitLoadingIcon';
 
 type PromptBarProps = {
-	value: string;
 	files: File[];
-	onChange: (e: React.ChangeEvent<HTMLTextAreaElement>) => void;
-	onSubmit: (e: SyntheticEvent<HTMLFormElement>) => void;
+	onSendMessage: (prompt: string) => Promise<void>;
 	onRemoveFile: (index: number) => void;
-	isSubmit: boolean;
 };
 
-export function PromptBar({ value, files, onChange, onSubmit, onRemoveFile, isSubmit }: PromptBarProps) {
+export function PromptBar({ files, onSendMessage, onRemoveFile }: PromptBarProps) {
 	const [isMultiline, setIsMultiline] = useState(false);
+	const [value, setValue] = useState('');
+	const [isSubmit, setIsSubmit] = useState(false);
 
 	const isSendDisabled = isSubmit || (!value.trim() && files.length === 0);
+
+	// ОТПРАВЛЕНИЕ ЗАПРОСА \\
+	function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
+		setValue(e.currentTarget.value);
+	}
 
 	function handleEnterDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
 		if (e.key !== 'Enter') return;
@@ -31,8 +35,28 @@ export function PromptBar({ value, files, onChange, onSubmit, onRemoveFile, isSu
 		e.currentTarget.form?.requestSubmit();
 	}
 
+	async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
+		e.preventDefault();
+		e.stopPropagation();
+		if (isSubmit) return;
+
+		const prompt = value.trim();
+
+		if (!prompt && files.length === 0) return;
+
+		try {
+			setIsSubmit(true);
+
+			await onSendMessage(prompt);
+
+			setValue('');
+		} finally {
+			setIsSubmit(false);
+		}
+	}
+
 	return (
-		<form className={isMultiline ? 'prompt-bar prompt-bar-multiline' : 'prompt-bar'} onSubmit={onSubmit}>
+		<form className={isMultiline ? 'prompt-bar prompt-bar--multiline' : 'prompt-bar'} onSubmit={handleSubmit}>
 			{files.length > 0 && (
 				<div className="prompt-bar__attachments">
 					{files.map((file, index) => (
@@ -51,7 +75,7 @@ export function PromptBar({ value, files, onChange, onSubmit, onRemoveFile, isSu
 
 				<AutoResizeTextarea
 					value={value}
-					onChange={onChange}
+					onChange={handleChange}
 					onMultilineChange={setIsMultiline}
 					onKeyDown={handleEnterDown}
 				/>

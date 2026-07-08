@@ -1,13 +1,11 @@
-import { HomePage } from "./pages/HomePage";
+import { ChatPage } from './pages/ChatPage';
 
 function App() {
-  return (
-    <>
-      <section>
-        <HomePage />
-      </section>
-    </>
-  );
+	return (
+		<>
+			<ChatPage />
+		</>
+	);
 }
 
 export default App;

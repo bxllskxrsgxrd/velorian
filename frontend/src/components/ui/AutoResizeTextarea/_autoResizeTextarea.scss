@@ -26,10 +26,12 @@
 
 	overflow-y: auto;
 	scrollbar-gutter: stable;
+	cursor: text;
 
 	// Chrome / Edge / Safari
 	&::-webkit-scrollbar {
 		width: 6px;
+		cursor: default;
 	}
 
 	&::-webkit-scrollbar-button {
@@ -48,15 +50,18 @@
 
 	&::-webkit-scrollbar-track {
 		background: transparent;
+		cursor: default;
 	}
 
 	&::-webkit-scrollbar-thumb {
 		background-color: var(--scroll-normal);
 		border-radius: 4px;
+		cursor: default;
 	}
 
 	&::-webkit-scrollbar-corner {
 		background: transparent;
+		cursor: default;
 	}
 
 	&:hover {

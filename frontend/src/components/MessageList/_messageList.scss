@@ -1,0 +1,11 @@
+.message-list{ 
+  display: flex;
+  flex-direction: column;
+  gap: 16px;
+
+  width: 100%;
+	max-width: var(--chat-content-width);
+
+	margin: 0 auto;
+	box-sizing: border-box;
+}

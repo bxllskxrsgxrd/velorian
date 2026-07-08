@@ -1,17 +1,18 @@
 .prompt-bar {
 	width: 100%;
-	max-width: 768px;
+	max-width: var(--chat-content-width);
 
 	position: relative;
-
-	border-radius: 24px;
-	padding: 12px;
+	flex-shrink: 0;
 
 	display: flex;
 	flex-direction: column;
 	align-items: center;
 	justify-content: center;
+
 	margin: 0 auto;
+	border-radius: 24px;
+	padding: 12px;
 
 	background: var(--bg-prompt-bar);
 
@@ -120,7 +121,7 @@
 		grid-area: send;
 	}
 
-	&-multiline {
+	&--multiline {
 		.prompt-bar__input-container {
 			grid-template-areas:
 				'textarea textarea textarea'
