@@ -4,13 +4,15 @@ import { DropZone } from '../components/ui/DragAndDrop/DropZone';
 import { useDragAndDrop } from '../hooks/useDragAndDrop';
 import '../scss/default/_index.scss';
 import './_chatPage.scss';
-import type { ChatMessage } from '../types/chat';
+import type { ChatAttachment, ChatMessage, PreviewFile } from '../types/chat';
 import { CHAT_ROLES } from '../constants/chatRoles';
 import { sendChatMessage } from '../api/chatApi';
 import { MessageList } from '../components/MessageList/MessageList';
+import { createChatAttachment } from '../utils/files';
 
 export function ChatPage() {
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
+	const [previewFile, setPreviewFile] = useState<PreviewFile | null>(null);
 	const chatPageRef = useRef<HTMLDivElement | null>(null);
 
 	const { isDragging, files, handleDragOver, handleDragLeave, handleDrop, removeFile, clearFiles } = useDragAndDrop();
@@ -28,19 +30,28 @@ export function ChatPage() {
 		});
 	}, [messages.length, hasMessages]);
 
-	if (!prompt && files.length === 0) return;
+	function revokePreviewFile(file: PreviewFile | null) {
+		if (file?.revokeOnClose) {
+			URL.revokeObjectURL(file.url);
+		}
+	}
 
 	async function handleSendMessage(prompt: string) {
+		const currentFiles = [...files];
+
+		if (!prompt.trim() && currentFiles.length === 0) return;
+
 		const userMessage: ChatMessage = {
 			id: crypto.randomUUID(),
 			role: CHAT_ROLES.USER,
 			content: prompt,
+			attachments: currentFiles.map(createChatAttachment),
 		};
 
 		setMessages((prevMessage) => [...prevMessage, userMessage]);
 
 		try {
-			const dataResponse = await sendChatMessage(prompt, files);
+			const dataResponse = await sendChatMessage(prompt, currentFiles);
 
 			const assistantMessage: ChatMessage = {
 				id: crypto.randomUUID(),

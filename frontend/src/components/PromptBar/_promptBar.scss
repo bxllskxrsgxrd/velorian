@@ -25,7 +25,7 @@
 		display: flex;
 		flex-wrap: wrap;
 		gap: 8px;
-		padding: 0 8px 8px;
+		padding-bottom: 8px;
 
 		&-item {
 			position: relative;
@@ -65,6 +65,7 @@
 			min-height: var(--attachment-size);
 			padding: 0;
 			border-radius: 12px;
+			object-fit: cover;
 		}
 
 		&-preview {
