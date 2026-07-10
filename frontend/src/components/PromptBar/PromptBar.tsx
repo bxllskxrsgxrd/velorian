@@ -1,19 +1,20 @@
 import React, { useState } from 'react';
 import { SendIcon } from '../icons/SendIcon';
+import { SubmitLoadingIcon } from '../icons/SubmitLoadingIcon/SubmitLoadingIcon';
 import { PromptActionsMenu } from '../PromptActionsMenu/PromptActionsMenu';
 import { AutoResizeTextarea } from '../ui/AutoResizeTextarea/AutoResizeTextarea';
 import { IconButton } from '../ui/IconButton/IconButton';
 import './_promptBar.scss';
 import { AttachmentPreview } from './AttachmentPreview';
-import { SubmitLoadingIcon } from '../icons/SubmitLoadingIcon/SubmitLoadingIcon';
 
 type PromptBarProps = {
 	files: File[];
 	onSendMessage: (prompt: string) => Promise<void>;
 	onRemoveFile: (index: number) => void;
+	onOpenFile: (file: File) => void;
 };
 
-export function PromptBar({ files, onSendMessage, onRemoveFile }: PromptBarProps) {
+export function PromptBar({ files, onSendMessage, onRemoveFile, onOpenFile }: PromptBarProps) {
 	const [isMultiline, setIsMultiline] = useState(false);
 	const [value, setValue] = useState('');
 	const [isSubmit, setIsSubmit] = useState(false);
@@ -64,6 +65,7 @@ export function PromptBar({ files, onSendMessage, onRemoveFile }: PromptBarProps
 							key={`${file.name}-${file.size}-${file.lastModified}-${index}`}
 							file={file}
 							onRemove={() => onRemoveFile(index)}
+							onOpen={onOpenFile}
 						/>
 					))}
 				</div>

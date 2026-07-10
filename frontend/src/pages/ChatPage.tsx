@@ -1,14 +1,15 @@
-import React, { useEffect, useRef, useState } from 'react';
-import { PromptBar } from '../components/PromptBar/PromptBar';
-import { DropZone } from '../components/ui/DragAndDrop/DropZone';
-import { useDragAndDrop } from '../hooks/useDragAndDrop';
-import '../scss/default/_index.scss';
-import './_chatPage.scss';
-import type { ChatAttachment, ChatMessage, PreviewFile } from '../types/chat';
-import { CHAT_ROLES } from '../constants/chatRoles';
+import { useEffect, useRef, useState } from 'react';
 import { sendChatMessage } from '../api/chatApi';
 import { MessageList } from '../components/MessageList/MessageList';
-import { createChatAttachment } from '../utils/files';
+import { PromptBar } from '../components/PromptBar/PromptBar';
+import { DropZone } from '../components/ui/DragAndDrop/DropZone';
+import { CHAT_ROLES } from '../constants/chatRoles';
+import { useDragAndDrop } from '../hooks/useDragAndDrop';
+import '../scss/default/_index.scss';
+import type { ChatAttachment, ChatMessage, PreviewFile } from '../types/chat';
+import { attachmentToPreviewFile, createChatAttachment, fileToPreviewFile } from '../utils/files';
+import './_chatPage.scss';
+import { FilePreviewModal } from '../components/FilePreviewModal/FilePreviewModal';
 
 export function ChatPage() {
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -34,6 +35,23 @@ export function ChatPage() {
 		if (file?.revokeOnClose) {
 			URL.revokeObjectURL(file.url);
 		}
+	}
+
+	function openPromptFile(file: File) {
+		revokePreviewFile(previewFile);
+		setPreviewFile(fileToPreviewFile(file));
+	}
+
+	function openMessageAttachment(attachment: ChatAttachment) {
+		revokePreviewFile(previewFile);
+
+		setPreviewFile(attachmentToPreviewFile(attachment));
+	}
+
+	function closePreview() {
+		revokePreviewFile(previewFile);
+
+		setPreviewFile(null);
 	}
 
 	async function handleSendMessage(prompt: string) {
@@ -77,22 +95,30 @@ export function ChatPage() {
 		}
 	}
 	return (
-		<DropZone isDragging={isDragging} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
-			<div ref={chatPageRef} className={hasMessages ? 'chat-page chat-page--chat' : 'chat-page chat-page--start'}>
-				<main className="chat-page__body">
-					{hasMessages ? (
-						<MessageList messages={messages} />
-					) : (
-						<div className="chat-page-start">
-							<h1 className="chat-page__heading">Введи запрос</h1>
-						</div>
-					)}
-				</main>
+		<>
+			<DropZone isDragging={isDragging} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+				<div ref={chatPageRef} className={hasMessages ? 'chat-page chat-page--chat' : 'chat-page chat-page--start'}>
+					<main className="chat-page__body">
+						{hasMessages ? (
+							<MessageList messages={messages} onOpenAttachment={openMessageAttachment} />
+						) : (
+							<div className="chat-page-start">
+								<h1 className="chat-page__heading">Введи запрос</h1>
+							</div>
+						)}
+					</main>
 
-				<div className="chat-page__prompt">
-					<PromptBar files={files} onSendMessage={handleSendMessage} onRemoveFile={removeFile} />
+					<div className="chat-page__prompt">
+						<PromptBar
+							files={files}
+							onSendMessage={handleSendMessage}
+							onRemoveFile={removeFile}
+							onOpenFile={openPromptFile}
+						/>
+					</div>
 				</div>
-			</div>
-		</DropZone>
+			</DropZone>
+			{previewFile && <FilePreviewModal file={previewFile} onClose={closePreview} />}
+		</>
 	);
 }

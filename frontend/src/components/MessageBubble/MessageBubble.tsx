@@ -1,13 +1,14 @@
 import { CHAT_ROLES } from '../../constants/chatRoles';
-import type { ChatMessage } from '../../types/chat';
+import type { ChatAttachment, ChatMessage } from '../../types/chat';
 import './_messageBubble.scss';
 import { MessageAttachment } from './MessageAttachment';
 
 type MessageBubbleProps = {
 	message: ChatMessage;
+	onOpenAttachment: (attachment: ChatAttachment) => void;
 };
 
-export function MessageBubble({ message }: MessageBubbleProps) {
+export function MessageBubble({ message, onOpenAttachment }: MessageBubbleProps) {
 	const isUser = message.role === CHAT_ROLES.USER;
 	const hasAttachments = Boolean(message.attachments?.length);
 	const hasText = Boolean(message.content);
@@ -19,14 +20,21 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 	const hasImages = Boolean(imageAttachments?.length);
 	const hasFiles = Boolean(fileAttachments?.length);
 
+	const contentClassName = hasAttachments ? 'message__content message__content--with-attachments' : 'message__content';
+
 	return (
 		<div className={isUser ? 'message message--user' : 'message message--assistant'}>
 			{hasImages && (
 				<div className="message__media">
 					{imageAttachments?.map((attachment) => (
-						<div className="message__attachment" key={attachment.id}>
+						<button
+							className="message__attachment-button"
+							key={attachment.id}
+							type="button"
+							onClick={() => onOpenAttachment(attachment)}
+						>
 							<MessageAttachment attachment={attachment} />
-						</div>
+						</button>
 					))}
 				</div>
 			)}
@@ -34,18 +42,19 @@ export function MessageBubble({ message }: MessageBubbleProps) {
 			{hasFiles && (
 				<div className="message__files">
 					{fileAttachments?.map((attachment) => (
-						<div className="message__attachment" key={attachment.id}>
+						<button
+							className="message__attachment-button"
+							key={attachment.id}
+							type="button"
+							onClick={() => onOpenAttachment(attachment)}
+						>
 							<MessageAttachment attachment={attachment} />
-						</div>
+						</button>
 					))}
 				</div>
 			)}
 
-			{hasText && (
-				<div className={hasAttachments ? 'message__content message__content--with-attachments' : 'message__content'}>
-					{message.content}
-				</div>
-			)}
+			{hasText && <div className={contentClassName}>{message.content}</div>}
 		</div>
 	);
 }
