@@ -4,26 +4,25 @@
 
 	flex: 1;
 
-	field-sizing: content;
-
 	display: block;
 	width: 100%;
 	min-height: 24px;
-	max-height: 320px;
-	resize: none;
 
 	grid-area: textarea;
 
+	padding: 0 8px;
 	border: none;
 	outline: none;
+
+	resize: none;
 
 	background: transparent;
 	color: var(--text);
 
 	font-size: 16px;
 	line-height: 24px;
-	padding: 0 8px;
 
+	overflow-x: hidden;
 	overflow-y: auto;
 	scrollbar-gutter: stable;
 	cursor: text;
@@ -59,15 +58,13 @@
 		cursor: default;
 	}
 
+	&::-webkit-scrollbar-thumb:hover {
+		background-color: var(--scroll-field-hover);
+	}
+
 	&::-webkit-scrollbar-corner {
 		background: transparent;
 		cursor: default;
-	}
-
-	&:hover {
-		&::-webkit-scrollbar-thumb {
-			background-color: var(--scroll-field-hover);
-		}
 	}
 
 	-webkit-mask-image: linear-gradient(

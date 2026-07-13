@@ -10,13 +10,20 @@
 		display: flex;
 		align-items: center;
 		justify-content: center;
+		flex-direction: column;
+		gap: 24px;
 
-		background: rgba(0, 0, 0, 0.6);
+		background: rgba(0, 0, 0, 0.9);
 		pointer-events: none;
 
 		&-content {
 			font-size: 24px;
 			color: var(--text);
+		}
+
+		& svg {
+			width: 128px;
+			height: auto;
 		}
 	}
 

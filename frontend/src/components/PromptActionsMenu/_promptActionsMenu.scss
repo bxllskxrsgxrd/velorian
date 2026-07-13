@@ -20,39 +20,39 @@
 		animation: promptMenuShow 0.15s ease;
 		transform-origin: bottom center;
 
-		&-button {
-			width: 100%;
-			min-height: 40px;
+		// &-button {
+		// 	width: 100%;
+		// 	min-height: 40px;
 
-			display: flex;
-			align-items: center;
-			gap: 10px;
+		// 	display: flex;
+		// 	align-items: center;
+		// 	gap: 10px;
 
-			padding: 8px 12px;
-			border: 0;
-			border-radius: 16px;
+		// 	padding: 8px 12px;
+		// 	border: 0;
+		// 	border-radius: 16px;
 
-			background: transparent;
-			color: var(--button-color);
+		// 	background: transparent;
+		// 	color: var(--button-color);
 
-			font: inherit;
-			text-align: start;
-			white-space: nowrap;
-			cursor: pointer;
+		// 	font: inherit;
+		// 	text-align: start;
+		// 	white-space: nowrap;
+		// 	cursor: pointer;
 
-			&:hover {
-				background: var(--icon-btn-hover);
-			}
+		// 	&:hover {
+		// 		background: var(--icon-btn-hover);
+		// 	}
 
-			&:active {
-				background: var(--icon-btn-active);
-			}
+		// 	&:active {
+		// 		background: var(--icon-btn-active);
+		// 	}
 
-			&:focus-visible {
-				outline: 1px solid var(--icon-btn-color);
-				outline-offset: 2px;
-			}
-		}
+		// 	&:focus-visible {
+		// 		outline: 1px solid var(--icon-btn-color);
+		// 		outline-offset: 2px;
+		// 	}
+		// }
 	}
 
 	@keyframes promptMenuShow {

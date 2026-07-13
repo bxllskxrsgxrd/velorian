@@ -12,9 +12,10 @@ type PromptBarProps = {
 	onSendMessage: (prompt: string) => Promise<void>;
 	onRemoveFile: (index: number) => void;
 	onOpenFile: (file: File) => void;
+	onFilesSelect: (files: File[]) => void;
 };
 
-export function PromptBar({ files, onSendMessage, onRemoveFile, onOpenFile }: PromptBarProps) {
+export function PromptBar({ files, onSendMessage, onRemoveFile, onOpenFile, onFilesSelect }: PromptBarProps) {
 	const [isMultiline, setIsMultiline] = useState(false);
 	const [value, setValue] = useState('');
 	const [isSubmit, setIsSubmit] = useState(false);
@@ -72,7 +73,7 @@ export function PromptBar({ files, onSendMessage, onRemoveFile, onOpenFile }: Pr
 			)}
 			<div className="prompt-bar__input-container">
 				<div className="prompt-bar__actions">
-					<PromptActionsMenu />
+					<PromptActionsMenu onFilesSelect={onFilesSelect}/>
 				</div>
 
 				<AutoResizeTextarea

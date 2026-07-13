@@ -20,11 +20,11 @@
 		fill: var(--icon-btn-color);
 	}
 
-	&:hover {
+	&:not(:disabled):hover {
 		background: var(--icon-btn-hover);
 	}
 
-	&:active {
+	&:not(:disabled):active {
 		background: var(--icon-btn-active);
 	}
 
@@ -36,6 +36,5 @@
 	&:disabled {
 		opacity: 0.5;
 		cursor: not-allowed;
-		pointer-events: none;
 	}
 }

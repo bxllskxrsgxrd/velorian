@@ -14,10 +14,11 @@ type AutoResizeTextareaProps = {
 
 export function AutoResizeTextarea({
 	value,
+
 	onChange,
 	placeholder = 'Что Ищем?',
 	onMultilineChange,
-	onKeyDown
+	onKeyDown,
 }: AutoResizeTextareaProps) {
 	// Создаю объект, в который передаю ссылки
 	const { textareaRef, isMultiline } = useTextareaMultiline({

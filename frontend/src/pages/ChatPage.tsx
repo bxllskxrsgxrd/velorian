@@ -1,22 +1,22 @@
 import { useEffect, useRef, useState } from 'react';
 import { sendChatMessage } from '../api/chatApi';
+import { FilePreviewModal } from '../components/FilePreviewModal/FilePreviewModal';
 import { MessageList } from '../components/MessageList/MessageList';
 import { PromptBar } from '../components/PromptBar/PromptBar';
-import { DropZone } from '../components/ui/DragAndDrop/DropZone';
+import { DropZone } from '../components/ui/DropZone/DropZone';
 import { CHAT_ROLES } from '../constants/chatRoles';
 import { useDragAndDrop } from '../hooks/useDragAndDrop';
 import '../scss/default/_index.scss';
 import type { ChatAttachment, ChatMessage, PreviewFile } from '../types/chat';
 import { attachmentToPreviewFile, createChatAttachment, fileToPreviewFile } from '../utils/files';
 import './_chatPage.scss';
-import { FilePreviewModal } from '../components/FilePreviewModal/FilePreviewModal';
 
 export function ChatPage() {
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [previewFile, setPreviewFile] = useState<PreviewFile | null>(null);
 	const chatPageRef = useRef<HTMLDivElement | null>(null);
 
-	const { isDragging, files, handleDragOver, handleDragLeave, handleDrop, removeFile, clearFiles } = useDragAndDrop();
+	const { isDragging, files, addFiles, handleDragOver, handleDragLeave, handleDrop, removeFile, clearFiles } = useDragAndDrop();
 
 	const hasMessages = messages.length > 0;
 
@@ -114,6 +114,7 @@ export function ChatPage() {
 							onSendMessage={handleSendMessage}
 							onRemoveFile={removeFile}
 							onOpenFile={openPromptFile}
+							onFilesSelect={addFiles}
 						/>
 					</div>
 				</div>

@@ -1,10 +1,16 @@
-import React, { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { PlusIcon } from '../icons/PlusIcon';
 import { IconButton } from '../ui/IconButton/IconButton';
 
 import './_promptActionsMenu.scss';
+import { AttachFilesAction } from './PromptActionsMenuButtons/AttachFilesAction';
+import { PromptActionButton } from './PromptActionsMenuButtons/PromptActionButton';
 
-export function PromptActionsMenu() {
+type PromptActionsMenuProps = {
+	onFilesSelect: (files: File[]) => void;
+};
+
+export function PromptActionsMenu({ onFilesSelect }: PromptActionsMenuProps) {
 	const [open, setOpen] = useState(false);
 	const buttonRef = useRef<HTMLButtonElement>(null);
 	const rootRef = useRef<HTMLDivElement>(null);
@@ -12,6 +18,11 @@ export function PromptActionsMenu() {
 	function closeMenu() {
 		setOpen(false);
 		buttonRef.current?.blur();
+	}
+
+	function handleFilesSelect(files: File[]) {
+		onFilesSelect(files);
+		closeMenu();
 	}
 
 	useEffect(() => {
@@ -42,18 +53,9 @@ export function PromptActionsMenu() {
 
 			{open && (
 				<div className="prompt-actions__menu">
-					<button className="prompt-actions__menu-button" type="button">
-						Прикрепить фото и файлы
-					</button>
-					<button className="prompt-actions__menu-button" type="button">
-						Создать изображение
-					</button>
-					<button className="prompt-actions__menu-button" type="button">
-						Поиск в сети
-					</button>
-					<button className="prompt-actions__menu-button" type="button">
-						Глубокое исследование
-					</button>
+					<AttachFilesAction onFilesSelect={handleFilesSelect} />
+					{/* нижний компонент заменить на аналогичный добавлению файлов*/}
+					<PromptActionButton>Поиск в базе данных</PromptActionButton>
 				</div>
 			)}
 		</div>

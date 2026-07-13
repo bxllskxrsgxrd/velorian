@@ -9,6 +9,12 @@ export function useDragAndDrop() {
 		return Array.from(e.dataTransfer.types).includes('Files');
 	}
 
+	function addFiles(newFiles: File[]) {
+		if (newFiles.length === 0) return;
+
+		setFiles((currentFiles) => [...currentFiles, ...newFiles]);
+	}
+
 	// функция переноса файла в дроп зону
 	function handleDragOver(e: React.DragEvent<HTMLDivElement>) {
 		if (!isFilesDragging(e)) return;
@@ -67,5 +73,5 @@ export function useDragAndDrop() {
 		setFiles([]);
 	}
 
-	return { isDragging, files, handleDragOver, handleDragLeave, handleDrop, removeFile, clearFiles };
+	return { isDragging, files, addFiles, handleDragOver, handleDragLeave, handleDrop, removeFile, clearFiles };
 }

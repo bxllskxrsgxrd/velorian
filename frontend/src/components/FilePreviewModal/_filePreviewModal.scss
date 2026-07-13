@@ -1,4 +1,8 @@
 .file-preview {
+	--scroll-normal: var(--attachment-bg);
+	--scroll-bg: #2b1f1e;
+	--scroll-field-hover: var(--attachment-bg-hover);
+
 	position: fixed;
 	inset: 0;
 	z-index: 1000;
@@ -22,14 +26,47 @@
 	}
 
 	&__file-container {
-		display: flex;
-		flex-direction: column;
+		flex: 1;
+		min-height: 0;
 
 		width: 100%;
-		height: auto;
+		height: 100%;
 
 		background: var(--bg);
 		overflow: auto;
+
+		&::-webkit-scrollbar {
+			width: 16px;
+		}
+
+		&::-webkit-scrollbar-button {
+			display: none;
+			width: 0;
+			height: 0;
+		}
+
+		&::-webkit-scrollbar-track,
+		&::-webkit-scrollbar-corner {
+			background: var(--scroll-bg);
+		}
+
+		&::-webkit-scrollbar-thumb {
+			background-color: var(--scroll-normal);
+			border-radius: 999px;
+
+			border: 4px solid transparent;
+			background-clip: padding-box;
+
+			&:hover {
+				background-color: var(--scroll-field-hover);
+			}
+		}
+
+		// Firefox
+		@supports (-moz-appearance: none) {
+			scrollbar-width: thin;
+			scrollbar-color: var(--scroll-normal) var(--scroll-bg);
+		}
 	}
 
 	&__content {
@@ -67,7 +104,6 @@
 		align-items: center;
 		justify-content: space-between;
 		gap: 16px;
-
 	}
 
 	&__name {
@@ -129,7 +165,6 @@
 		margin: 0;
 		padding: 16px;
 
-		overflow: auto;
 		white-space: pre-wrap;
 
 		font-size: 14px;

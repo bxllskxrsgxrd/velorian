@@ -1,5 +1,6 @@
 import type { ReactNode } from 'react';
 import './_dropZone.scss';
+import { DropZoneIcons } from '../../icons/DropZoneIcons';
 
 type DropZoneProps = {
 	children: ReactNode;
@@ -15,7 +16,8 @@ export function DropZone({ children, isDragging, onDragOver, onDragLeave, onDrop
 			{children}
 			{isDragging && (
 				<div className="drop-zone__overlay">
-					<div className="drop-zone__overlay-content">Дропай файлы</div>
+					<DropZoneIcons />
+					<div className="drop-zone__overlay-content">Добавить файлы</div>
 				</div>
 			)}
 		</div>
