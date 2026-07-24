@@ -54,9 +54,7 @@ export function ChatPage() {
 		setPreviewFile(null);
 	}
 
-	async function handleSendMessage(prompt: string) {
-		const currentFiles = [...files];
-
+	async function handleSendMessage(prompt: string, currentFiles: File[]) {
 		if (!prompt.trim() && currentFiles.length === 0) return;
 
 		const userMessage: ChatMessage = {
@@ -81,7 +79,6 @@ export function ChatPage() {
 
 			console.log(`User: ${prompt}\n\nGrok: ${dataResponse.response}`);
 
-			clearFiles();
 		} catch (error) {
 			console.error(`Ошибка запроса: ${error}`);
 
@@ -115,6 +112,7 @@ export function ChatPage() {
 							onRemoveFile={removeFile}
 							onOpenFile={openPromptFile}
 							onFilesSelect={addFiles}
+							onClearFiles={clearFiles}
 						/>
 					</div>
 				</div>

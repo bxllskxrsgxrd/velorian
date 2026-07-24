@@ -9,15 +9,24 @@ import { AttachmentPreview } from './AttachmentPreview';
 
 type PromptBarProps = {
 	files: File[];
-	onSendMessage: (prompt: string) => Promise<void>;
+	onSendMessage: (prompt: string, files: File[]) => Promise<void>;
 	onRemoveFile: (index: number) => void;
 	onOpenFile: (file: File) => void;
 	onFilesSelect: (files: File[]) => void;
+	onClearFiles: () => void;
 };
 
-export function PromptBar({ files, onSendMessage, onRemoveFile, onOpenFile, onFilesSelect }: PromptBarProps) {
+export function PromptBar({
+	files,
+	onSendMessage,
+	onRemoveFile,
+	onOpenFile,
+	onFilesSelect,
+	onClearFiles,
+}: PromptBarProps) {
 	const [isMultiline, setIsMultiline] = useState(false);
 	const [value, setValue] = useState('');
+
 	const [isSubmit, setIsSubmit] = useState(false);
 
 	const isSendDisabled = isSubmit || (!value.trim() && files.length === 0);
@@ -40,18 +49,24 @@ export function PromptBar({ files, onSendMessage, onRemoveFile, onOpenFile, onFi
 	async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
 		e.preventDefault();
 		e.stopPropagation();
+
 		if (isSubmit) return;
 
 		const prompt = value.trim();
+		const submittedFiles = [...files];
 
-		if (!prompt && files.length === 0) return;
+		if (!prompt && submittedFiles.length === 0) return;
 
+		setIsSubmit(true);
+
+		setValue('');
+		onClearFiles();
 		try {
-			setIsSubmit(true);
+			await onSendMessage(prompt, submittedFiles);
+		} catch (error) {
+			console.error('Не удалось отправить сообщение:', error);
 
-			await onSendMessage(prompt);
-
-			setValue('');
+			setValue((currentValue) => currentValue || prompt);
 		} finally {
 			setIsSubmit(false);
 		}
@@ -73,7 +88,7 @@ export function PromptBar({ files, onSendMessage, onRemoveFile, onOpenFile, onFi
 			)}
 			<div className="prompt-bar__input-container">
 				<div className="prompt-bar__actions">
-					<PromptActionsMenu onFilesSelect={onFilesSelect}/>
+					<PromptActionsMenu onFilesSelect={onFilesSelect} />
 				</div>
 
 				<AutoResizeTextarea
