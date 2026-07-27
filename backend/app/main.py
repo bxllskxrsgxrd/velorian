@@ -70,6 +70,15 @@ async def generate(
 		# с помощью json.loads(messages) превращаю json-строку в python-список, а ChatMessage(**item) - превращаю каждый словарь в объект
 		parsed_messages = [ChatMessage(**item) for item in json.loads(messages)]
 
+		# проверка на тестовую ошибку 500, если переменная окружения APP_ENV не равна production
+		if os.getenv("APP_ENV") != "production":
+			for message in parsed_messages:
+				if message.role == Role.USER and message.content.strip() == "__TEST_500__":
+					raise HTTPException(
+						status_code=500,
+						detail="Тестовая ошибка 500",
+					)
+				
 		# пустой список для дальнейшего заполнения текстом из файлов
 		file_texts = []
 

@@ -16,7 +16,8 @@ export function ChatPage() {
 	const [previewFile, setPreviewFile] = useState<PreviewFile | null>(null);
 	const chatPageRef = useRef<HTMLDivElement | null>(null);
 
-	const { isDragging, files, addFiles, handleDragOver, handleDragLeave, handleDrop, removeFile, clearFiles } = useDragAndDrop();
+	const { isDragging, files, addFiles, handleDragOver, handleDragLeave, handleDrop, removeFile, clearFiles } =
+		useDragAndDrop();
 
 	const hasMessages = messages.length > 0;
 
@@ -78,9 +79,10 @@ export function ChatPage() {
 			setMessages((prevMessage) => [...prevMessage, assistantMessage]);
 
 			console.log(`User: ${prompt}\n\nGrok: ${dataResponse.response}`);
-
 		} catch (error) {
-			console.error(`Ошибка запроса: ${error}`);
+			const message = error instanceof Error ? error.message : 'Неизвестная ошибка';
+
+			console.error(`Ошибка запроса: ${message}`);
 
 			const errorMessage: ChatMessage = {
 				id: crypto.randomUUID(),

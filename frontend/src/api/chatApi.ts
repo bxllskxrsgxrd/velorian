@@ -21,7 +21,11 @@ export async function sendChatMessage(prompt: string, files: File[]) {
 	});
 
 	if (!response.ok) {
-		throw new Error('Ошибка запроса');
+		const errorData = await response.json().catch(() => null);
+
+		const errorMessage = errorData?.detail || `Ошибка сервера: ${response.status}`;
+
+		throw new Error(errorMessage);
 	}
 
 	return response.json();

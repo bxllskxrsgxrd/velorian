@@ -20,6 +20,11 @@
 		inset 0 0 0 1px rgb(255 255 255 / 3%),
 		0 6px 20px rgb(0 0 0 / 12%);
 
+	transition:
+		border-radius 180ms ease,
+		padding 180ms ease,
+		box-shadow 180ms ease;
+
 	&__attachments {
 		--attachment-size: 48px;
 
@@ -146,6 +151,10 @@
 		grid-template-columns: auto minmax(0, 1fr) auto;
 		grid-template-areas: 'actions textarea send';
 		align-items: center;
+
+		row-gap: 0;
+
+		transition: row-gap 180ms ease;
 	}
 
 	&__actions {

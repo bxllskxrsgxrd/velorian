@@ -2,11 +2,17 @@
 	--scroll-normal: var(--bg);
 	--scroll-field-hover: var(--attachment-remove-bg-hover);
 
+	--top-fade: var(--color-black);
+	--bottom-fade: var(--color-black);
+
+	--main-font: 'Cera Stencil PRO Trial', Helvetica, Arial, sans-serif;
+
 	flex: 1;
 
 	display: block;
 	width: 100%;
 	min-width: 0;
+	height: 24px;
 	min-height: 24px;
 
 	grid-area: textarea;
@@ -20,6 +26,7 @@
 	background: transparent;
 	color: var(--text);
 
+	font-family: Helvetica, Arial, sans-serif;
 	font-size: 16px;
 	line-height: 24px;
 
@@ -27,6 +34,9 @@
 	overflow-y: auto;
 	scrollbar-gutter: stable;
 	cursor: text;
+
+	transition: height 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
+	will-change: height;
 
 	// Chrome / Edge / Safari
 	&::-webkit-scrollbar {
@@ -82,9 +92,6 @@
 		var(--color-black) calc(100% - 12px),
 		var(--bottom-fade) 100%
 	);
-
-	animation: shadow-mask linear both;
-	animation-timeline: scroll(self y);
 }
 
 // Firefox
@@ -96,25 +103,5 @@
 		&:hover {
 			scrollbar-color: var(--scroll-field-hover) transparent;
 		}
-	}
-}
-
-@keyframes shadow-mask {
-	// Самое начало (скролл вверху): контент превысил 320px, верх четкий, низ размыт
-	0% {
-		--top-fade: var(--color-black);
-		--bottom-fade: transparent;
-	}
-	// Текст прокручивается: и верх, и низ плавно размыты
-	0.5%,
-	99.5% {
-		--top-fade: transparent;
-		--bottom-fade: transparent;
-	}
-	// Конец (скролл в самом низу): верх размыт, а последняя строчка четкая
-	100% {
-		--top-fade: transparent;
-		--black-fade: transparent;
-		--bottom-fade: var(--color-black);
 	}
 }

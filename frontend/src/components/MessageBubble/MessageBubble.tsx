@@ -6,21 +6,25 @@ import { MessageAttachment } from './MessageAttachment';
 type MessageBubbleProps = {
 	message: ChatMessage;
 	onOpenAttachment: (attachment: ChatAttachment) => void;
+	shouldAnimate?: boolean;
 };
 
-export function MessageBubble({ message, onOpenAttachment }: MessageBubbleProps) {
+export function MessageBubble({ message, onOpenAttachment, shouldAnimate }: MessageBubbleProps) {
 	const isUser = message.role === CHAT_ROLES.USER;
-	const hasAttachments = Boolean(message.attachments?.length);
-	const hasText = Boolean(message.content);
 
 	const imageAttachments = message.attachments?.filter((attachment) => attachment.type.startsWith('image/'));
 
 	const fileAttachments = message.attachments?.filter((attachment) => !attachment.type.startsWith('image/'));
 
+	const hasAttachments = Boolean(message.attachments?.length);
+	const hasText = Boolean(message.content);
+
 	const hasImages = Boolean(imageAttachments?.length);
 	const hasFiles = Boolean(fileAttachments?.length);
 
-	const contentClassName = hasAttachments ? 'message__content message__content--with-attachments' : 'message__content';
+	const contentClassName = ['message__content', hasAttachments && ' message__content--with-attachments']
+		.filter(Boolean)
+		.join(' ');
 
 	return (
 		<div className={isUser ? 'message message--user' : 'message message--assistant'}>

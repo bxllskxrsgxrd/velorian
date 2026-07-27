@@ -7,6 +7,8 @@
 	--scroll-bg: #2b1f1e;
 	--scroll-field-hover: var(--attachment-bg-hover);
 
+	--heading-font: 'Cera Stencil PRO Trial';
+
 	position: relative;
 
 	width: 100%;
@@ -48,7 +50,7 @@
 
 	&__heading {
 		line-height: 1;
-		font-family: var(--heading);
+		font-family: var(--heading-font);
 		font-weight: 500;
 		color: var(--text-h);
 

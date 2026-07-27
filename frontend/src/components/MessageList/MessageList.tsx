@@ -10,7 +10,7 @@ type MessageListProps = {
 export function MessageList({ messages, onOpenAttachment }: MessageListProps) {
 	return <div className='message-list'>
     {messages.map((message) => (
-      <MessageBubble onOpenAttachment={onOpenAttachment} message={message} />
+      <MessageBubble key={message.id} onOpenAttachment={onOpenAttachment} message={message} />
     ))}
   </div>;
 }
