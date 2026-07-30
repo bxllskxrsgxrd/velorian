@@ -5,12 +5,18 @@ import './_messageList.scss';
 type MessageListProps = {
 	messages: ChatMessage[];
   onOpenAttachment: (attachment: ChatAttachment) => void;
+  activeAssistantMessageId: string | null;
 };
 
-export function MessageList({ messages, onOpenAttachment }: MessageListProps) {
+export function MessageList({ messages, onOpenAttachment, activeAssistantMessageId }: MessageListProps) {
 	return <div className='message-list'>
     {messages.map((message) => (
-      <MessageBubble key={message.id} onOpenAttachment={onOpenAttachment} message={message} />
+      <MessageBubble 
+        key={message.id} 
+        onOpenAttachment={onOpenAttachment} 
+        message={message} 
+        shouldAnimate={message.id === activeAssistantMessageId}
+      />
     ))}
   </div>;
 }

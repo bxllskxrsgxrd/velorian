@@ -14,6 +14,8 @@
 	border-radius: 24px;
 	padding: 12px;
 
+	font-family: var(--main-font);
+
 	background: var(--bg-prompt-bar);
 
 	box-shadow:
@@ -28,7 +30,6 @@
 	&__attachments {
 		--attachment-size: 48px;
 
-		position: relative;
 		width: 100%;
 
 		display: flex;
@@ -39,12 +40,12 @@
 		&-item {
 			position: relative;
 
-			display: flex;
-			align-items: center;
-			gap: 6px;
-
 			height: var(--attachment-size);
 			max-width: 180px;
+
+			&--image {
+				flex: 0 0 var(--attachment-size);
+			}
 
 			&-icon {
 				display: flex;
@@ -62,24 +63,6 @@
 			&-name {
 				font-size: 12px;
 			}
-		}
-
-		&-image {
-			width: var(--attachment-size);
-			height: var(--attachment-size);
-			min-height: var(--attachment-size);
-			padding: 0;
-			border-radius: 12px;
-			object-fit: cover;
-		}
-
-		&-preview {
-			display: block;
-
-			width: 100%;
-			height: 100%;
-
-			object-fit: cover;
 		}
 
 		&-open-button {
@@ -123,7 +106,6 @@
 			right: -3px;
 
 			border: none;
-			background: none;
 			cursor: pointer;
 
 			padding: 4px;
@@ -141,6 +123,30 @@
 			&:hover {
 				background: var(--attachment-remove-color-hover);
 			}
+		}
+
+		&-open-button--image {
+			padding: 0;
+			overflow: hidden;
+
+			background: transparent;
+
+			&:hover,
+			&:active {
+				background: transparent;
+			}
+		}
+
+		&-preview {
+			display: block;
+
+			width: 100%;
+			height: 100%;
+
+			border-radius: inherit;
+
+			object-fit: cover;
+			object-position: center;
 		}
 	}
 

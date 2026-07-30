@@ -1,0 +1,32 @@
+.message {
+	&__text {
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+
+	&__typing-cursor {
+		display: inline-block;
+
+		width: 2px;
+		height: 1em;
+
+		margin-left: 2px;
+
+		background: currentColor;
+		vertical-align: -0.12em;
+
+		animation: message-cursor-blink 800ms steps(1) infinite;
+	}
+}
+
+@keyframes message-cursor-blink {
+	0%,
+	50% {
+		opacity: 1;
+	}
+
+	51%,
+	100% {
+		opacity: 0;
+	}
+}

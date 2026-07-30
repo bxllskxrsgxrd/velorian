@@ -29,15 +29,22 @@ export function AttachmentPreview({ file, onRemove, onOpen }: AttachmentPreviewP
 		};
 	}, [file, isImage]);
 
+	const itemClassName = ['prompt-bar__attachments-item', isImage && 'prompt-bar__attachments-item--image']
+		.filter(Boolean)
+		.join(' ');
+
+	const openButtonClassName = [
+		'prompt-bar__attachments-open-button',
+		isImage && 'prompt-bar__attachments-open-button--image',
+	]
+		.filter(Boolean)
+		.join(' ');
+
 	return (
-		<div
-			className={
-				isImage ? 'prompt-bar__attachments-item prompt-bar__attachments-image' : 'prompt-bar__attachments-item'
-			}
-		>
-			<button className="prompt-bar__attachments-open-button" type="button" onClick={() => onOpen(file)}>
-				{previewUrl ? (
-					<img src={previewUrl} alt={`${file.name}`} className="prompt-bar__attachments-image" />
+		<div className={itemClassName}>
+			<button className={openButtonClassName} type="button" onClick={() => onOpen(file)}>
+				{isImage ? (
+					previewUrl && <img src={previewUrl} alt={`${file.name}`} className="prompt-bar__attachments-preview" />
 				) : (
 					<>
 						<div className="prompt-bar__attachments-item-icon">

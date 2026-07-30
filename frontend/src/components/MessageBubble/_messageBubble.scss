@@ -1,7 +1,6 @@
 .message {
 	--message-color: var(--text);
 
-	--message-font: Helvetica, Arial, sans-serif;
 
 	display: flex;
 	width: 100%;
@@ -35,7 +34,7 @@
 
 		background-color: var(--bg-prompt-bar);
 
-		font-family: var(--message-font);
+		font-family: var(--main-font);
 		font-size: 16px;
 		line-height: 24px;
 		color: var(--message-color);
@@ -76,6 +75,8 @@
 		border-radius: 12px;
 		background: transparent;
 
+		
+
 		&-image {
 			display: block;
 
@@ -98,6 +99,8 @@
 			display: flex;
 			align-items: center;
 			gap: 6px;
+
+			font-family: var(--main-font);
 
 			& svg {
 				flex-shrink: 0;

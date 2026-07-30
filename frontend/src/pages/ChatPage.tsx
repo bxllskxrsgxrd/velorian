@@ -13,6 +13,7 @@ import './_chatPage.scss';
 
 export function ChatPage() {
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
+	const [activeAssistantMessageId, setActiveAssistantMessageId] = useState<string | null>(null);
 	const [previewFile, setPreviewFile] = useState<PreviewFile | null>(null);
 	const chatPageRef = useRef<HTMLDivElement | null>(null);
 
@@ -65,7 +66,9 @@ export function ChatPage() {
 			attachments: currentFiles.map(createChatAttachment),
 		};
 
-		setMessages((prevMessage) => [...prevMessage, userMessage]);
+		setMessages((prevMessages) => [...prevMessages, userMessage]);
+
+		setActiveAssistantMessageId(null);
 
 		try {
 			const dataResponse = await sendChatMessage(prompt, currentFiles);
@@ -76,7 +79,9 @@ export function ChatPage() {
 				content: dataResponse.response,
 			};
 
-			setMessages((prevMessage) => [...prevMessage, assistantMessage]);
+			setActiveAssistantMessageId(assistantMessage.id);
+
+			setMessages((prevMessages) => [...prevMessages, assistantMessage]);
 
 			console.log(`User: ${prompt}\n\nGrok: ${dataResponse.response}`);
 		} catch (error) {
@@ -90,7 +95,9 @@ export function ChatPage() {
 				content: 'Ошибка при получении ответа',
 			};
 
-			setMessages((prevMessage) => [...prevMessage, errorMessage]);
+			setActiveAssistantMessageId(errorMessage.id);
+
+			setMessages((prevMessages) => [...prevMessages, errorMessage]);
 		}
 	}
 	return (
@@ -99,7 +106,11 @@ export function ChatPage() {
 				<div ref={chatPageRef} className={hasMessages ? 'chat-page chat-page--chat' : 'chat-page chat-page--start'}>
 					<main className="chat-page__body">
 						{hasMessages ? (
-							<MessageList messages={messages} onOpenAttachment={openMessageAttachment} />
+							<MessageList
+								messages={messages}
+								onOpenAttachment={openMessageAttachment}
+								activeAssistantMessageId={activeAssistantMessageId}
+							/>
 						) : (
 							<div className="chat-page-start">
 								<h1 className="chat-page__heading">Введи запрос</h1>

@@ -1,7 +1,9 @@
 import { CHAT_ROLES } from '../../constants/chatRoles';
 import type { ChatAttachment, ChatMessage } from '../../types/chat';
 import './_messageBubble.scss';
+import { AssistantMessageContent } from './AssistantMessageContent';
 import { MessageAttachment } from './MessageAttachment';
+import { UserMessageContent } from './UserMessageContent';
 
 type MessageBubbleProps = {
 	message: ChatMessage;
@@ -9,7 +11,7 @@ type MessageBubbleProps = {
 	shouldAnimate?: boolean;
 };
 
-export function MessageBubble({ message, onOpenAttachment, shouldAnimate }: MessageBubbleProps) {
+export function MessageBubble({ message, onOpenAttachment, shouldAnimate = false }: MessageBubbleProps) {
 	const isUser = message.role === CHAT_ROLES.USER;
 
 	const imageAttachments = message.attachments?.filter((attachment) => attachment.type.startsWith('image/'));
@@ -58,7 +60,15 @@ export function MessageBubble({ message, onOpenAttachment, shouldAnimate }: Mess
 				</div>
 			)}
 
-			{hasText && <div className={contentClassName}>{message.content}</div>}
+			{hasText && (
+				<div className={contentClassName}>
+					{isUser ? (
+						<UserMessageContent content={message.content} />
+					) : (
+						<AssistantMessageContent messageId={message.id} content={message.content} shouldAnimate={shouldAnimate} />
+					)}
+				</div>
+			)}
 		</div>
 	);
 }

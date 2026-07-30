@@ -5,8 +5,6 @@
 	--top-fade: var(--color-black);
 	--bottom-fade: var(--color-black);
 
-	--main-font: 'Cera Stencil PRO Trial', Helvetica, Arial, sans-serif;
-
 	flex: 1;
 
 	display: block;
@@ -26,7 +24,7 @@
 	background: transparent;
 	color: var(--text);
 
-	font-family: Helvetica, Arial, sans-serif;
+	font-family: var(--main-font);
 	font-size: 16px;
 	line-height: 24px;
 
