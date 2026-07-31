@@ -4,6 +4,7 @@ import { FilePreviewModal } from '../components/FilePreviewModal/FilePreviewModa
 import { MessageList } from '../components/MessageList/MessageList';
 import { PromptBar } from '../components/PromptBar/PromptBar';
 import { DropZone } from '../components/ui/DropZone/DropZone';
+import { CHAT_MESSAGE_STATUSES } from '../constants/chatMessageStatuses';
 import { CHAT_ROLES } from '../constants/chatRoles';
 import { useDragAndDrop } from '../hooks/useDragAndDrop';
 import '../scss/default/_index.scss';
@@ -59,45 +60,52 @@ export function ChatPage() {
 	async function handleSendMessage(prompt: string, currentFiles: File[]) {
 		if (!prompt.trim() && currentFiles.length === 0) return;
 
+		const userMessageId = crypto.randomUUID();
+
 		const userMessage: ChatMessage = {
-			id: crypto.randomUUID(),
+			id: userMessageId,
 			role: CHAT_ROLES.USER,
 			content: prompt,
 			attachments: currentFiles.map(createChatAttachment),
 		};
 
-		setMessages((prevMessages) => [...prevMessages, userMessage]);
+		const assistantMessageId = crypto.randomUUID();
 
-		setActiveAssistantMessageId(null);
+		const assistantMessage: ChatMessage = {
+			id: assistantMessageId,
+			role: CHAT_ROLES.ASSISTANT,
+			content: '',
+			status: CHAT_MESSAGE_STATUSES.PENDING,
+		};
+
+		setActiveAssistantMessageId(assistantMessageId);
+
+		setMessages((prevMessages) => [...prevMessages, userMessage, assistantMessage]);
 
 		try {
 			const dataResponse = await sendChatMessage(prompt, currentFiles);
 
-			const assistantMessage: ChatMessage = {
-				id: crypto.randomUUID(),
-				role: CHAT_ROLES.ASSISTANT,
-				content: dataResponse.response,
-			};
-
-			setActiveAssistantMessageId(assistantMessage.id);
-
-			setMessages((prevMessages) => [...prevMessages, assistantMessage]);
+			setMessages((prevMessages) =>
+				prevMessages.map((message) =>
+					message.id === assistantMessageId
+						? { ...message, content: dataResponse.response, status: CHAT_MESSAGE_STATUSES.DONE }
+						: message,
+				),
+			);
 
 			console.log(`User: ${prompt}\n\nGrok: ${dataResponse.response}`);
 		} catch (error) {
-			const message = error instanceof Error ? error.message : 'Неизвестная ошибка';
+			const errorText = error instanceof Error ? error.message : 'Неизвестная ошибка';
 
-			console.error(`Ошибка запроса: ${message}`);
+			console.error(`Ошибка запроса: ${errorText}`);
 
-			const errorMessage: ChatMessage = {
-				id: crypto.randomUUID(),
-				role: CHAT_ROLES.ASSISTANT,
-				content: 'Ошибка при получении ответа',
-			};
-
-			setActiveAssistantMessageId(errorMessage.id);
-
-			setMessages((prevMessages) => [...prevMessages, errorMessage]);
+			setMessages((prevMessages) =>
+				prevMessages.map((message) =>
+					message.id === assistantMessageId
+						? { ...message, content: 'Ошибка при получении ответа', status: CHAT_MESSAGE_STATUSES.ERROR }
+						: message,
+				),
+			);
 		}
 	}
 	return (

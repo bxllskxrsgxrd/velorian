@@ -1,3 +1,4 @@
+import type { CHAT_MESSAGE_STATUSES } from '../constants/chatMessageStatuses';
 import type { CHAT_ROLES } from '../constants/chatRoles';
 
 // нужно, чтобы взять все значения из объекта CHAT_ROLES и сделать из них union-тип
@@ -12,10 +13,13 @@ export type ChatAttachment = {
 	isImage: boolean;
 };
 
+export type ChatMessageStatus = (typeof CHAT_MESSAGE_STATUSES)[keyof typeof CHAT_MESSAGE_STATUSES];
+
 export type ChatMessage = {
 	id: string;
 	role: ChatRole;
 	content: string;
+	status?: ChatMessageStatus;
 	attachments?: ChatAttachment[];
 };
 

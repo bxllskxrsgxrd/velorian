@@ -1,5 +1,7 @@
+import { CHAT_MESSAGE_STATUSES } from '../../constants/chatMessageStatuses';
 import { CHAT_ROLES } from '../../constants/chatRoles';
 import type { ChatAttachment, ChatMessage } from '../../types/chat';
+import { SubmitLoadingIcon } from '../icons/SubmitLoadingIcon/SubmitLoadingIcon';
 import './_messageBubble.scss';
 import { AssistantMessageContent } from './AssistantMessageContent';
 import { MessageAttachment } from './MessageAttachment';
@@ -14,17 +16,20 @@ type MessageBubbleProps = {
 export function MessageBubble({ message, onOpenAttachment, shouldAnimate = false }: MessageBubbleProps) {
 	const isUser = message.role === CHAT_ROLES.USER;
 
-	const imageAttachments = message.attachments?.filter((attachment) => attachment.type.startsWith('image/'));
+	const isPending = !isUser && message.status === CHAT_MESSAGE_STATUSES.PENDING;
 
-	const fileAttachments = message.attachments?.filter((attachment) => !attachment.type.startsWith('image/'));
+	const attachments = message.attachments ?? [];
 
-	const hasAttachments = Boolean(message.attachments?.length);
+	const imageAttachments = attachments.filter((attachment) => attachment.type.startsWith('image/'));
+
+	const fileAttachments = attachments.filter((attachment) => !attachment.type.startsWith('image/'));
+
+	const hasAttachments = attachments.length > 0;
+	const hasImages = imageAttachments.length > 0;
+	const hasFiles = fileAttachments.length > 0;
 	const hasText = Boolean(message.content);
 
-	const hasImages = Boolean(imageAttachments?.length);
-	const hasFiles = Boolean(fileAttachments?.length);
-
-	const contentClassName = ['message__content', hasAttachments && ' message__content--with-attachments']
+	const contentClassName = ['message__content', hasAttachments && 'message__content--with-attachments']
 		.filter(Boolean)
 		.join(' ');
 
@@ -57,6 +62,12 @@ export function MessageBubble({ message, onOpenAttachment, shouldAnimate = false
 							<MessageAttachment attachment={attachment} />
 						</button>
 					))}
+				</div>
+			)}
+
+			{isPending && (
+				<div className="message__content message__content--pending">
+					<SubmitLoadingIcon />
 				</div>
 			)}
 
