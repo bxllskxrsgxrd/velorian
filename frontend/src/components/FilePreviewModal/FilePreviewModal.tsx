@@ -36,7 +36,7 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 
 		const controller = new AbortController();
 
-		fetch(file.url, { signal: controller.signal })
+		fetch(file.url, { signal: controller.signal, credentials: 'include' })
 			.then((response) => response.text())
 			.then((content) => setTextPreview({ url: file.url, content }))
 			.catch((error: unknown) => {

@@ -11,6 +11,7 @@ export type ChatAttachment = {
 	type: string;
 	url: string;
 	isImage: boolean;
+	extractionStatus?: 'ready' | 'empty' | 'ocr_unavailable' | 'unsupported';
 };
 
 export type ChatMessageStatus = (typeof CHAT_MESSAGE_STATUSES)[keyof typeof CHAT_MESSAGE_STATUSES];
@@ -21,6 +22,7 @@ export type ChatMessage = {
 	content: string;
 	status?: ChatMessageStatus;
 	attachments?: ChatAttachment[];
+	createdAt?: string;
 };
 
 export type PreviewFile = {
@@ -29,4 +31,20 @@ export type PreviewFile = {
 	type: string;
 	url: string;
 	revokeOnClose?: boolean;
+};
+
+export type ConversationSummary = {
+	id: string;
+	title: string;
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type Conversation = ConversationSummary & {
+	messages: ChatMessage[];
+};
+
+export type AuthUser = {
+	id: string;
+	email: string;
 };

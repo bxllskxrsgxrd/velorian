@@ -1,15 +1,34 @@
-import React, { useState } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 import { SendIcon } from '../icons/SendIcon';
-import { SubmitLoadingIcon } from '../icons/SubmitLoadingIcon/SubmitLoadingIcon';
 import { PromptActionsMenu } from '../PromptActionsMenu/PromptActionsMenu';
 import { AutoResizeTextarea } from '../ui/AutoResizeTextarea/AutoResizeTextarea';
 import { IconButton } from '../ui/IconButton/IconButton';
 import './_promptBar.scss';
 import { AttachmentPreview } from './AttachmentPreview';
 
+type SpeechRecognitionEventLike = Event & {
+	results: ArrayLike<{ 0: { transcript: string } }>;
+};
+
+type SpeechRecognitionLike = {
+	lang: string;
+	interimResults: boolean;
+	continuous: boolean;
+	start: () => void;
+	stop: () => void;
+	onresult: ((event: SpeechRecognitionEventLike) => void) | null;
+	onend: (() => void) | null;
+	onerror: (() => void) | null;
+};
+
+type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
+
 type PromptBarProps = {
 	files: File[];
-	onSendMessage: (prompt: string, files: File[]) => Promise<void>;
+	fileError?: string;
+	isGenerating: boolean;
+	onSendMessage: (prompt: string, files: File[], webSearch: boolean) => Promise<void>;
+	onStop: () => void;
 	onRemoveFile: (index: number) => void;
 	onOpenFile: (file: File) => void;
 	onFilesSelect: (files: File[]) => void;
@@ -18,7 +37,10 @@ type PromptBarProps = {
 
 export function PromptBar({
 	files,
+	fileError,
+	isGenerating,
 	onSendMessage,
+	onStop,
 	onRemoveFile,
 	onOpenFile,
 	onFilesSelect,
@@ -26,47 +48,74 @@ export function PromptBar({
 }: PromptBarProps) {
 	const [isMultiline, setIsMultiline] = useState(false);
 	const [value, setValue] = useState('');
+	const [webSearch, setWebSearch] = useState(false);
+	const [isListening, setIsListening] = useState(false);
+	const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+	const speechWindow = window as typeof window & {
+		SpeechRecognition?: SpeechRecognitionConstructor;
+		webkitSpeechRecognition?: SpeechRecognitionConstructor;
+	};
+	const voiceInputAvailable = Boolean(speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition);
+	const isSendDisabled = isGenerating || (!value.trim() && files.length === 0);
 
-	const [isSubmit, setIsSubmit] = useState(false);
+	useEffect(() => () => {
+		const recognition = recognitionRef.current;
+		if (!recognition) return;
+		recognition.onresult = null;
+		recognition.onend = null;
+		recognition.onerror = null;
+		recognition.stop();
+		recognitionRef.current = null;
+	}, []);
 
-	const isSendDisabled = isSubmit || (!value.trim() && files.length === 0);
-
-	// ОТПРАВЛЕНИЕ ЗАПРОСА \\
-	function handleChange(e: React.ChangeEvent<HTMLTextAreaElement>) {
-		setValue(e.currentTarget.value);
+	function handleChange(event: React.ChangeEvent<HTMLTextAreaElement>) {
+		setValue(event.currentTarget.value);
 	}
 
-	function handleEnterDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
-		if (e.key !== 'Enter') return;
-		if (e.shiftKey) return;
-		if (e.nativeEvent.isComposing) return;
-		if (isSubmit) return;
-
-		e.preventDefault();
-
-		e.currentTarget.form?.requestSubmit();
+	function handleEnterDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
+		if (event.key !== 'Enter' || event.shiftKey || event.nativeEvent.isComposing || isGenerating) return;
+		event.preventDefault();
+		event.currentTarget.form?.requestSubmit();
 	}
 
-	async function handleSubmit(e: React.SyntheticEvent<HTMLFormElement>) {
-		e.preventDefault();
-		e.stopPropagation();
-
-		if (isSubmit) return;
-
+	async function handleSubmit(event: React.SyntheticEvent<HTMLFormElement>) {
+		event.preventDefault();
+		if (isSendDisabled) return;
 		const prompt = value.trim();
 		const submittedFiles = [...files];
-
-		if (!prompt && submittedFiles.length === 0) return;
-
-		setIsSubmit(true);
-
 		setValue('');
 		onClearFiles();
 		try {
-			await onSendMessage(prompt, submittedFiles);
-		} finally {
-			setIsSubmit(false);
+			await onSendMessage(prompt, submittedFiles, webSearch);
+		} catch {
+			setValue(prompt);
+			onFilesSelect(submittedFiles);
 		}
+	}
+
+	function toggleVoiceInput() {
+		if (recognitionRef.current) {
+			recognitionRef.current.stop();
+			return;
+		}
+		const Recognition = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
+		if (!Recognition) return;
+		const recognition = new Recognition();
+		recognition.lang = 'ru-RU';
+		recognition.interimResults = false;
+		recognition.continuous = false;
+		recognition.onresult = (event) => {
+			const transcript = event.results[0]?.[0]?.transcript ?? '';
+			setValue((current) => `${current}${current && transcript ? ' ' : ''}${transcript}`);
+		};
+		recognition.onend = () => {
+			recognitionRef.current = null;
+			setIsListening(false);
+		};
+		recognition.onerror = recognition.onend;
+		recognitionRef.current = recognition;
+		setIsListening(true);
+		recognition.start();
 	}
 
 	return (
@@ -83,22 +132,27 @@ export function PromptBar({
 					))}
 				</div>
 			)}
+			{fileError && <div className="prompt-bar__error" role="alert">{fileError}</div>}
+			<div className="prompt-bar__options">
+				<label className="prompt-bar__search-toggle">
+					<input type="checkbox" checked={webSearch} onChange={(event) => setWebSearch(event.target.checked)} />
+					<span>Веб-поиск</span>
+				</label>
+				{voiceInputAvailable && (
+					<button className={isListening ? 'prompt-bar__voice prompt-bar__voice--active' : 'prompt-bar__voice'} type="button" onClick={toggleVoiceInput}>
+						{isListening ? 'Остановить запись' : 'Голосовой ввод'}
+					</button>
+				)}
+			</div>
 			<div className="prompt-bar__input-container">
-				<div className="prompt-bar__actions">
-					<PromptActionsMenu onFilesSelect={onFilesSelect} />
-				</div>
-
-				<AutoResizeTextarea
-					value={value}
-					onChange={handleChange}
-					onMultilineChange={setIsMultiline}
-					onKeyDown={handleEnterDown}
-				/>
-
+				<div className="prompt-bar__actions"><PromptActionsMenu onFilesSelect={onFilesSelect} /></div>
+				<AutoResizeTextarea value={value} onChange={handleChange} onMultilineChange={setIsMultiline} onKeyDown={handleEnterDown} />
 				<div className="prompt-bar__send">
-					<IconButton disabled={isSendDisabled} type="submit" aria-label="Отправить сообщение">
-						{isSubmit ? <SubmitLoadingIcon /> : <SendIcon />}
-					</IconButton>
+					{isGenerating ? (
+						<IconButton type="button" onClick={onStop} aria-label="Остановить генерацию"><span className="prompt-bar__stop" /></IconButton>
+					) : (
+						<IconButton disabled={isSendDisabled} type="submit" aria-label="Отправить сообщение"><SendIcon /></IconButton>
+					)}
 				</div>
 			</div>
 		</form>

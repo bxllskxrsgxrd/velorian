@@ -1,8 +1,45 @@
 .message {
 	&__text {
 		color: inherit;
-		white-space: pre-wrap;
 		overflow-wrap: anywhere;
+	}
+
+	&__markdown {
+		line-height: 1.65;
+
+		> :first-child { margin-top: 0; }
+		> :last-child { margin-bottom: 0; }
+		p, ul, ol, blockquote, pre, table { margin: 0 0 12px; }
+		ul, ol { padding-left: 24px; }
+		li + li { margin-top: 4px; }
+		a { color: var(--color-accent); text-underline-offset: 3px; }
+		blockquote {
+			padding-left: 14px;
+			border-left: 3px solid var(--color-accent);
+			color: var(--color-text-secondary);
+		}
+		code {
+			padding: 2px 5px;
+			border: 1px solid var(--color-border-subtle);
+			border-radius: 6px;
+			background: var(--color-bg-elevated);
+			font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+			font-size: 0.9em;
+		}
+		pre {
+			max-width: 100%;
+			overflow-x: auto;
+			padding: 14px;
+			border: 1px solid var(--color-border);
+			border-radius: var(--radius-medium);
+			background: var(--color-bg-elevated);
+			code { padding: 0; border: 0; background: transparent; }
+		}
+		table { display: block; max-width: 100%; overflow-x: auto; border-collapse: collapse; }
+		th, td { padding: 7px 10px; border: 1px solid var(--color-border); text-align: left; }
+		th { background: var(--color-bg-elevated); }
+		h1, h2, h3, h4 { margin: 18px 0 9px; line-height: 1.25; }
+		h1 { font-size: 1.6em; } h2 { font-size: 1.35em; } h3 { font-size: 1.15em; }
 	}
 
 	&__typing-cursor {

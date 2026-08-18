@@ -1,0 +1,48 @@
+services:
+  postgres:
+    image: postgres:17-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: velorian
+      POSTGRES_USER: velorian
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?Set POSTGRES_PASSWORD}
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U velorian"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+  backend:
+    build: ./backend
+    restart: unless-stopped
+    environment:
+      APP_ENV: production
+      GROQ_API_KEY: ${GROQ_API_KEY:?Set GROQ_API_KEY}
+      GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
+      GROQ_VISION_MODEL: ${GROQ_VISION_MODEL:-qwen/qwen3.6-27b}
+      ENABLE_VISION: ${ENABLE_VISION:-true}
+      AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
+      COOKIE_SECURE: ${COOKIE_SECURE:-false}
+      DATABASE_URL: postgresql+psycopg://velorian:${POSTGRES_PASSWORD}@postgres:5432/velorian
+      UPLOAD_DIR: /app/data/uploads
+      CORS_ORIGINS: ${PUBLIC_ORIGIN:-http://localhost}
+      OCR_LANGUAGES: rus+eng
+    volumes:
+      - uploads_data:/app/data/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+  frontend:
+    build: ./frontend
+    restart: unless-stopped
+    ports:
+      - "${APP_PORT:-8080}:80"
+    depends_on:
+      - backend
+
+volumes:
+  postgres_data:
+  uploads_data:

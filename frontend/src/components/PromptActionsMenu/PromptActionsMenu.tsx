@@ -4,7 +4,6 @@ import { IconButton } from '../ui/IconButton/IconButton';
 
 import './_promptActionsMenu.scss';
 import { AttachFilesAction } from './PromptActionsMenuButtons/AttachFilesAction';
-import { PromptActionButton } from './PromptActionsMenuButtons/PromptActionButton';
 
 type PromptActionsMenuProps = {
 	onFilesSelect: (files: File[]) => void;
@@ -62,9 +61,6 @@ export function PromptActionsMenu({ onFilesSelect }: PromptActionsMenuProps) {
 			{open && (
 				<div className="prompt-actions__menu" role="menu">
 					<AttachFilesAction onFilesSelect={handleFilesSelect} />
-					<PromptActionButton role="menuitem" disabled title="Функция пока недоступна">
-						Поиск в базе данных
-					</PromptActionButton>
 				</div>
 			)}
 		</div>

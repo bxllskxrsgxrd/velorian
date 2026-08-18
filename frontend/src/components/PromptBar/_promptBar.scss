@@ -173,6 +173,23 @@
 		transition: row-gap 180ms ease;
 	}
 
+	&__options {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding: 0 4px 8px;
+		font-size: 12px;
+		color: var(--color-text-secondary);
+	}
+
+	&__search-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
+	&__search-toggle input { accent-color: var(--color-accent); }
+	&__voice { border: 0; padding: 3px 0; color: var(--color-text-secondary); background: transparent; cursor: pointer; }
+	&__voice--active { color: var(--color-error); }
+	&__error { padding: 0 4px 8px; color: var(--color-error); font-size: 12px; }
+	&__stop { width: 12px; height: 12px; border-radius: 3px; background: currentColor; }
+
 	&__actions {
 		grid-area: actions;
 	}
@@ -203,11 +220,7 @@
 
 	&--multiline {
 		.prompt-bar__input-container {
-			grid-template-areas:
-				'textarea textarea textarea'
-				'actions . send';
-
-			row-gap: 8px;
+			grid-template-areas: 'actions textarea send';
 			align-items: end;
 		}
 	}

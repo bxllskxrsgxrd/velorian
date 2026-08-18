@@ -1,3 +1,25 @@
+.chat-shell {
+	position: relative;
+	display: flex;
+	width: 100%;
+	height: 100dvh;
+	overflow: hidden;
+
+	> .drop-zone { min-width: 0; flex: 1; }
+
+	&__backdrop {
+		display: none;
+		@include tablet {
+			display: block;
+			position: fixed;
+			z-index: 30;
+			inset: 0;
+			border: 0;
+			background: var(--color-overlay);
+		}
+	}
+}
+
 .chat-page {
 	--chat-content-width: 768px;
 	--chat-side-padding: 16px;
@@ -39,6 +61,62 @@
 		margin: 0 auto;
 	}
 
+	&__topbar {
+		position: absolute;
+		top: 12px;
+		left: 14px;
+		z-index: 22;
+		display: none;
+		align-items: center;
+		gap: 10px;
+		max-width: calc(100% - 28px);
+		color: var(--color-text-secondary);
+		font-size: 14px;
+		span { overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+		button {
+			width: 36px;
+			height: 36px;
+			flex-shrink: 0;
+			border: 1px solid var(--color-border);
+			border-radius: 10px;
+			color: var(--color-text-primary);
+			background: var(--color-bg-surface);
+			cursor: pointer;
+		}
+	}
+
+	&__error {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		margin-bottom: 16px;
+		padding: 10px 12px;
+		border: 1px solid color-mix(in srgb, var(--color-error) 35%, transparent);
+		border-radius: var(--radius-medium);
+		color: var(--color-error);
+		background: color-mix(in srgb, var(--color-error) 8%, var(--color-bg-surface));
+		font-size: 14px;
+		button { border: 0; color: inherit; background: transparent; cursor: pointer; }
+	}
+
+	&__loading { padding: 20px; color: var(--color-text-secondary); text-align: center; }
+
+	&__scroll-bottom {
+		position: sticky;
+		z-index: 25;
+		bottom: 128px;
+		left: calc(50% - 20px);
+		width: 40px;
+		height: 40px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-round);
+		color: var(--color-text-primary);
+		background: var(--color-bg-elevated);
+		box-shadow: var(--shadow-surface);
+		cursor: pointer;
+	}
+
 	&__prompt {
 		width: 100%;
 		max-width: var(--chat-content-width);
@@ -52,6 +130,8 @@
 		align-items: center;
 		justify-content: center;
 	}
+
+	&__start p { color: var(--color-text-secondary); text-align: center; }
 
 	&__heading {
 		line-height: 1;
@@ -145,6 +225,11 @@
 		&--chat .chat-page__prompt {
 			padding-bottom: 18px;
 		}
+	}
+
+	@include tablet {
+		padding-top: 64px;
+		&__topbar { display: flex; }
 	}
 }
 

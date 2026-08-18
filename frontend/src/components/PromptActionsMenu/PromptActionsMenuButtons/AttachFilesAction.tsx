@@ -1,4 +1,5 @@
 import React, { useRef } from 'react';
+import { ACCEPTED_FILE_TYPES } from '../../../utils/fileValidation';
 import { PromptActionButton } from './PromptActionButton';
 
 type AttachFilesActionProps = {
@@ -28,7 +29,7 @@ export function AttachFilesAction({ onFilesSelect }: AttachFilesActionProps) {
 				Прикрепить фото и файлы
 			</PromptActionButton>
 
-			<input type="file" ref={inputRef} onChange={handleFilesChange} multiple hidden accept='image/*,.pdf,.doc,.txt,.html,.css,.js' />
+				<input type="file" ref={inputRef} onChange={handleFilesChange} multiple hidden accept={ACCEPTED_FILE_TYPES} />
 		</>
 	);
 }

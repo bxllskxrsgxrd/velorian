@@ -37,6 +37,22 @@
 		border-color: color-mix(in srgb, var(--color-error) 28%, transparent);
 	}
 
+	&__actions {
+		display: flex;
+		gap: 6px;
+		margin-top: -4px;
+		button {
+			padding: 4px 8px;
+			border: 1px solid transparent;
+			border-radius: 8px;
+			color: var(--color-text-secondary);
+			background: transparent;
+			font-size: 12px;
+			cursor: pointer;
+			&:hover { color: var(--color-accent); border-color: var(--color-border); }
+		}
+	}
+
 	&__content {
 		display: flex;
 		flex-direction: column;

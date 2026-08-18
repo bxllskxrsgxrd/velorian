@@ -10,14 +10,16 @@ import { UserMessageContent } from './UserMessageContent';
 type MessageBubbleProps = {
 	message: ChatMessage;
 	onOpenAttachment: (attachment: ChatAttachment) => void;
-	shouldAnimate?: boolean;
+	onRetry?: () => void;
 };
 
-export function MessageBubble({ message, onOpenAttachment, shouldAnimate = false }: MessageBubbleProps) {
+export function MessageBubble({ message, onOpenAttachment, onRetry }: MessageBubbleProps) {
 	const isUser = message.role === CHAT_ROLES.USER;
 
-	const isPending = !isUser && message.status === CHAT_MESSAGE_STATUSES.PENDING;
+	const isPending = !isUser && message.status === CHAT_MESSAGE_STATUSES.PENDING && !message.content;
+	const isStreaming = !isUser && message.status === CHAT_MESSAGE_STATUSES.STREAMING;
 	const isError = !isUser && message.status === CHAT_MESSAGE_STATUSES.ERROR;
+	const isCancelled = !isUser && message.status === CHAT_MESSAGE_STATUSES.CANCELLED;
 
 	const attachments = message.attachments ?? [];
 
@@ -36,7 +38,7 @@ export function MessageBubble({ message, onOpenAttachment, shouldAnimate = false
 	const messageClassName = [
 		'message',
 		isUser ? 'message--user' : 'message--assistant',
-		isError && 'message--error',
+		(isError || isCancelled) && 'message--error',
 	]
 		.filter(Boolean)
 		.join(' ');
@@ -84,8 +86,15 @@ export function MessageBubble({ message, onOpenAttachment, shouldAnimate = false
 					{isUser ? (
 						<UserMessageContent content={message.content} />
 					) : (
-						<AssistantMessageContent messageId={message.id} content={message.content} shouldAnimate={shouldAnimate} />
+						<AssistantMessageContent content={message.content} isStreaming={isStreaming} />
 					)}
+				</div>
+			)}
+			{!isUser && !isPending && !isStreaming && (
+				<div className="message__actions">
+					{message.content && <button type="button" onClick={() => void navigator.clipboard.writeText(message.content)}>Копировать</button>}
+					{message.content && 'speechSynthesis' in window && <button type="button" onClick={() => window.speechSynthesis.speak(new SpeechSynthesisUtterance(message.content))}>Озвучить</button>}
+					{(isError || isCancelled) && onRetry && <button type="button" onClick={onRetry}>Повторить</button>}
 				</div>
 			)}
 		</div>

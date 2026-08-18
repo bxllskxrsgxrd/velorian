@@ -1,8 +1,10 @@
 import React, { useState } from 'react';
+import { validateAndMergeFiles } from '../utils/fileValidation';
 
 export function useDragAndDrop() {
 	const [isDragging, setIsDragging] = useState(false);
 	const [files, setFiles] = useState<File[]>([]);
+	const [fileError, setFileError] = useState('');
 
 	// функция проверяет перетягиваются файлы или нет
 	function isFilesDragging(e: React.DragEvent<HTMLElement>) {
@@ -11,8 +13,9 @@ export function useDragAndDrop() {
 
 	function addFiles(newFiles: File[]) {
 		if (newFiles.length === 0) return;
-
-		setFiles((currentFiles) => [...currentFiles, ...newFiles]);
+		const result = validateAndMergeFiles(files, newFiles);
+		setFileError(result.error);
+		setFiles(result.files);
 	}
 
 	// функция переноса файла в дроп зону
@@ -55,18 +58,20 @@ export function useDragAndDrop() {
 		if (droppedFiles.length === 0) return;
 
 		// функция обновления массива droppedFiles при добавлении новых
-		setFiles((prev) => [...prev, ...droppedFiles]);
+		addFiles(droppedFiles);
 	}
 
 	// функция удаления файлов из массива под индексу
 	function removeFile(index: number) {
 		setFiles((prev) => prev.filter((_, i) => i !== index));
+		setFileError('');
 	}
 
 	// функция полной очистки массива
 	function clearFiles() {
 		setFiles([]);
+		setFileError('');
 	}
 
-	return { isDragging, files, addFiles, handleDragOver, handleDragLeave, handleDrop, removeFile, clearFiles };
+	return { isDragging, files, fileError, addFiles, handleDragOver, handleDragLeave, handleDrop, removeFile, clearFiles };
 }

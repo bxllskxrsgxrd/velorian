@@ -102,6 +102,13 @@ body {
 	font-family: var(--main-font);
 }
 
+.app-loading {
+	min-height: 100dvh;
+	display: grid;
+	place-items: center;
+	color: var(--color-text-secondary);
+}
+
 p {
 	margin: 0;
 }

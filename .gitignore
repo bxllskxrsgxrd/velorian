@@ -27,8 +27,12 @@ dist-ssr
 .env
 .env.*
 !.env.example
+!.env.production.example
 
 # python
 .venv/
 __pycache__/
 *.pyc
+
+# runtime data
+backend/data/
