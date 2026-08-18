@@ -164,7 +164,7 @@ export function ChatPage() {
 								activeAssistantMessageId={activeAssistantMessageId}
 							/>
 						) : (
-							<div className="chat-page-start">
+							<div className="chat-page__start">
 								<h1 className="chat-page__heading">Введи запрос</h1>
 							</div>
 						)}

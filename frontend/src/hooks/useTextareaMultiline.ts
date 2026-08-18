@@ -13,8 +13,8 @@ function updateScrollMask(textarea: HTMLTextAreaElement) {
 	const canScrollUp = scrollTop > threshold;
 	const canScrollDown = scrollTop + clientHeight < scrollHeight - threshold;
 
-	textarea.style.setProperty('--top-fade', hasOverflow && canScrollUp ? 'transparent' : 'var(--color-black)');
-	textarea.style.setProperty('--bottom-fade', hasOverflow && canScrollDown ? 'transparent' : 'var(--color-black)');
+	textarea.style.setProperty('--top-fade', hasOverflow && canScrollUp ? 'transparent' : 'var(--color-mask-opaque)');
+	textarea.style.setProperty('--bottom-fade', hasOverflow && canScrollDown ? 'transparent' : 'var(--color-mask-opaque)');
 }
 
 export function useTextareaMultiline({ value, maxHeight = 320 }: useTextareaMultilineProps) {

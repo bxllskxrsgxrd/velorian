@@ -17,6 +17,7 @@ export function MessageBubble({ message, onOpenAttachment, shouldAnimate = false
 	const isUser = message.role === CHAT_ROLES.USER;
 
 	const isPending = !isUser && message.status === CHAT_MESSAGE_STATUSES.PENDING;
+	const isError = !isUser && message.status === CHAT_MESSAGE_STATUSES.ERROR;
 
 	const attachments = message.attachments ?? [];
 
@@ -32,9 +33,16 @@ export function MessageBubble({ message, onOpenAttachment, shouldAnimate = false
 	const contentClassName = ['message__content', hasAttachments && 'message__content--with-attachments']
 		.filter(Boolean)
 		.join(' ');
+	const messageClassName = [
+		'message',
+		isUser ? 'message--user' : 'message--assistant',
+		isError && 'message--error',
+	]
+		.filter(Boolean)
+		.join(' ');
 
 	return (
-		<div className={isUser ? 'message message--user' : 'message message--assistant'}>
+		<div className={messageClassName}>
 			{hasImages && (
 				<div className="message__media">
 					{imageAttachments?.map((attachment) => (

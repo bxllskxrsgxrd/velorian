@@ -1,40 +1,50 @@
 @use './fonts';
 
 :root {
-	color-scheme: light dark;
+	color-scheme: dark;
 
-	--text: #f5f0ea;
-	--text-h: var(--text);
-	--bg: #3c2c2b;
-	--bg-prompt-bar: #4b403f;
-	--color-black: #000000;
+	/* Forest Night: базовые поверхности */
+	--color-bg-canvas: #0f1512;
+	--color-bg-surface: #151e19;
+	--color-bg-elevated: #1b2821;
+	--color-bg-user-message: #24352b;
+	--color-text-primary: #f2f7f3;
+	--color-text-secondary: #a4b3a9;
+	--color-border: #304438;
+	--color-border-subtle: color-mix(in srgb, var(--color-border) 62%, transparent);
+	--color-success: #58d99a;
+	--color-error: #ff8290;
+	--color-overlay: rgb(4 10 7 / 88%);
+	--color-mask-opaque: #000;
 
-	--icon-btn-color: var(--text);
-	--icon-btn-color-dark: var(--bg);
-	--icon-btn-hover: #645352;
-	--icon-btn-active: #5c4c4b;
-	--button-color: var(--text);
+	/* Pine — акцент по умолчанию */
+	--color-accent: #74d79c;
+	--color-accent-hover: #8be1ad;
+	--color-accent-active: #5bc584;
+	--color-accent-focus: #a9ebc0;
+	--color-on-accent: #0b1710;
+	--color-accent-soft: color-mix(in srgb, var(--color-accent) 13%, transparent);
+	--color-accent-soft-hover: color-mix(in srgb, var(--color-accent) 20%, transparent);
 
-	/* прикреплённый файл */
-	--attachment-bg: #5a4a48;
-	--attachment-bg-hover: #645250;
-	--attachment-bg-active: #6d5956;
-	--attachment-border: #6f5c59;
-	--attachment-text: #f3ece9;
-
-	/* крестик */
-	--attachment-remove-color: #cdbfbc;
-	--attachment-remove-color-hover: #fff4f1;
-	--attachment-remove-bg-hover: #745a56;
-	--attachment-remove-bg-active: #835f5a;
+	/* Общие дизайн-токены */
+	--radius-small: 8px;
+	--radius-medium: 12px;
+	--radius-large: 18px;
+	--radius-xlarge: 24px;
+	--radius-round: 999px;
+	--shadow-surface: 0 18px 48px rgb(3 9 6 / 32%);
+	--shadow-prompt: 0 12px 36px rgb(3 9 6 / 28%);
+	--transition-fast: 140ms ease;
+	--transition-normal: 180ms ease;
+	--focus-ring: 0 0 0 3px color-mix(in srgb, var(--color-accent-focus) 32%, transparent);
 
 	--main-font: Helvetica, Arial, sans-serif;
 
 	line-height: 150%;
 	letter-spacing: 0.18px;
 
-	color: var(--text);
-	background: var(--bg);
+	color: var(--color-text-primary);
+	background: var(--color-bg-canvas);
 	font-synthesis: none;
 	text-rendering: optimizeLegibility;
 	-webkit-font-smoothing: antialiased;
@@ -45,6 +55,30 @@
 	}
 }
 
+:root[data-accent='terracotta'] {
+	--color-accent: #ff9c80;
+	--color-accent-hover: #ffb098;
+	--color-accent-active: #e9866d;
+	--color-accent-focus: #ffc5b3;
+	--color-on-accent: #0b1710;
+}
+
+:root[data-accent='plum'] {
+	--color-accent: #d3a4ee;
+	--color-accent-hover: #deb6f4;
+	--color-accent-active: #bd8dd9;
+	--color-accent-focus: #e8cdf7;
+	--color-on-accent: #0b1710;
+}
+
+:root[data-accent='pine'] {
+	--color-accent: #74d79c;
+	--color-accent-hover: #8be1ad;
+	--color-accent-active: #5bc584;
+	--color-accent-focus: #a9ebc0;
+	--color-on-accent: #0b1710;
+}
+
 *,
 *::before,
 *::after {
@@ -52,6 +86,7 @@
 }
 
 #root {
+	min-height: 100dvh;
 	max-width: 100%;
 
 	display: flex;
@@ -60,11 +95,26 @@
 }
 
 body {
+	min-width: 320px;
+	min-height: 100dvh;
 	margin: 0;
+	background: var(--color-bg-canvas);
+	font-family: var(--main-font);
 }
 
 p {
 	margin: 0;
+}
+
+button,
+textarea,
+input {
+	font: inherit;
+}
+
+::selection {
+	color: var(--color-on-accent);
+	background: var(--color-accent);
 }
 
 @media (prefers-reduced-motion: reduce) {

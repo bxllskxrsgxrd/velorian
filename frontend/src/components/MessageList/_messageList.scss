@@ -1,9 +1,9 @@
-.message-list{ 
-  display: flex;
-  flex-direction: column;
-  gap: 16px;
+.message-list {
+	display: flex;
+	flex-direction: column;
+	gap: 22px;
 
-  width: 100%;
+	width: 100%;
 	max-width: var(--chat-content-width);
 
 	margin: 0 auto;

@@ -1,5 +1,5 @@
 .icon-button {
-		display: flex;
+	display: flex;
 	align-items: center;
 	justify-content: center;
 
@@ -7,30 +7,38 @@
 	border: none;
 	border-radius: 999px;
 
-	background: none;
+	background: transparent;
+	color: var(--color-text-secondary);
 	cursor: pointer;
 
 	line-height: 0;
+	transition:
+		color var(--transition-fast),
+		background-color var(--transition-fast),
+		transform var(--transition-fast);
 
 	& svg {
 		display: block;
 		width: 16px;
 		height: 16px;
 
-		fill: var(--icon-btn-color);
+		fill: currentColor;
 	}
 
 	&:not(:disabled):hover {
-		background: var(--icon-btn-hover);
+		color: var(--color-accent);
+		background: var(--color-accent-soft);
 	}
 
 	&:not(:disabled):active {
-		background: var(--icon-btn-active);
+		background: var(--color-accent-soft-hover);
+		transform: translateY(1px);
 	}
 
 	&:focus-visible {
-		outline: 1px solid var(--icon-btn-color);
+		outline: 1px solid var(--color-accent-focus);
 		outline-offset: 2px;
+		box-shadow: var(--focus-ring);
 	}
 
 	&:disabled {

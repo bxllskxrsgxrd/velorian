@@ -1,9 +1,7 @@
 <svg width="962" height="842" viewBox="0 0 962 842"  xmlns="http://www.w3.org/2000/svg">
 <style>
   :root{
-    color-scheme: light dark;
-
-    --logo-color: light-dark(#3c2c2b, #f5f0ea)
+		--logo-color: #74d79c;
   }
   .logo {
     fill: var(--logo-color);

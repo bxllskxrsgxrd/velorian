@@ -1,5 +1,6 @@
 .message {
 	&__text {
+		color: inherit;
 		white-space: pre-wrap;
 		overflow-wrap: anywhere;
 	}
@@ -12,7 +13,7 @@
 
 		margin-left: 2px;
 
-		background: currentColor;
+		background: var(--color-accent);
 		vertical-align: -0.12em;
 
 		animation: message-cursor-blink 800ms steps(1) infinite;

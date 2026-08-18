@@ -3,9 +3,9 @@
 	--chat-side-padding: 16px;
 	--prompt-bottom: 16px;
 
-	--scroll-normal: var(--attachment-bg);
-	--scroll-bg: #2b1f1e;
-	--scroll-field-hover: var(--attachment-bg-hover);
+	--scroll-normal: var(--color-border);
+	--scroll-bg: var(--color-bg-canvas);
+	--scroll-field-hover: var(--color-accent);
 
 	--heading-font: 'Cera Stencil PRO Trial';
 
@@ -18,9 +18,14 @@
 	flex-direction: column;
 
 	margin: 0 auto;
-	padding: 32px var(--chat-side-padding) 0;
+	padding: 28px var(--chat-side-padding) 0;
 
-	background: var(--bg);
+	background-color: var(--color-bg-canvas);
+	background-image: radial-gradient(
+		color-mix(in srgb, var(--color-border) 34%, transparent) 0.7px,
+		transparent 0.7px
+	);
+	background-size: 18px 18px;
 
 	overflow-y: auto;
 	overflow-x: hidden;
@@ -52,11 +57,12 @@
 		line-height: 1;
 		font-family: var(--heading-font);
 		font-weight: 500;
-		color: var(--text-h);
+		color: var(--color-text-primary);
+		text-shadow: 0 10px 40px color-mix(in srgb, var(--color-accent) 20%, transparent);
 
 		text-align: center;
-		font-size: 56px;
-		letter-spacing: -1.68px;
+		font-size: 54px;
+		letter-spacing: -1.3px;
 		margin: 32px 0;
 
 		@include tablet {
@@ -92,10 +98,14 @@
 			z-index: 20;
 
 			margin-top: auto;
-			padding: 0 0 32px;
+			padding: 28px 0 28px;
 
-			border-radius: 24px 24px 0 0;
-			background: var(--bg);
+			background: linear-gradient(
+				to bottom,
+				transparent,
+				var(--color-bg-canvas) 32%,
+				var(--color-bg-canvas)
+			);
 		}
 	}
 	// Chrome, Edge, Safari
@@ -123,7 +133,17 @@
 		background-clip: padding-box;
 
 		&:hover {
-			background-color: var(--scroll-field-hover);
+				background-color: var(--scroll-field-hover);
+			}
+		}
+
+	@include mobile {
+		--chat-side-padding: 12px;
+
+		padding-top: 20px;
+
+		&--chat .chat-page__prompt {
+			padding-bottom: 18px;
 		}
 	}
 }
