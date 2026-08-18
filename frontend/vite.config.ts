@@ -14,8 +14,8 @@ export default defineConfig({
 
 	css: {
 		preprocessorOptions: {
-				scss: {
-					additionalData: `
+			scss: {
+				additionalData: `
 						@use "@/scss/mixins/breakpoint" as *;
 						@use "@/scss/mixins/mixin" as *;
 					`,

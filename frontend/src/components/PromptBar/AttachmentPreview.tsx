@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useRef } from 'react';
 import { DeleteAttachmentIcon } from '../icons/DeleteAttachmentIcon';
 import { DocumentIcon } from '../icons/DocumentIcon';
 import { IconButton } from '../ui/IconButton/IconButton';
@@ -11,13 +11,21 @@ type AttachmentPreviewProps = {
 
 export function AttachmentPreview({ file, onRemove, onOpen }: AttachmentPreviewProps) {
 	const isImage = file.type.startsWith('image/');
-	const previewUrl = useMemo(() => (isImage ? URL.createObjectURL(file) : null), [file, isImage]);
+	const imageRef = useRef<HTMLImageElement>(null);
 
 	useEffect(() => {
+		const imageElement = imageRef.current;
+
+		if (!isImage || !imageElement) return;
+
+		const nextPreviewUrl = URL.createObjectURL(file);
+		imageElement.src = nextPreviewUrl;
+
 		return () => {
-			if (previewUrl) URL.revokeObjectURL(previewUrl);
+			imageElement.removeAttribute('src');
+			URL.revokeObjectURL(nextPreviewUrl);
 		};
-	}, [previewUrl]);
+	}, [file, isImage]);
 
 	const itemClassName = ['prompt-bar__attachments-item', isImage && 'prompt-bar__attachments-item--image']
 		.filter(Boolean)
@@ -34,7 +42,7 @@ export function AttachmentPreview({ file, onRemove, onOpen }: AttachmentPreviewP
 		<div className={itemClassName}>
 			<button className={openButtonClassName} type="button" onClick={() => onOpen(file)}>
 				{isImage ? (
-					previewUrl && <img src={previewUrl} alt={`${file.name}`} className="prompt-bar__attachments-preview" />
+					<img ref={imageRef} alt={file.name} className="prompt-bar__attachments-preview" />
 				) : (
 					<>
 						<div className="prompt-bar__attachments-item-icon">
