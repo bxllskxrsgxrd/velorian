@@ -1,4 +1,5 @@
 import { useTypewriter } from '../../hooks/useTypeWriter';
+import './_messageContent.scss';
 
 type AssistantMessageContentProps = {
 	messageId: string;

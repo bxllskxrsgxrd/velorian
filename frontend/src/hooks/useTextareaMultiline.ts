@@ -6,6 +6,17 @@ type useTextareaMultilineProps = {
 	maxHeight?: number;
 };
 
+function updateScrollMask(textarea: HTMLTextAreaElement) {
+	const { scrollTop, scrollHeight, clientHeight } = textarea;
+	const threshold = 1;
+	const hasOverflow = scrollHeight > clientHeight + threshold;
+	const canScrollUp = scrollTop > threshold;
+	const canScrollDown = scrollTop + clientHeight < scrollHeight - threshold;
+
+	textarea.style.setProperty('--top-fade', hasOverflow && canScrollUp ? 'transparent' : 'var(--color-black)');
+	textarea.style.setProperty('--bottom-fade', hasOverflow && canScrollDown ? 'transparent' : 'var(--color-black)');
+}
+
 export function useTextareaMultiline({ value, maxHeight = 320 }: useTextareaMultilineProps) {
 	const [isMultiline, setIsMultiline] = useState(false);
 	// Создаю переменную, в которую передаю ссылку на атрибут в DOM с пустым значением
@@ -80,13 +91,8 @@ export function useTextareaMultiline({ value, maxHeight = 320 }: useTextareaMult
 
 			targetHeightRef.current = nextHeight;
 		}
-		setIsMultiline((previousIsMultiline) => {
-			if (value.length === 0) {
-				return false;
-			}
-
-			return previousIsMultiline || hasMultipleLines;
-		});
+		setIsMultiline(value.length > 0 && hasMultipleLines);
+		updateScrollMask(textarea);
 
 		previousValueRef.current = value;
 	}, [value, maxHeight]);
@@ -96,33 +102,21 @@ export function useTextareaMultiline({ value, maxHeight = 320 }: useTextareaMult
 
 		if (!textarea) return;
 
-		const updateScrollMask = () => {
-			const { scrollTop, scrollHeight, clientHeight } = textarea;
+		const handleScrollMaskUpdate = () => updateScrollMask(textarea);
 
-			const threshold = 1;
-
-			const hasOverflow = scrollHeight > clientHeight + threshold;
-			const canScrollUp = scrollTop > threshold;
-			const canScrollDown = scrollTop + clientHeight < scrollHeight - threshold;
-
-			textarea.style.setProperty('--top-fade', hasOverflow && canScrollUp ? 'transparent' : 'var(--color-black)');
-
-			textarea.style.setProperty('--bottom-fade', hasOverflow && canScrollDown ? 'transparent' : 'var(--color-black)');
-		};
-
-		const resizeObserver = new ResizeObserver(updateScrollMask);
+		const resizeObserver = new ResizeObserver(handleScrollMaskUpdate);
 
 		resizeObserver.observe(textarea);
-		textarea.addEventListener('scroll', updateScrollMask);
+		textarea.addEventListener('scroll', handleScrollMaskUpdate);
 
-		const frameId = requestAnimationFrame(updateScrollMask);
+		const frameId = requestAnimationFrame(handleScrollMaskUpdate);
 
 		return () => {
 			cancelAnimationFrame(frameId);
 			resizeObserver.disconnect();
-			textarea.removeEventListener('scroll', updateScrollMask);
+			textarea.removeEventListener('scroll', handleScrollMaskUpdate);
 		};
-	}, [value]);
+	}, []);
 
 	return { textareaRef, isMultiline };
 }

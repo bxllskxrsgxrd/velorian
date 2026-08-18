@@ -1,4 +1,4 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo } from 'react';
 import { DeleteAttachmentIcon } from '../icons/DeleteAttachmentIcon';
 import { DocumentIcon } from '../icons/DocumentIcon';
 import { IconButton } from '../ui/IconButton/IconButton';
@@ -10,24 +10,14 @@ type AttachmentPreviewProps = {
 };
 
 export function AttachmentPreview({ file, onRemove, onOpen }: AttachmentPreviewProps) {
-	const [previewUrl, setPreviewUrl] = useState<string | null>(null);
-
 	const isImage = file.type.startsWith('image/');
+	const previewUrl = useMemo(() => (isImage ? URL.createObjectURL(file) : null), [file, isImage]);
 
 	useEffect(() => {
-		if (!isImage) {
-			setPreviewUrl(null);
-			return;
-		}
-
-		const url = URL.createObjectURL(file);
-
-		setPreviewUrl(url);
-
 		return () => {
-			URL.revokeObjectURL(url);
+			if (previewUrl) URL.revokeObjectURL(previewUrl);
 		};
-	}, [file, isImage]);
+	}, [previewUrl]);
 
 	const itemClassName = ['prompt-bar__attachments-item', isImage && 'prompt-bar__attachments-item--image']
 		.filter(Boolean)

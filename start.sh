@@ -111,7 +111,7 @@ echo "Запускаю backend..."
 
   if [ ! -s "requirements.txt" ]; then
     echo "requirements.txt пустой. Устанавливаю базовые зависимости..."
-    python -m pip install fastapi "uvicorn[standard]" python-dotenv groq pydantic
+		python -m pip install fastapi "uvicorn[standard]" python-dotenv groq pydantic python-multipart
     python -m pip freeze > requirements.txt
   else
     echo "Устанавливаю зависимости backend..."

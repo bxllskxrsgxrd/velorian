@@ -9,23 +9,10 @@ type UseTypewriterProps = {
 
 export function useTypewriter({ text, messageId, enabled = true, charsPerSecond = 50 }: UseTypewriterProps) {
 	const [visibleLength, setVisibleLength] = useState(enabled ? 0 : text.length);
-
-	const textRef = useRef(text);
-
-	useEffect(() => {
-		textRef.current = text;
-
-		if (!enabled) {
-			setVisibleLength(text.length);
-		}
-	}, [text, enabled]);
+	const visibleLengthRef = useRef(visibleLength);
 
 	useEffect(() => {
-		setVisibleLength(enabled ? 0 : textRef.current.length);
-	}, [messageId, enabled]);
-
-	useEffect(() => {
-		if (!enabled) return;
+		if (!enabled || visibleLengthRef.current >= text.length) return;
 
 		let animationFrameId: number;
 		let previousTime = performance.now();
@@ -43,12 +30,15 @@ export function useTypewriter({ text, messageId, enabled = true, charsPerSecond 
 			if (charactersToAdd > 0) {
 				accumulatedCharacters -= charactersToAdd;
 
-				setVisibleLength((currentLength) => {
-					return Math.min(currentLength + charactersToAdd, textRef.current.length);
-				});
+				const nextLength = Math.min(visibleLengthRef.current + charactersToAdd, text.length);
+
+				visibleLengthRef.current = nextLength;
+				setVisibleLength(nextLength);
 			}
 
-			animationFrameId = requestAnimationFrame(animate);
+			if (visibleLengthRef.current < text.length) {
+				animationFrameId = requestAnimationFrame(animate);
+			}
 		};
 
 		animationFrameId = requestAnimationFrame(animate);
@@ -56,9 +46,9 @@ export function useTypewriter({ text, messageId, enabled = true, charsPerSecond 
 		return () => {
 			cancelAnimationFrame(animationFrameId);
 		};
-	}, [messageId, enabled, charsPerSecond]);
+	}, [text, messageId, enabled, charsPerSecond]);
 
-	const safeVisibleLength = Math.min(visibleLength, text.length);
+	const safeVisibleLength = enabled ? Math.min(visibleLength, text.length) : text.length;
 
 	return {
 		displayedText: text.slice(0, safeVisibleLength),

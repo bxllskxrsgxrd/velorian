@@ -11,7 +11,7 @@ type FilePreviewModalProps = {
 };
 
 export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
-	const [textContent, setTextContent] = useState('');
+	const [textPreview, setTextPreview] = useState<{ url: string; content: string } | null>(null);
 
 	const isImage = file.type.startsWith('image/');
 	const isPdf = file.type === 'application/pdf';
@@ -32,17 +32,20 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 	}, [onClose]);
 
 	useEffect(() => {
-		if (!isText) {
-			setTextContent('');
-			return;
-		}
+		if (!isText) return;
 
-		fetch(file.url)
+		const controller = new AbortController();
+
+		fetch(file.url, { signal: controller.signal })
 			.then((response) => response.text())
-			.then(setTextContent)
-			.catch(() => {
-				setTextContent('Не удалось прочитать файл.');
+			.then((content) => setTextPreview({ url: file.url, content }))
+			.catch((error: unknown) => {
+				if (error instanceof DOMException && error.name === 'AbortError') return;
+
+				setTextPreview({ url: file.url, content: 'Не удалось прочитать файл.' });
 			});
+
+		return () => controller.abort();
 	}, [file.url, isText]);
 
 	const renderFilePreview = () => {
@@ -51,6 +54,8 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 		}
 
 		if (isText) {
+			const textContent = textPreview?.url === file.url ? textPreview.content : 'Загрузка…';
+
 			return <pre className="file-preview__text">{textContent}</pre>;
 		}
 
@@ -64,7 +69,14 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 					<div className="file-preview__image-header">
 						<div className="file-preview__name">{file.name}</div>
 
-						<IconButton className="file-preview__close" onClick={onClose} aria-label="Закрыть превью">
+						<IconButton
+							className="file-preview__close"
+							onClick={(event) => {
+								event.stopPropagation();
+								onClose();
+							}}
+							aria-label="Закрыть превью"
+						>
 							<DeleteAttachmentIcon />
 						</IconButton>
 					</div>
@@ -72,6 +84,7 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 						className="file-preview__image-container"
 						role="dialog"
 						aria-modal="true"
+						aria-label={`Предпросмотр файла ${file.name}`}
 						onClick={(event) => event.stopPropagation()}
 					>
 						<img className="file-preview__image" src={file.url} alt={file.name} />
@@ -82,7 +95,14 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 					<div className="file-preview__file-header">
 						<div className="file-preview__name">{file.name}</div>
 
-						<IconButton className="file-preview__close" onClick={onClose} aria-label="Закрыть превью">
+						<IconButton
+							className="file-preview__close"
+							onClick={(event) => {
+								event.stopPropagation();
+								onClose();
+							}}
+							aria-label="Закрыть превью"
+						>
 							<DeleteAttachmentIcon />
 						</IconButton>
 					</div>
@@ -90,6 +110,7 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 						className="file-preview__file-container"
 						role="dialog"
 						aria-modal="true"
+						aria-label={`Предпросмотр файла ${file.name}`}
 						onClick={(event) => event.stopPropagation()}
 					>
 						<div className="file-preview__body">{renderFilePreview()}</div>

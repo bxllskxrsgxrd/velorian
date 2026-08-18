@@ -6,7 +6,7 @@ interface PromptActionButtonProps extends PropsWithChildren, ButtonHTMLAttribute
 export function PromptActionButton({ children, className = '', type = 'button', ...props }: PromptActionButtonProps) {
 	return (
 		<button type={type} className={`prompt-action-btn ${className}`} {...props}>
-			<p className="prompt-action-btn__text">{children}</p>
+				<span className="prompt-action-btn__text">{children}</span>
 		</button>
 	);
 }

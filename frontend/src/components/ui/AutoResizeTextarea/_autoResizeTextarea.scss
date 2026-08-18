@@ -34,8 +34,6 @@
 	cursor: text;
 
 	transition: height 180ms cubic-bezier(0.2, 0.8, 0.2, 1);
-	will-change: height;
-
 	// Chrome / Edge / Safari
 	&::-webkit-scrollbar {
 		width: 6px;

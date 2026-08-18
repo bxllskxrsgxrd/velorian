@@ -1,7 +1,10 @@
+@use './fonts';
+
 :root {
 	color-scheme: light dark;
 
 	--text: #f5f0ea;
+	--text-h: var(--text);
 	--bg: #3c2c2b;
 	--bg-prompt-bar: #4b403f;
 	--color-black: #000000;
@@ -10,6 +13,7 @@
 	--icon-btn-color-dark: var(--bg);
 	--icon-btn-hover: #645352;
 	--icon-btn-active: #5c4c4b;
+	--button-color: var(--text);
 
 	/* прикреплённый файл */
 	--attachment-bg: #5a4a48;
@@ -61,4 +65,15 @@ body {
 
 p {
 	margin: 0;
+}
+
+@media (prefers-reduced-motion: reduce) {
+	*,
+	*::before,
+	*::after {
+		scroll-behavior: auto !important;
+		animation-duration: 0.01ms !important;
+		animation-iteration-count: 1 !important;
+		transition-duration: 0.01ms !important;
+	}
 }

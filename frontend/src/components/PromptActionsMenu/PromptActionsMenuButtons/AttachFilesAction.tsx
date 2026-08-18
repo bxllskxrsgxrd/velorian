@@ -3,10 +3,9 @@ import { PromptActionButton } from './PromptActionButton';
 
 type AttachFilesActionProps = {
 	onFilesSelect: (files: File[]) => void;
-	onActionComplete?: () => void;
 };
 
-export function AttachFilesAction({ onFilesSelect, onActionComplete }: AttachFilesActionProps) {
+export function AttachFilesAction({ onFilesSelect }: AttachFilesActionProps) {
 	const inputRef = useRef<HTMLInputElement>(null);
 
 	function handleOpenFilePicker() {
@@ -18,7 +17,6 @@ export function AttachFilesAction({ onFilesSelect, onActionComplete }: AttachFil
 
 		if (selectedFiles.length > 0) {
 			onFilesSelect(selectedFiles);
-			onActionComplete?.();
 		}
 
 		e.currentTarget.value = '';
@@ -26,7 +24,9 @@ export function AttachFilesAction({ onFilesSelect, onActionComplete }: AttachFil
 
 	return (
 		<>
-			<PromptActionButton onClick={handleOpenFilePicker}>Прикрепить фото и файлы</PromptActionButton>
+			<PromptActionButton role="menuitem" onClick={handleOpenFilePicker}>
+				Прикрепить фото и файлы
+			</PromptActionButton>
 
 			<input type="file" ref={inputRef} onChange={handleFilesChange} multiple hidden accept='image/*,.pdf,.doc,.txt,.html,.css,.js' />
 		</>

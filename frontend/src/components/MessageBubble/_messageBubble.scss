@@ -63,20 +63,7 @@
 		width: 180px;
 	}
 
-	&__attachments {
-		display: flex;
-		flex-wrap: wrap;
-		gap: 8px;
-	}
-
 	&__attachment {
-		overflow: hidden;
-
-		border-radius: 12px;
-		background: transparent;
-
-		
-
 		&-image {
 			display: block;
 

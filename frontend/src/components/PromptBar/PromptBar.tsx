@@ -39,6 +39,7 @@ export function PromptBar({
 	function handleEnterDown(e: React.KeyboardEvent<HTMLTextAreaElement>) {
 		if (e.key !== 'Enter') return;
 		if (e.shiftKey) return;
+		if (e.nativeEvent.isComposing) return;
 		if (isSubmit) return;
 
 		e.preventDefault();
@@ -63,10 +64,6 @@ export function PromptBar({
 		onClearFiles();
 		try {
 			await onSendMessage(prompt, submittedFiles);
-		} catch (error) {
-			console.error('Не удалось отправить сообщение:', error);
-
-			setValue((currentValue) => currentValue || prompt);
 		} finally {
 			setIsSubmit(false);
 		}

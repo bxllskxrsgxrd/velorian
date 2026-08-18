@@ -26,6 +26,8 @@ export function PromptActionsMenu({ onFilesSelect }: PromptActionsMenuProps) {
 	}
 
 	useEffect(() => {
+		if (!open) return;
+
 		function handleClick(e: PointerEvent) {
 			if (!rootRef.current) return;
 
@@ -43,19 +45,26 @@ export function PromptActionsMenu({ onFilesSelect }: PromptActionsMenuProps) {
 			window.removeEventListener('keydown', handleEsc);
 			document.removeEventListener('pointerdown', handleClick);
 		};
-	}, []);
+	}, [open]);
 
 	return (
 		<div ref={rootRef} className="prompt-actions">
-			<IconButton ref={buttonRef} onClick={() => setOpen((v) => !v)}>
+			<IconButton
+				ref={buttonRef}
+				onClick={() => setOpen((v) => !v)}
+				aria-label="Открыть меню действий"
+				aria-haspopup="menu"
+				aria-expanded={open}
+			>
 				<PlusIcon />
 			</IconButton>
 
 			{open && (
-				<div className="prompt-actions__menu">
+				<div className="prompt-actions__menu" role="menu">
 					<AttachFilesAction onFilesSelect={handleFilesSelect} />
-					{/* нижний компонент заменить на аналогичный добавлению файлов*/}
-					<PromptActionButton>Поиск в базе данных</PromptActionButton>
+					<PromptActionButton role="menuitem" disabled title="Функция пока недоступна">
+						Поиск в базе данных
+					</PromptActionButton>
 				</div>
 			)}
 		</div>

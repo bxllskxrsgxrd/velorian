@@ -1,4 +1,4 @@
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 
 export function useDragAndDrop() {
 	const [isDragging, setIsDragging] = useState(false);
@@ -39,11 +39,6 @@ export function useDragAndDrop() {
 			setIsDragging(false);
 		}
 	}
-
-	// вывод массива в консоль
-	useEffect(() => {
-		console.log(files);
-	}, [files]);
 
 	// функция поведения дроп-зоны
 	function handleDrop(e: React.DragEvent<HTMLDivElement>) {

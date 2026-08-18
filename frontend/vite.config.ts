@@ -14,21 +14,16 @@ export default defineConfig({
 
 	css: {
 		preprocessorOptions: {
-			scss: {
-				additionalData: `
-					@use "@/scss/mixins/breakpoint" as *;
-					@use "@/scss/mixins/mixin" as *;
-					@use "@/scss/default/fonts" as *;
-				`,
+				scss: {
+					additionalData: `
+						@use "@/scss/mixins/breakpoint" as *;
+						@use "@/scss/mixins/mixin" as *;
+					`,
 			},
 		},
 	},
 
-	plugins: [
-		react({
-			plugins: ['babel-plugin-react-compiler'],
-		}),
-	],
+	plugins: [react()],
 
 	build: {
 		rollupOptions: {
