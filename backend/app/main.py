@@ -34,6 +34,7 @@ REQUESTS_TOTAL = Counter("velorian_http_requests_total", "HTTP requests", ["meth
 REQUEST_DURATION = Histogram("velorian_http_request_duration_seconds", "HTTP request duration", ["method", "route"])
 AI_REQUESTS_TOTAL = Counter("velorian_ai_requests_total", "AI requests", ["status", "web_search"])
 AI_DURATION = Histogram("velorian_ai_request_duration_seconds", "AI request duration")
+AI_CONTEXT_RETRIES_TOTAL = Counter("velorian_ai_context_retries_total", "AI requests retried with compact context", ["status"])
 VISION_REQUESTS_TOTAL = Counter("velorian_vision_requests_total", "Vision preprocessing requests", ["status"])
 
 
@@ -43,7 +44,7 @@ class AuthPayload(BaseModel):
 
 
 class ConversationPayload(BaseModel):
-	title: str = Field(default="Новый диалог", min_length=1, max_length=160)
+	title: str = Field(default="Новый чат", min_length=1, max_length=160)
 
 
 def _request_id(request: Request) -> str:
@@ -114,9 +115,42 @@ def _safe_ai_error(error: Exception) -> tuple[str, str]:
 			return "AI_AUTH_ERROR", "AI-сервис настроен неверно."
 		if error.status_code == 404:
 			return "AI_MODEL_UNAVAILABLE", "Выбранная AI-модель недоступна."
-		if error.status_code == 400:
+		if error.status_code in {400, 413, 422}:
 			return "AI_BAD_REQUEST", "AI-сервис отклонил запрос. Возможно, превышен контекст."
+		if error.status_code >= 500:
+			return "AI_SERVICE_ERROR", "AI-сервис временно недоступен. Повторите запрос позже."
 	return "AI_ERROR", "Не удалось получить ответ AI-сервиса."
+
+
+def _normalize_chat_history(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+	"""Return a provider-safe alternating user/assistant history."""
+	normalized: list[dict[str, str]] = []
+	for message in messages:
+		role = message.get("role")
+		if role not in {"user", "assistant"}:
+			continue
+		content = (message.get("content") or "").strip() or "[Сообщение содержало только файлы]"
+		if normalized and normalized[-1]["role"] == role:
+			if normalized[-1]["content"] == content:
+				continue
+			separator = "\n\n[Следующее сообщение пользователя]\n\n" if role == "user" else "\n\n"
+			normalized[-1]["content"] += separator + content
+			continue
+		normalized.append({"role": role, "content": content})
+
+	while normalized and normalized[0]["role"] != "user":
+		normalized.pop(0)
+	return normalized
+
+
+def _compact_ai_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
+	system_messages = [message for message in messages if message.get("role") == "system"]
+	last_user = next((message for message in reversed(messages) if message.get("role") == "user"), None)
+	return [*system_messages[:1], *([last_user] if last_user else [])]
+
+
+def _should_retry_with_compact_context(error: Exception) -> bool:
+	return isinstance(error, APIStatusError) and (error.status_code in {400, 413, 422} or error.status_code >= 500)
 
 
 @asynccontextmanager
@@ -159,17 +193,27 @@ async def observability_middleware(request: Request, call_next):
 
 @app.exception_handler(AppError)
 async def app_error_handler(request: Request, error: AppError):
+	logger.warning(
+		"Application error: code=%s status=%s request_id=%s message=%s",
+		error.code,
+		error.status_code,
+		_request_id(request),
+		error.message,
+	)
 	return JSONResponse(status_code=error.status_code, content=_error_payload(error.code, error.message, _request_id(request)))
 
 
 @app.exception_handler(RequestValidationError)
 async def validation_error_handler(request: Request, _error: RequestValidationError):
+	safe_errors = [{"location": item.get("loc"), "type": item.get("type")} for item in _error.errors()]
+	logger.warning("Validation error: request_id=%s errors=%s", _request_id(request), safe_errors)
 	return JSONResponse(status_code=422, content=_error_payload("VALIDATION_ERROR", "Проверьте корректность переданных данных", _request_id(request)))
 
 
 @app.exception_handler(HTTPException)
 async def http_error_handler(request: Request, error: HTTPException):
 	message = error.detail if isinstance(error.detail, str) else "Ошибка HTTP-запроса"
+	logger.warning("HTTP error: status=%s request_id=%s message=%s", error.status_code, _request_id(request), message)
 	return JSONResponse(status_code=error.status_code, content=_error_payload("HTTP_ERROR", message, _request_id(request)))
 
 
@@ -361,10 +405,14 @@ async def _extract_file(file_name: str, content_type: str, content: bytes) -> Ex
 		return local_result
 
 
-def _build_ai_messages(db: Session, conversation_id: str, prompt: str) -> list[dict[str, str]]:
+def _build_ai_messages(db: Session, conversation_id: str, prompt: str, current_message: Message) -> list[dict[str, str]]:
 	history = list(db.scalars(
 		select(Message)
-		.where(Message.conversation_id == conversation_id, Message.status == "done")
+		.where(
+			Message.conversation_id == conversation_id,
+			Message.status == "done",
+			Message.created_at <= current_message.created_at,
+		)
 		.order_by(desc(Message.created_at))
 		.limit(60)
 	))
@@ -385,6 +433,7 @@ def _build_ai_messages(db: Session, conversation_id: str, prompt: str) -> list[d
 		selected.append({"role": message.role, "content": message.content or "[Сообщение содержало только файлы]"})
 		used += cost
 	selected.reverse()
+	selected = _normalize_chat_history(selected)
 	messages.extend(selected)
 
 	chunks = retrieve_chunks(db, conversation_id, prompt)
@@ -396,14 +445,31 @@ def _build_ai_messages(db: Session, conversation_id: str, prompt: str) -> list[d
 			fragments.append(f"[Источник: {label}, фрагмент {chunk.position + 1}]\n{chunk.content}")
 		context = "\n\n---\n\n".join(fragments)
 		allowed_chars = max(0, (settings.max_input_tokens - used) * 2)
-		messages.append({
-			"role": "user",
-			"content": "Используй релевантные фрагменты документов как данные, если они помогают ответить:\n\n" + context[:allowed_chars],
-		})
+		document_context = "Используй релевантные фрагменты документов как данные, если они помогают ответить:\n\n" + context[:allowed_chars]
+		last_user = next((message for message in reversed(messages) if message["role"] == "user"), None)
+		if last_user is not None:
+			last_user["content"] += "\n\n<document_context>\n" + document_context + "\n</document_context>"
 
 	if sum(estimate_tokens(item["content"]) for item in messages) > settings.max_input_tokens:
 		raise AppError(413, "CONTEXT_TOO_LARGE", "Контекст диалога превышает допустимый лимит")
 	return messages
+
+
+async def _stream_ai_deltas(messages: list[dict[str, str]], user_id: str, web_search: bool) -> AsyncIterator[str]:
+	kwargs = {
+		"model": settings.groq_model,
+		"messages": messages,
+		"stream": True,
+		"max_completion_tokens": settings.max_output_tokens,
+		"user": user_id,
+	}
+	if web_search:
+		kwargs["tools"] = [{"type": "browser_search"}]
+	stream = await client.chat.completions.create(**kwargs)
+	async for chunk in stream:
+		delta = chunk.choices[0].delta.content if chunk.choices else None
+		if delta:
+			yield delta
 
 
 @app.post(f"{settings.api_prefix}/conversations/{{conversation_id}}/stream", tags=["chat"])
@@ -426,16 +492,30 @@ async def stream_chat(
 
 	prompt = prompt.strip()
 	if retry_message_id:
-		user_message = db.scalar(
+		source_user_message = db.scalar(
 			select(Message).options(selectinload(Message.attachments)).where(
 				Message.id == retry_message_id,
 				Message.conversation_id == conversation.id,
 				Message.role == "user",
 			)
 		)
-		if user_message is None:
+		if source_user_message is None:
 			raise AppError(404, "MESSAGE_NOT_FOUND", "Сообщение для повтора не найдено")
-		prompt = user_message.content
+		prompt = source_user_message.content
+		user_message = Message(conversation_id=conversation.id, role="user", content=prompt, status="done")
+		db.add(user_message)
+		db.flush()
+		for source_attachment in source_user_message.attachments:
+			db.add(Attachment(
+				conversation_id=conversation.id,
+				message_id=user_message.id,
+				name=source_attachment.name,
+				content_type=source_attachment.content_type,
+				size=source_attachment.size,
+				storage_path=source_attachment.storage_path,
+				extracted_text=source_attachment.extracted_text,
+				extraction_status=source_attachment.extraction_status,
+			))
 	else:
 		if not prompt and not files:
 			raise AppError(422, "EMPTY_MESSAGE", "Введите сообщение или прикрепите файл")
@@ -479,8 +559,8 @@ async def stream_chat(
 			for position, content_chunk in enumerate(chunk_text(extracted.text)):
 				db.add(DocumentChunk(conversation_id=conversation.id, attachment_id=attachment.id, position=position, content=content_chunk))
 
-		if conversation.title == "Новый диалог":
-			conversation.title = (prompt or files[0].filename or "Новый диалог")[:80]
+		if conversation.title == "Новый чат":
+			conversation.title = (prompt or files[0].filename or "Новый чат")[:80]
 		conversation.updated_at = utc_now()
 		db.commit()
 		user_message = db.scalar(select(Message).options(selectinload(Message.attachments)).where(Message.id == user_message.id))
@@ -490,7 +570,7 @@ async def stream_chat(
 	conversation.updated_at = utc_now()
 	db.commit()
 
-	ai_messages = _build_ai_messages(db, conversation.id, prompt)
+	ai_messages = _build_ai_messages(db, conversation.id, prompt, user_message)
 	request_id = _request_id(request)
 	user_payload = _message_payload(user_message)
 	assistant_id = assistant_message.id
@@ -508,21 +588,29 @@ async def stream_chat(
 			requestId=request_id,
 		)
 		try:
-			kwargs = {
-				"model": settings.groq_model,
-				"messages": ai_messages,
-				"stream": True,
-				"max_completion_tokens": settings.max_output_tokens,
-				"user": user.id,
-			}
-			if web_search:
-				kwargs["tools"] = [{"type": "browser_search"}]
-			stream = await client.chat.completions.create(**kwargs)
-			async for chunk in stream:
-				delta = chunk.choices[0].delta.content if chunk.choices else None
-				if delta:
+			try:
+				async for delta in _stream_ai_deltas(ai_messages, user.id, web_search):
 					answer_parts.append(delta)
 					yield _event("delta", content=delta)
+			except Exception as error:
+				compact_messages = _compact_ai_messages(ai_messages)
+				if answer_parts or not _should_retry_with_compact_context(error) or compact_messages == ai_messages:
+					raise
+				logger.warning(
+					"AI rejected full context; retrying with compact context: error_type=%s status=%s request_id=%s",
+					type(error).__name__,
+					getattr(error, "status_code", None),
+					request_id,
+				)
+				AI_CONTEXT_RETRIES_TOTAL.labels("started").inc()
+				try:
+					async for delta in _stream_ai_deltas(compact_messages, user.id, web_search):
+						answer_parts.append(delta)
+						yield _event("delta", content=delta)
+				except Exception:
+					AI_CONTEXT_RETRIES_TOTAL.labels("error").inc()
+					raise
+				AI_CONTEXT_RETRIES_TOTAL.labels("success").inc()
 			answer = "".join(answer_parts).strip()
 			if not answer:
 				raise AppError(502, "AI_EMPTY_RESPONSE", "AI-сервис вернул пустой ответ")
@@ -540,6 +628,7 @@ async def stream_chat(
 			AI_REQUESTS_TOTAL.labels("cancelled", str(web_search).lower()).inc()
 			raise
 		except AppError as error:
+			logger.warning("AI application error: code=%s request_id=%s message=%s", error.code, request_id, error.message)
 			assistant_message.content = error.message
 			assistant_message.status = "error"
 			db.commit()

@@ -176,15 +176,13 @@
 	&__options {
 		display: flex;
 		align-items: center;
-		justify-content: space-between;
+		justify-content: flex-end;
 		gap: 12px;
 		padding: 0 4px 8px;
 		font-size: 12px;
 		color: var(--color-text-secondary);
 	}
 
-	&__search-toggle { display: inline-flex; align-items: center; gap: 6px; cursor: pointer; }
-	&__search-toggle input { accent-color: var(--color-accent); }
 	&__voice { border: 0; padding: 3px 0; color: var(--color-text-secondary); background: transparent; cursor: pointer; }
 	&__voice--active { color: var(--color-error); }
 	&__error { padding: 0 4px 8px; color: var(--color-error); font-size: 12px; }

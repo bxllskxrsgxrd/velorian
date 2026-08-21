@@ -3,6 +3,7 @@ import { SendIcon } from '../icons/SendIcon';
 import { PromptActionsMenu } from '../PromptActionsMenu/PromptActionsMenu';
 import { AutoResizeTextarea } from '../ui/AutoResizeTextarea/AutoResizeTextarea';
 import { IconButton } from '../ui/IconButton/IconButton';
+import { reportError } from '../../utils/reportError';
 import './_promptBar.scss';
 import { AttachmentPreview } from './AttachmentPreview';
 
@@ -35,6 +36,15 @@ type PromptBarProps = {
 	onClearFiles: () => void;
 };
 
+const WEB_SEARCH_MARKER_TEXT = '🌐 Поиск в сети';
+export const WEB_SEARCH_MARKER = `${WEB_SEARCH_MARKER_TEXT} `;
+
+function removeWebSearchMarker(value: string) {
+	if (value.startsWith(WEB_SEARCH_MARKER)) return value.slice(WEB_SEARCH_MARKER.length);
+	if (value.startsWith(WEB_SEARCH_MARKER_TEXT)) return value.slice(WEB_SEARCH_MARKER_TEXT.length);
+	return value;
+}
+
 export function PromptBar({
 	files,
 	fileError,
@@ -56,7 +66,8 @@ export function PromptBar({
 		webkitSpeechRecognition?: SpeechRecognitionConstructor;
 	};
 	const voiceInputAvailable = Boolean(speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition);
-	const isSendDisabled = isGenerating || (!value.trim() && files.length === 0);
+	const promptValue = webSearch ? removeWebSearchMarker(value) : value;
+	const isSendDisabled = isGenerating || (!promptValue.trim() && files.length === 0);
 
 	useEffect(() => () => {
 		const recognition = recognitionRef.current;
@@ -69,7 +80,20 @@ export function PromptBar({
 	}, []);
 
 	function handleChange(event: React.ChangeEvent<HTMLTextAreaElement>) {
-		setValue(event.currentTarget.value);
+		const nextValue = event.currentTarget.value;
+		if (webSearch && !nextValue.startsWith(WEB_SEARCH_MARKER_TEXT)) {
+			const currentPrompt = removeWebSearchMarker(value);
+			const promptPosition = currentPrompt ? nextValue.lastIndexOf(currentPrompt) : -1;
+			setWebSearch(false);
+			setValue(promptPosition >= 0 ? nextValue.slice(promptPosition) : nextValue.startsWith('🌐') ? currentPrompt : nextValue);
+			return;
+		}
+		setValue(nextValue);
+	}
+
+	function handleWebSearchChange(enabled: boolean) {
+		setWebSearch(enabled);
+		setValue((current) => enabled ? `${WEB_SEARCH_MARKER}${removeWebSearchMarker(current)}` : removeWebSearchMarker(current));
 	}
 
 	function handleEnterDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -81,14 +105,18 @@ export function PromptBar({
 	async function handleSubmit(event: React.SyntheticEvent<HTMLFormElement>) {
 		event.preventDefault();
 		if (isSendDisabled) return;
-		const prompt = value.trim();
+		const prompt = removeWebSearchMarker(value).trim();
 		const submittedFiles = [...files];
+		const submittedWithWebSearch = webSearch;
 		setValue('');
+		setWebSearch(false);
 		onClearFiles();
 		try {
-			await onSendMessage(prompt, submittedFiles, webSearch);
-		} catch {
-			setValue(prompt);
+			await onSendMessage(prompt, submittedFiles, submittedWithWebSearch);
+		} catch (error) {
+			reportError('Не удалось отправить сообщение', error);
+			setWebSearch(submittedWithWebSearch);
+			setValue(submittedWithWebSearch ? `${WEB_SEARCH_MARKER}${prompt}` : prompt);
 			onFilesSelect(submittedFiles);
 		}
 	}
@@ -106,7 +134,7 @@ export function PromptBar({
 		recognition.continuous = false;
 		recognition.onresult = (event) => {
 			const transcript = event.results[0]?.[0]?.transcript ?? '';
-			setValue((current) => `${current}${current && transcript ? ' ' : ''}${transcript}`);
+			setValue((current) => `${current}${current && transcript && !current.endsWith(' ') ? ' ' : ''}${transcript}`);
 		};
 		recognition.onend = () => {
 			recognitionRef.current = null;
@@ -133,19 +161,17 @@ export function PromptBar({
 				</div>
 			)}
 			{fileError && <div className="prompt-bar__error" role="alert">{fileError}</div>}
-			<div className="prompt-bar__options">
-				<label className="prompt-bar__search-toggle">
-					<input type="checkbox" checked={webSearch} onChange={(event) => setWebSearch(event.target.checked)} />
-					<span>Веб-поиск</span>
-				</label>
-				{voiceInputAvailable && (
+			{voiceInputAvailable && (
+				<div className="prompt-bar__options">
 					<button className={isListening ? 'prompt-bar__voice prompt-bar__voice--active' : 'prompt-bar__voice'} type="button" onClick={toggleVoiceInput}>
 						{isListening ? 'Остановить запись' : 'Голосовой ввод'}
 					</button>
-				)}
-			</div>
+				</div>
+			)}
 			<div className="prompt-bar__input-container">
-				<div className="prompt-bar__actions"><PromptActionsMenu onFilesSelect={onFilesSelect} /></div>
+				<div className="prompt-bar__actions">
+					<PromptActionsMenu onFilesSelect={onFilesSelect} webSearch={webSearch} onWebSearchChange={handleWebSearchChange} />
+				</div>
 				<AutoResizeTextarea value={value} onChange={handleChange} onMultilineChange={setIsMultiline} onKeyDown={handleEnterDown} />
 				<div className="prompt-bar__send">
 					{isGenerating ? (

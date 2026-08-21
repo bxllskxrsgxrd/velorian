@@ -92,9 +92,24 @@ export function MessageBubble({ message, onOpenAttachment, onRetry }: MessageBub
 			)}
 			{!isUser && !isPending && !isStreaming && (
 				<div className="message__actions">
-					{message.content && <button type="button" onClick={() => void navigator.clipboard.writeText(message.content)}>Копировать</button>}
-					{message.content && 'speechSynthesis' in window && <button type="button" onClick={() => window.speechSynthesis.speak(new SpeechSynthesisUtterance(message.content))}>Озвучить</button>}
-					{(isError || isCancelled) && onRetry && <button type="button" onClick={onRetry}>Повторить</button>}
+					{message.content && (
+						<button type="button" onClick={() => void navigator.clipboard.writeText(message.content)}>
+							Копировать
+						</button>
+					)}
+					{message.content && 'speechSynthesis' in window && (
+						<button
+							type="button"
+							onClick={() => window.speechSynthesis.speak(new SpeechSynthesisUtterance(message.content))}
+						>
+							Озвучить
+						</button>
+					)}
+					{(isError || isCancelled) && onRetry && (
+						<button type="button" onClick={onRetry}>
+							Повторить
+						</button>
+					)}
 				</div>
 			)}
 		</div>

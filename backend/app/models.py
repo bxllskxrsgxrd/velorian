@@ -31,7 +31,7 @@ class Conversation(Base):
 
 	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
 	user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
-	title: Mapped[str] = mapped_column(String(160), default="Новый диалог")
+	title: Mapped[str] = mapped_column(String(160), default="Новый чат")
 	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 

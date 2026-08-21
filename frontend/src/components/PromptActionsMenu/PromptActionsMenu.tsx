@@ -4,12 +4,15 @@ import { IconButton } from '../ui/IconButton/IconButton';
 
 import './_promptActionsMenu.scss';
 import { AttachFilesAction } from './PromptActionsMenuButtons/AttachFilesAction';
+import { PromptActionButton } from './PromptActionsMenuButtons/PromptActionButton';
 
 type PromptActionsMenuProps = {
 	onFilesSelect: (files: File[]) => void;
+	webSearch: boolean;
+	onWebSearchChange: (enabled: boolean) => void;
 };
 
-export function PromptActionsMenu({ onFilesSelect }: PromptActionsMenuProps) {
+export function PromptActionsMenu({ onFilesSelect, webSearch, onWebSearchChange }: PromptActionsMenuProps) {
 	const [open, setOpen] = useState(false);
 	const buttonRef = useRef<HTMLButtonElement>(null);
 	const rootRef = useRef<HTMLDivElement>(null);
@@ -21,6 +24,11 @@ export function PromptActionsMenu({ onFilesSelect }: PromptActionsMenuProps) {
 
 	function handleFilesSelect(files: File[]) {
 		onFilesSelect(files);
+		closeMenu();
+	}
+
+	function handleWebSearchClick() {
+		onWebSearchChange(!webSearch);
 		closeMenu();
 	}
 
@@ -61,6 +69,14 @@ export function PromptActionsMenu({ onFilesSelect }: PromptActionsMenuProps) {
 			{open && (
 				<div className="prompt-actions__menu" role="menu">
 					<AttachFilesAction onFilesSelect={handleFilesSelect} />
+					<PromptActionButton
+						role="menuitemcheckbox"
+						aria-checked={webSearch}
+						className={webSearch ? 'prompt-action-btn--active' : ''}
+						onClick={handleWebSearchClick}
+					>
+						{webSearch ? 'Отключить поиск в сети' : 'Поиск в сети'}
+					</PromptActionButton>
 				</div>
 			)}
 		</div>

@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import type { PreviewFile } from '../../types/chat';
 import { isTextPreview } from '../../utils/files';
+import { reportError } from '../../utils/reportError';
 import { DeleteAttachmentIcon } from '../icons/DeleteAttachmentIcon';
 import { IconButton } from '../ui/IconButton/IconButton';
 import './_filePreviewModal.scss';
@@ -42,11 +43,12 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 			.catch((error: unknown) => {
 				if (error instanceof DOMException && error.name === 'AbortError') return;
 
+				reportError('Не удалось загрузить превью файла', error, { fileName: file.name });
 				setTextPreview({ url: file.url, content: 'Не удалось прочитать файл.' });
 			});
 
 		return () => controller.abort();
-	}, [file.url, isText]);
+	}, [file.name, file.url, isText]);
 
 	const renderFilePreview = () => {
 		if (isPdf) {

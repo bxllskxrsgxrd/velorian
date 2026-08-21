@@ -1,3 +1,5 @@
+import { reportError } from '../utils/reportError';
+
 export const ACCENT_THEMES = ['pine', 'terracotta', 'plum'] as const;
 
 export type AccentTheme = (typeof ACCENT_THEMES)[number];
@@ -21,7 +23,8 @@ export function getStoredAccentTheme(): AccentTheme {
 		const storedTheme = window.localStorage.getItem(ACCENT_THEME_STORAGE_KEY);
 
 		return isAccentTheme(storedTheme) ? storedTheme : DEFAULT_ACCENT_THEME;
-	} catch {
+	} catch (error) {
+		reportError('Не удалось прочитать тему из localStorage', error);
 		return DEFAULT_ACCENT_THEME;
 	}
 }
@@ -32,7 +35,8 @@ export function setAccentTheme(theme: AccentTheme, persist = true) {
 	if (persist) {
 		try {
 			window.localStorage.setItem(ACCENT_THEME_STORAGE_KEY, theme);
-		} catch {
+		} catch (error) {
+			reportError('Не удалось сохранить тему в localStorage', error, { theme });
 			// Тема всё равно применяется к текущей сессии, даже если storage недоступен.
 		}
 	}

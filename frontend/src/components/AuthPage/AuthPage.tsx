@@ -1,6 +1,7 @@
 import { useState, type FormEvent } from 'react';
 import { authenticate } from '../../api/chatApi';
 import type { AuthUser } from '../../types/chat';
+import { reportError } from '../../utils/reportError';
 import './_authPage.scss';
 
 type AuthPageProps = {
@@ -21,6 +22,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
 		try {
 			onAuthenticated(await authenticate(mode, email, password));
 		} catch (requestError) {
+			reportError('Ошибка авторизации', requestError, { mode });
 			setError(requestError instanceof Error ? requestError.message : 'Не удалось войти');
 		} finally {
 			setLoading(false);
@@ -32,7 +34,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
 			<form className="auth-card" onSubmit={handleSubmit}>
 				<div className="auth-card__eyebrow">VELORIAN</div>
 				<h1>{mode === 'login' ? 'С возвращением' : 'Создать аккаунт'}</h1>
-				<p>Диалоги и документы будут храниться в вашем локальном пространстве.</p>
+				<p>Диалоги и документы будут храниться в вашем локальном пространстве</p>
 
 				<label>
 					<span>Email</span>

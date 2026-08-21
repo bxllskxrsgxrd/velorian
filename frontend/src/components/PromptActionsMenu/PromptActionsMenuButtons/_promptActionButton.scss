@@ -27,6 +27,20 @@
 		background: var(--color-accent-soft-hover);
 	}
 
+	&--active {
+		color: var(--color-accent);
+		background: var(--color-accent-soft);
+
+		&::before {
+			content: '';
+			width: 7px;
+			height: 7px;
+			flex: 0 0 7px;
+			border-radius: var(--radius-round);
+			background: var(--color-accent);
+		}
+	}
+
 	&:focus-visible {
 		outline: 1px solid var(--color-accent-focus);
 		outline-offset: 2px;

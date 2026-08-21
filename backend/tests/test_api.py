@@ -1,5 +1,8 @@
 from types import SimpleNamespace
 
+import httpx
+from groq import APIStatusError
+
 
 class FakeCompletions:
 	async def create(self, **kwargs):
@@ -12,8 +15,27 @@ class FakeCompletions:
 
 
 class FakeGroq:
+	def __init__(self, completions=None):
+		self.chat = SimpleNamespace(completions=completions or FakeCompletions())
+
+
+class RecordingCompletions(FakeCompletions):
 	def __init__(self):
-		self.chat = SimpleNamespace(completions=FakeCompletions())
+		self.calls: list[dict] = []
+
+	async def create(self, **kwargs):
+		self.calls.append(kwargs)
+		return await super().create(**kwargs)
+
+
+class ContextRejectingCompletions(RecordingCompletions):
+	async def create(self, **kwargs):
+		self.calls.append(kwargs)
+		if len(kwargs["messages"]) > 2:
+			request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+			response = httpx.Response(500, request=request)
+			raise APIStatusError("context rejected", response=response, body={"error": "test"})
+		return await FakeCompletions.create(self, **kwargs)
 
 
 def test_auth_session_and_structured_error(client):
@@ -59,7 +81,7 @@ def test_streaming_and_retry(authenticated_client, monkeypatch):
 	import app.main as main_module
 
 	monkeypatch.setattr(main_module, "client", FakeGroq())
-	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Новый диалог"}).json()["conversation"]["id"]
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Новый чат"}).json()["conversation"]["id"]
 
 	with authenticated_client.stream(
 		"POST",
@@ -76,6 +98,79 @@ def test_streaming_and_retry(authenticated_client, monkeypatch):
 	loaded = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]
 	assert [message["role"] for message in loaded["messages"]] == ["user", "assistant"]
 	assert loaded["messages"][-1]["content"] == "Привет, мир!"
+
+
+def test_normalizes_broken_history():
+	from app.main import _normalize_chat_history
+
+	normalized = _normalize_chat_history([
+		{"role": "assistant", "content": "orphan"},
+		{"role": "user", "content": "Первый вопрос"},
+		{"role": "assistant", "content": "Ответ"},
+		{"role": "user", "content": "Повтори"},
+		{"role": "user", "content": "Повтори"},
+		{"role": "user", "content": "И уточни детали"},
+	])
+
+	assert [message["role"] for message in normalized] == ["user", "assistant", "user"]
+	assert normalized[-1]["content"].count("Повтори") == 1
+	assert "И уточни детали" in normalized[-1]["content"]
+
+
+def test_retries_rejected_history_with_compact_context(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	completions = ContextRejectingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Контекст"}).json()["conversation"]["id"]
+
+	first = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Первый вопрос"},
+	)
+	assert '"type": "done"' in first.text
+
+	second = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Продолжи"},
+	)
+
+	assert '"type": "done"' in second.text
+	assert len(completions.calls) == 3
+	assert [message["role"] for message in completions.calls[1]["messages"]] == ["system", "user", "assistant", "user"]
+	assert [message["role"] for message in completions.calls[2]["messages"]] == ["system", "user"]
+
+
+def test_retry_creates_a_new_user_message(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Повтор"}).json()["conversation"]["id"]
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Исходный вопрос"},
+		files={"files": ("notes.txt", b"context", "text/plain")},
+	)
+	conversation = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]
+	user_message_id = conversation["messages"][0]["id"]
+
+	retried = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"retry_message_id": user_message_id},
+	)
+
+	assert '"type": "done"' in retried.text
+	updated_messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
+	assert [message["role"] for message in updated_messages] == ["user", "assistant", "user", "assistant"]
+	assert updated_messages[0]["id"] != updated_messages[2]["id"]
+	assert updated_messages[0]["content"] == updated_messages[2]["content"] == "Исходный вопрос"
+	assert updated_messages[0]["attachments"][0]["name"] == updated_messages[2]["attachments"][0]["name"] == "notes.txt"
+	assert updated_messages[0]["attachments"][0]["id"] != updated_messages[2]["attachments"][0]["id"]
+	assert [[message["role"] for message in call["messages"]] for call in completions.calls] == [
+		["system", "user"],
+		["system", "user", "assistant", "user"],
+	]
 
 
 def test_rejects_unsupported_file(authenticated_client):
