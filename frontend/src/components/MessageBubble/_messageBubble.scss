@@ -19,6 +19,9 @@
 	}
 
 	&--assistant {
+		flex-direction: column;
+		align-items: stretch;
+		gap: 10px;
 		justify-content: flex-start;
 
 		.message__content {
@@ -95,7 +98,19 @@
 		display: flex;
 		flex-direction: column;
 		gap: 8px;
-		width: 180px;
+		width: min(100%, 480px);
+	}
+
+	&__download {
+		display: grid;
+		place-items: center;
+		flex: 0 0 42px;
+		align-self: stretch;
+		border: 0;
+		border-left: 1px solid var(--color-border);
+		color: var(--color-accent);
+		background: transparent;
+		&:hover { background: var(--color-accent-soft-hover); }
 	}
 
 	&__attachment {
@@ -112,16 +127,14 @@
 		}
 
 		&-file {
-			min-width: 180px;
-			padding: 10px 12px;
-
+			min-width: 0;
+			width: 100%;
 			border-radius: var(--radius-medium);
 			border: 1px solid var(--color-border);
 			background: var(--color-bg-elevated);
 
 			display: flex;
-			align-items: center;
-			gap: 6px;
+			overflow: hidden;
 
 			font-family: var(--main-font);
 
@@ -129,6 +142,22 @@
 				flex-shrink: 0;
 				fill: var(--color-accent);
 			}
+		}
+
+		&-main {
+			min-width: 0;
+			flex: 1;
+			display: flex;
+			align-items: center;
+			gap: 8px;
+			padding: 10px 12px;
+			border: 0;
+			color: inherit;
+			background: transparent;
+			font: inherit;
+			text-align: left;
+			cursor: pointer;
+			&:hover { background: var(--color-accent-soft-hover); }
 		}
 
 		&-info {
@@ -181,6 +210,31 @@
 				outline-offset: 3px;
 			}
 		}
+	}
+
+	&__user-actions {
+		display: flex;
+		align-items: center;
+		gap: 6px;
+		button { display: grid; place-items: center; min-width: 28px; height: 28px; padding: 0 6px; border: 0; border-radius: 8px; color: var(--color-text-secondary); background: transparent; cursor: pointer; }
+		button:hover:not(:disabled) { color: var(--color-accent); background: var(--color-accent-soft-hover); }
+		button:disabled { opacity: .35; cursor: default; }
+	}
+
+	&__branches { display: flex; align-items: center; gap: 2px; color: var(--color-text-secondary); font-size: 12px; }
+
+	&__editor {
+		width: min(86%, 680px);
+		padding: 10px;
+		border: 1px solid var(--color-accent);
+		border-radius: var(--radius-large);
+		background: var(--color-bg-user-message);
+		box-shadow: var(--focus-ring);
+		textarea { width: 100%; min-height: 96px; resize: vertical; padding: 8px; border: 0; outline: none; color: var(--color-text-primary); background: transparent; line-height: 1.5; }
+		> div { display: flex; justify-content: flex-end; gap: 6px; }
+		button { padding: 7px 11px; border: 1px solid var(--color-border); border-radius: 9px; color: var(--color-text-primary); background: var(--color-bg-elevated); cursor: pointer; }
+		button:last-child { color: var(--color-on-accent); border-color: transparent; background: var(--color-accent); }
+		button:disabled { opacity: .4; cursor: default; }
 	}
 
 	@include mobile {

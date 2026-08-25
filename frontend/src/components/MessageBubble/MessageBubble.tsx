@@ -1,7 +1,9 @@
+import { useState } from 'react';
 import { CHAT_MESSAGE_STATUSES } from '../../constants/chatMessageStatuses';
 import { CHAT_ROLES } from '../../constants/chatRoles';
 import type { ChatAttachment, ChatMessage } from '../../types/chat';
 import { SubmitLoadingIcon } from '../icons/SubmitLoadingIcon/SubmitLoadingIcon';
+import { EditIcon } from '../icons/AppIcons';
 import './_messageBubble.scss';
 import { AssistantMessageContent } from './AssistantMessageContent';
 import { MessageAttachment } from './MessageAttachment';
@@ -11,9 +13,13 @@ type MessageBubbleProps = {
 	message: ChatMessage;
 	onOpenAttachment: (attachment: ChatAttachment) => void;
 	onRetry?: () => void;
+	onEdit?: (content: string) => void;
+	branch?: { index: number; total: number; onPrevious?: () => void; onNext?: () => void };
 };
 
-export function MessageBubble({ message, onOpenAttachment, onRetry }: MessageBubbleProps) {
+export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, branch }: MessageBubbleProps) {
+	const [isEditing, setIsEditing] = useState(false);
+	const [draft, setDraft] = useState(message.content);
 	const isUser = message.role === CHAT_ROLES.USER;
 
 	const isPending = !isUser && message.status === CHAT_MESSAGE_STATUSES.PENDING && !message.content;
@@ -44,7 +50,7 @@ export function MessageBubble({ message, onOpenAttachment, onRetry }: MessageBub
 		.join(' ');
 
 	return (
-		<div className={messageClassName}>
+		<div className={messageClassName} id={`message-${message.id}`}>
 			{hasImages && (
 				<div className="message__media">
 					{imageAttachments?.map((attachment) => (
@@ -63,14 +69,7 @@ export function MessageBubble({ message, onOpenAttachment, onRetry }: MessageBub
 			{hasFiles && (
 				<div className="message__files">
 					{fileAttachments?.map((attachment) => (
-						<button
-							className="message__attachment-button"
-							key={attachment.id}
-							type="button"
-							onClick={() => onOpenAttachment(attachment)}
-						>
-							<MessageAttachment attachment={attachment} />
-						</button>
+						<MessageAttachment key={attachment.id} attachment={attachment} onOpen={() => onOpenAttachment(attachment)} />
 					))}
 				</div>
 			)}
@@ -81,13 +80,24 @@ export function MessageBubble({ message, onOpenAttachment, onRetry }: MessageBub
 				</div>
 			)}
 
-			{hasText && (
+			{isUser && isEditing ? (
+				<div className="message__editor">
+					<textarea autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} />
+					<div><button type="button" onClick={() => { setDraft(message.content); setIsEditing(false); }}>Отмена</button><button type="button" disabled={!draft.trim() || draft.trim() === message.content.trim()} onClick={() => { onEdit?.(draft.trim()); setIsEditing(false); }}>Отправить</button></div>
+				</div>
+			) : hasText && (
 				<div className={contentClassName}>
 					{isUser ? (
 						<UserMessageContent content={message.content} />
 					) : (
 						<AssistantMessageContent content={message.content} isStreaming={isStreaming} />
 					)}
+				</div>
+			)}
+			{isUser && !isEditing && (onEdit || (branch && branch.total > 1)) && (
+				<div className="message__user-actions">
+					{branch && branch.total > 1 && <div className="message__branches"><button type="button" onClick={branch.onPrevious} disabled={!branch.onPrevious} aria-label="Предыдущая версия">‹</button><span>{branch.index + 1} / {branch.total}</span><button type="button" onClick={branch.onNext} disabled={!branch.onNext} aria-label="Следующая версия">›</button></div>}
+					{onEdit && <button type="button" onClick={() => { setDraft(message.content); setIsEditing(true); }} aria-label="Редактировать сообщение"><EditIcon size={15} /></button>}
 				</div>
 			)}
 			{!isUser && !isPending && !isStreaming && (isError || isCancelled) && onRetry && (

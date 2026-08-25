@@ -1,8 +1,10 @@
 import { useEffect, useState } from 'react';
 import type { PreviewFile } from '../../types/chat';
+import { getFileCodeLanguage } from '../../utils/codeLanguage';
 import { isTextPreview } from '../../utils/files';
 import { reportError } from '../../utils/reportError';
 import { DeleteAttachmentIcon } from '../icons/DeleteAttachmentIcon';
+import { HighlightedCode } from '../MessageBubble/AssistantMessageContent';
 import { IconButton } from '../ui/IconButton/IconButton';
 import './_filePreviewModal.scss';
 
@@ -58,7 +60,14 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 		if (isText) {
 			const textContent = textPreview?.url === file.url ? textPreview.content : 'Загрузка…';
 
-			return <pre className="file-preview__text">{textContent}</pre>;
+			return (
+				<HighlightedCode
+					code={textContent}
+					language={getFileCodeLanguage(file.name)}
+					className="file-preview__text"
+					ariaLabel={`Содержимое файла ${file.name}`}
+				/>
+			);
 		}
 
 		return <div className="file-preview__empty">Этот тип файла нельзя показать прямо в браузере</div>;

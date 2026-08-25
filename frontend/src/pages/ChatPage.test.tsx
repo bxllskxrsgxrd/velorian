@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, waitFor } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatPage } from './ChatPage';
 
@@ -39,7 +39,9 @@ describe('ChatPage retry', () => {
 
 		fireEvent.click(await screen.findByRole('button', { name: 'Повторить' }));
 
-		await waitFor(() => expect(screen.getAllByText('Повтори меня')).toHaveLength(2));
+		const messageList = document.querySelector('.message-list');
+		expect(messageList).not.toBeNull();
+		await waitFor(() => expect(within(messageList as HTMLElement).getAllByText('Повтори меня')).toHaveLength(2));
 		expect(api.streamChat).toHaveBeenCalledWith(expect.objectContaining({ retryMessageId: 'user-1' }));
 	});
 });

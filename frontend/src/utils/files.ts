@@ -39,5 +39,5 @@ export function attachmentToPreviewFile(attachment: ChatAttachment): PreviewFile
 }
 
 export function isTextPreview(file: PreviewFile) {
-	return file.type.startsWith('text/') || /\.(txt|md|json|csv|log)$/i.test(file.name);
+	return file.type.startsWith('text/') || /\.(txt|md|json|csv|log|html|css|scss|sass|less|js|jsx|ts|tsx|xml|yaml|yml|toml|ini|env|py|rb|php|java|kt|kts|swift|go|rs|c|h|cpp|hpp|cs|sql|sh|bash|zsh|vue|svelte)$/i.test(file.name);
 }

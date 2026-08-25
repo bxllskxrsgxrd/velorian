@@ -1,3 +1,4 @@
+import json
 from types import SimpleNamespace
 
 import httpx
@@ -26,6 +27,16 @@ class RecordingCompletions(FakeCompletions):
 	async def create(self, **kwargs):
 		self.calls.append(kwargs)
 		return await super().create(**kwargs)
+
+
+class FixedCompletions:
+	def __init__(self, content: str):
+		self.content = content
+
+	async def create(self, **kwargs):
+		async def chunks():
+			yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=self.content))])
+		return chunks()
 
 
 class ContextRejectingCompletions(RecordingCompletions):
@@ -171,6 +182,98 @@ def test_retry_creates_a_new_user_message(authenticated_client, monkeypatch):
 		["system", "user"],
 		["system", "user", "assistant", "user"],
 	]
+
+
+def test_edit_creates_branch_and_can_switch_versions(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	monkeypatch.setattr(main_module, "client", FakeGroq())
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Ветки"}).json()["conversation"]["id"]
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Первая версия"})
+	original = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"][0]
+
+	edited = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Изменённая версия", "edit_message_id": original["id"]},
+	)
+	assert '"type": "done"' in edited.text
+	messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
+	user_versions = [message for message in messages if message["role"] == "user"]
+	assert len(user_versions) == 2
+	assert user_versions[0]["branchGroupId"] == user_versions[1]["branchGroupId"]
+	assert [message["isActive"] for message in user_versions] == [False, True]
+
+	activated = authenticated_client.patch(f"/api/messages/{original['id']}/activate")
+	assert activated.status_code == 200
+	user_versions = [
+		message
+		for message in authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
+		if message["role"] == "user"
+	]
+	assert [message["isActive"] for message in user_versions] == [True, False]
+
+
+def test_generated_file_is_attached_and_downloadable(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	answer = "```file:hello.py\nprint('Velorian')\n```\n\nФайл готов."
+	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(answer)))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Новый чат"}).json()["conversation"]["id"]
+	response = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Создай файл hello.py"},
+	)
+	done = next(json.loads(line) for line in response.text.splitlines() if '"type": "done"' in line)
+	attachment = done["message"]["attachments"][0]
+	assert done["message"]["content"] == "Файл готов."
+	assert attachment["name"] == "hello.py"
+	assert attachment["generated"] is True
+	download = authenticated_client.get(attachment["downloadUrl"])
+	assert download.status_code == 200
+	assert download.content == b"print('Velorian')"
+	assert "attachment" in download.headers["content-disposition"]
+
+
+def test_code_request_does_not_create_file_without_explicit_file_intent(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	answer = "```file:app.js\nconsole.log('Hello');\n```\n\nГотово."
+	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(answer)))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Новый чат"}).json()["conversation"]["id"]
+	response = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Напиши простенький скрипт на node js"},
+	)
+	done = next(json.loads(line) for line in response.text.splitlines() if '"type": "done"' in line)
+	assert done["message"]["attachments"] == []
+	assert done["message"]["content"] == "```javascript\nconsole.log('Hello');\n```\n\nГотово."
+
+
+def test_automatic_title_is_short_and_has_no_emoji(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	monkeypatch.setattr(main_module, "client", FakeGroq())
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Новый чат"}).json()["conversation"]["id"]
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "🚀 Подробно расскажи про архитектуру большого современного приложения и способы тестирования"},
+	)
+	title = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["title"]
+	assert title == "Архитектура большого современного приложения"
+	assert len(title) <= 48
+
+
+def test_automatic_title_summarizes_code_request():
+	from app.main import _clean_title
+
+	assert _clean_title("напиши простенький скрипт на node js") == "Простой скрипт на Node.js"
+
+
+def test_sanitizes_heading_emoji_without_touching_code():
+	from app.main import _sanitize_markdown_headings
+
+	content = "##\u202f1️⃣ 🚀 Настройка\n\n```md\n## 🚀 Код\n```"
+	assert _sanitize_markdown_headings(content) == "## 1. Настройка\n\n```md\n## 🚀 Код\n```"
 
 
 def test_rejects_unsupported_file(authenticated_client):

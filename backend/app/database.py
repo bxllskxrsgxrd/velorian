@@ -1,6 +1,6 @@
 from collections.abc import Generator
 
-from sqlalchemy import create_engine, event
+from sqlalchemy import create_engine, event, inspect, text
 from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 
 from .config import settings
@@ -27,6 +27,17 @@ def init_database() -> None:
 	from . import models  # noqa: F401
 
 	Base.metadata.create_all(bind=engine)
+	columns = {column["name"] for column in inspect(engine).get_columns("messages")}
+	boolean_default = "1" if engine.dialect.name == "sqlite" else "TRUE"
+	statements = {
+		"branch_group_id": "ALTER TABLE messages ADD COLUMN branch_group_id VARCHAR(36)",
+		"reply_to_id": "ALTER TABLE messages ADD COLUMN reply_to_id VARCHAR(36)",
+		"is_active": f"ALTER TABLE messages ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT {boolean_default}",
+	}
+	with engine.begin() as connection:
+		for column, statement in statements.items():
+			if column not in columns:
+				connection.execute(text(statement))
 
 
 def get_db() -> Generator[Session, None, None]:

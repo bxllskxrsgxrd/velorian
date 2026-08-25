@@ -1,11 +1,14 @@
 export const MAX_FILES = 10;
 export const MAX_FILE_SIZE = 10 * 1024 * 1024;
 export const MAX_TOTAL_FILE_SIZE = 25 * 1024 * 1024;
-export const ACCEPTED_FILE_TYPES = 'image/png,image/jpeg,image/webp,image/bmp,image/tiff,.pdf,.docx,.txt,.md,.json,.csv,.log,.html,.css,.js,.ts,.tsx,.xml';
+export const ACCEPTED_FILE_TYPES = 'image/png,image/jpeg,image/webp,image/bmp,image/tiff,.pdf,.docx,.txt,.md,.json,.csv,.log,.html,.css,.scss,.sass,.less,.js,.jsx,.ts,.tsx,.xml,.yaml,.yml,.toml,.ini,.env,.py,.rb,.php,.java,.kt,.kts,.swift,.go,.rs,.c,.h,.cpp,.hpp,.cs,.sql,.sh,.bash,.zsh,.vue,.svelte';
 
 const SUPPORTED_EXTENSIONS = new Set([
 	'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tif',
-	'.pdf', '.docx', '.txt', '.md', '.json', '.csv', '.log', '.html', '.css', '.js', '.ts', '.tsx', '.xml',
+	'.pdf', '.docx', '.txt', '.md', '.json', '.csv', '.log', '.html', '.css', '.scss', '.sass', '.less',
+	'.js', '.jsx', '.ts', '.tsx', '.xml', '.yaml', '.yml', '.toml', '.ini', '.env', '.py', '.rb', '.php',
+	'.java', '.kt', '.kts', '.swift', '.go', '.rs', '.c', '.h', '.cpp', '.hpp', '.cs', '.sql', '.sh', '.bash',
+	'.zsh', '.vue', '.svelte',
 ]);
 
 function extensionOf(name: string) {

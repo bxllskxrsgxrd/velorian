@@ -36,6 +36,7 @@ function normalizeAttachment(attachment: Omit<ChatAttachment, 'isImage'> & { isI
 	return {
 		...attachment,
 		url: resolveAttachmentUrl(attachment.url),
+		downloadUrl: attachment.downloadUrl ? resolveAttachmentUrl(attachment.downloadUrl) : resolveAttachmentUrl(attachment.url),
 		isImage: attachment.type.startsWith('image/'),
 	};
 }
@@ -157,7 +158,7 @@ export type StreamEvent =
 			requestId: string;
 	  }
 	| { type: 'delta'; content: string }
-	| { type: 'done'; messageId: string }
+	| { type: 'done'; messageId: string; message?: ChatMessage }
 	| { type: 'error'; code: string; message: string; requestId?: string };
 
 type StreamChatOptions = {
@@ -166,6 +167,7 @@ type StreamChatOptions = {
 	files?: File[];
 	webSearch?: boolean;
 	retryMessageId?: string;
+	editMessageId?: string;
 	signal: AbortSignal;
 	onEvent: (event: StreamEvent) => void;
 };
@@ -175,6 +177,7 @@ async function runChatStream(options: StreamChatOptions): Promise<void> {
 	formData.append('prompt', options.prompt ?? '');
 	formData.append('web_search', String(Boolean(options.webSearch)));
 	if (options.retryMessageId) formData.append('retry_message_id', options.retryMessageId);
+	if (options.editMessageId) formData.append('edit_message_id', options.editMessageId);
 	options.files?.forEach((file) => formData.append('files', file));
 
 	const response = await fetch(`${API_BASE_URL}/conversations/${options.conversationId}/stream`, {
@@ -199,6 +202,7 @@ async function runChatStream(options: StreamChatOptions): Promise<void> {
 			if (!line.trim()) continue;
 			const event = JSON.parse(line) as StreamEvent;
 			if (event.type === 'meta') event.userMessage = normalizeMessage(event.userMessage);
+			if (event.type === 'done' && event.message) event.message = normalizeMessage(event.message);
 			options.onEvent(event);
 			if (event.type === 'error') throw new ApiError(event.message, event.code, 200, event.requestId);
 		}
@@ -207,9 +211,18 @@ async function runChatStream(options: StreamChatOptions): Promise<void> {
 	if (buffer.trim()) {
 		const event = JSON.parse(buffer) as StreamEvent;
 		if (event.type === 'meta') event.userMessage = normalizeMessage(event.userMessage);
+		if (event.type === 'done' && event.message) event.message = normalizeMessage(event.message);
 		options.onEvent(event);
 		if (event.type === 'error') throw new ApiError(event.message, event.code, 200, event.requestId);
 	}
+}
+
+export async function activateMessageBranch(messageId: string): Promise<ChatMessage> {
+	return (
+		await requestJson<{ message: ChatMessage }>(`/messages/${messageId}/activate`, {
+			method: 'PATCH',
+		})
+	).message;
 }
 
 export async function streamChat(options: StreamChatOptions): Promise<void> {

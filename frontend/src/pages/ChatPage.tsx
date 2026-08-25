@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
+	activateMessageBranch,
 	createConversation,
 	deleteConversation,
 	getConversation,
@@ -11,6 +12,7 @@ import { ChatSidebar } from '../components/ChatSidebar/ChatSidebar';
 import { FilePreviewModal } from '../components/FilePreviewModal/FilePreviewModal';
 import { MessageList } from '../components/MessageList/MessageList';
 import { PromptBar } from '../components/PromptBar/PromptBar';
+import { RequestMap } from '../components/RequestMap/RequestMap';
 import { DropZone } from '../components/ui/DropZone/DropZone';
 import { CHAT_MESSAGE_STATUSES } from '../constants/chatMessageStatuses';
 import { CHAT_ROLES } from '../constants/chatRoles';
@@ -36,6 +38,15 @@ function downloadText(name: string, content: string, type: string) {
 	URL.revokeObjectURL(url);
 }
 
+function getStoredSidebarCollapsed() {
+	try {
+		return window.localStorage.getItem('velorian-sidebar-collapsed') === 'true';
+	} catch (error) {
+		reportError('Не удалось прочитать состояние боковой панели', error);
+		return false;
+	}
+}
+
 export function ChatPage({ user, onLogout }: ChatPageProps) {
 	const [conversations, setConversations] = useState<ConversationSummary[]>([]);
 	const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
@@ -47,6 +58,7 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 	const [conversationSearch, setConversationSearch] = useState('');
 	const [accent, setAccent] = useState<AccentTheme>(getStoredAccentTheme);
 	const [isSidebarOpen, setIsSidebarOpen] = useState(false);
+	const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(getStoredSidebarCollapsed);
 	const [showScrollButton, setShowScrollButton] = useState(false);
 	const chatPageRef = useRef<HTMLDivElement | null>(null);
 	const attachmentUrlsRef = useRef(new Set<string>());
@@ -205,6 +217,7 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 		currentFiles: File[] = [],
 		retryMessageId?: string,
 		webSearch = false,
+		editMessageId?: string,
 	) {
 		if (isGenerating) return;
 		setPageError('');
@@ -213,6 +226,9 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 
 		const retrySourceMessage = retryMessageId
 			? messages.find((message) => message.id === retryMessageId && message.role === CHAT_ROLES.USER)
+			: undefined;
+		const editSourceMessage = editMessageId
+			? messages.find((message) => message.id === editMessageId && message.role === CHAT_ROLES.USER)
 			: undefined;
 		const tempUserId = crypto.randomUUID();
 		const tempAttachments = currentFiles.map(createChatAttachment);
@@ -236,20 +252,27 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 			);
 		}
 
-		const optimistic: ChatMessage[] = [{
+		const optimisticUser: ChatMessage = {
 			id: tempUserId,
 			role: CHAT_ROLES.USER,
-			content: retrySourceMessage?.content ?? prompt,
-			attachments: retrySourceMessage?.attachments ?? tempAttachments,
+			content: editSourceMessage ? prompt : retrySourceMessage?.content ?? prompt,
+			attachments: editSourceMessage?.attachments ?? retrySourceMessage?.attachments ?? tempAttachments,
 			status: CHAT_MESSAGE_STATUSES.DONE,
-		}];
+			branchGroupId: editSourceMessage ? editSourceMessage.branchGroupId || editSourceMessage.id : tempUserId,
+			isActive: true,
+		};
+		const optimistic: ChatMessage[] = [optimisticUser];
 		optimistic.push({
 			id: tempAssistantId,
 			role: CHAT_ROLES.ASSISTANT,
 			content: '',
 			status: CHAT_MESSAGE_STATUSES.PENDING,
+			replyToId: tempUserId,
 		});
-		setMessages((current) => [...current, ...optimistic]);
+		setMessages((current) => [
+			...current.map((message) => editSourceMessage && message.role === CHAT_ROLES.USER && (message.branchGroupId || message.id) === (editSourceMessage.branchGroupId || editSourceMessage.id) ? { ...message, isActive: false } : message),
+			...optimistic,
+		]);
 
 		const controller = new AbortController();
 		requestControllerRef.current = controller;
@@ -260,6 +283,7 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 				files: currentFiles,
 				webSearch,
 				retryMessageId,
+				editMessageId,
 				signal: controller.signal,
 				onEvent: (event) => {
 					if (event.type === 'meta') {
@@ -273,7 +297,7 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 							current.map((message) => {
 								if (message.id === tempUserId) return event.userMessage;
 								if (message.id === tempAssistantId)
-									return { ...message, id: event.assistantMessageId, status: CHAT_MESSAGE_STATUSES.STREAMING };
+									return { ...message, id: event.assistantMessageId, replyToId: event.userMessage.id, status: CHAT_MESSAGE_STATUSES.STREAMING };
 								return message;
 							}),
 						);
@@ -284,11 +308,9 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 					} else if (event.type === 'done') {
 						if (deltaFrame !== null) cancelAnimationFrame(deltaFrame);
 						flushDelta();
-						setMessages((current) =>
-							current.map((message) =>
-								message.id === currentAssistantId ? { ...message, status: CHAT_MESSAGE_STATUSES.DONE } : message,
-							),
-						);
+						setMessages((current) => current.map((message) => message.id === currentAssistantId
+							? event.message ?? { ...message, status: CHAT_MESSAGE_STATUSES.DONE }
+							: message));
 					} else {
 						setMessages((current) =>
 							current.map((message) =>
@@ -313,7 +335,11 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 			if (!receivedMeta) {
 				revokeLocalAttachmentUrls();
 				setMessages((current) =>
-					current.filter((message) => message.id !== tempUserId && message.id !== tempAssistantId),
+					current
+						.filter((message) => message.id !== tempUserId && message.id !== tempAssistantId)
+						.map((message) => editSourceMessage && message.role === CHAT_ROLES.USER && (message.branchGroupId || message.id) === (editSourceMessage.branchGroupId || editSourceMessage.id)
+							? { ...message, isActive: message.id === editSourceMessage.id }
+							: message),
 				);
 				setPageError(messageText);
 				throw error instanceof Error ? error : new Error(messageText);
@@ -348,6 +374,18 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 		if (activeConversationId) void runStream(activeConversationId, '', [], userMessageId);
 	}
 
+	function handleEditMessage(message: ChatMessage, content: string) {
+		if (activeConversationId) void runStream(activeConversationId, content, [], undefined, false, message.id);
+	}
+
+	async function handleActivateBranch(messageId: string) {
+		const active = await activateMessageBranch(messageId);
+		const groupId = active.branchGroupId || active.id;
+		setMessages((current) => current.map((message) => message.role === CHAT_ROLES.USER && (message.branchGroupId || message.id) === groupId
+			? { ...message, isActive: message.id === messageId }
+			: message));
+	}
+
 	function handleNewConversation() {
 		if (isGenerating) requestControllerRef.current?.abort();
 		revokeLocalAttachmentUrls();
@@ -361,7 +399,6 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 			setPageError('Сначала остановите генерацию ответа');
 			return;
 		}
-		if (!window.confirm('Удалить этот диалог и его файлы?')) return;
 		await deleteConversation(id);
 		const remaining = conversations.filter((item) => item.id !== id);
 		setConversations(remaining);
@@ -374,9 +411,8 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 		}
 	}
 
-	async function handleRenameConversation(conversation: ConversationSummary) {
-		const title = window.prompt('Название диалога', conversation.title)?.trim();
-		if (!title || title === conversation.title) return;
+	async function handleRenameConversation(conversation: ConversationSummary, title: string) {
+		if (title === conversation.title) return;
 		const updated = await renameConversation(conversation.id, title);
 		setConversations((current) => current.map((item) => (item.id === updated.id ? updated : item)));
 	}
@@ -414,6 +450,7 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 				search={conversationSearch}
 				accentTheme={accent}
 				isOpen={isSidebarOpen}
+				isCollapsed={isSidebarCollapsed}
 				onSearchChange={setConversationSearch}
 				onSelect={(id) => {
 					requestControllerRef.current?.abort();
@@ -426,8 +463,8 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 						reportActionError(error, 'Не удалось удалить диалог'),
 					)
 				}
-				onRename={(conversation) =>
-					void handleRenameConversation(conversation).catch((error: unknown) =>
+				onRename={(conversation, title) =>
+					void handleRenameConversation(conversation, title).catch((error: unknown) =>
 						reportActionError(error, 'Не удалось переименовать диалог'),
 					)
 				}
@@ -435,6 +472,15 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 				onExport={handleExport}
 				onLogout={() => void onLogout()}
 				onClose={() => setIsSidebarOpen(false)}
+				onToggleCollapsed={() => setIsSidebarCollapsed((current) => {
+					const next = !current;
+					try {
+						window.localStorage.setItem('velorian-sidebar-collapsed', String(next));
+					} catch (error) {
+						reportError('Не удалось сохранить состояние боковой панели', error);
+					}
+					return next;
+				})}
 			/>
 			<DropZone isDragging={isDragging} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
 				<div
@@ -460,7 +506,14 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 						{isLoadingConversation ? (
 							<div className="chat-page__loading">Загрузка диалога…</div>
 						) : hasMessages ? (
-							<MessageList messages={messages} onOpenAttachment={openMessageAttachment} onRetry={handleRetry} />
+							<MessageList
+								messages={messages}
+								onOpenAttachment={openMessageAttachment}
+								onRetry={handleRetry}
+								onEdit={handleEditMessage}
+								canEdit={!isGenerating}
+								onActivateBranch={(messageId) => void handleActivateBranch(messageId).catch((error: unknown) => reportActionError(error, 'Не удалось переключить версию'))}
+							/>
 						) : (
 							<div className="chat-page__start">
 								<h1 className="chat-page__heading">Введи запрос</h1>
@@ -492,6 +545,7 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 					</div>
 				</div>
 			</DropZone>
+			<RequestMap messages={messages} />
 			{isSidebarOpen && (
 				<button
 					className="chat-shell__backdrop"

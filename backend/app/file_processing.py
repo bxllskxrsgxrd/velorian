@@ -7,7 +7,12 @@ from .config import settings
 from .errors import AppError
 
 
-TEXT_EXTENSIONS = {".txt", ".md", ".json", ".csv", ".log", ".html", ".css", ".js", ".ts", ".tsx", ".xml"}
+TEXT_EXTENSIONS = {
+	".txt", ".md", ".json", ".csv", ".log", ".html", ".css", ".scss", ".sass", ".less",
+	".js", ".jsx", ".ts", ".tsx", ".xml", ".yaml", ".yml", ".toml", ".ini", ".env",
+	".py", ".rb", ".php", ".java", ".kt", ".kts", ".swift", ".go", ".rs", ".c", ".h",
+	".cpp", ".hpp", ".cs", ".sql", ".sh", ".bash", ".zsh", ".vue", ".svelte",
+}
 IMAGE_EXTENSIONS = {".png", ".jpg", ".jpeg", ".webp", ".bmp", ".tiff", ".tif"}
 SUPPORTED_EXTENSIONS = TEXT_EXTENSIONS | IMAGE_EXTENSIONS | {".pdf", ".docx"}
 

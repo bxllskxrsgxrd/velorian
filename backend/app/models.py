@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -48,6 +48,9 @@ class Message(Base):
 	role: Mapped[str] = mapped_column(String(16))
 	content: Mapped[str] = mapped_column(Text, default="")
 	status: Mapped[str] = mapped_column(String(24), default="done")
+	branch_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+	reply_to_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
+	is_active: Mapped[bool] = mapped_column(Boolean, default=True)
 	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 
 	conversation: Mapped[Conversation] = relationship(back_populates="messages")

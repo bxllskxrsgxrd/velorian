@@ -10,8 +10,10 @@ export type ChatAttachment = {
 	size: number;
 	type: string;
 	url: string;
+	downloadUrl?: string;
 	isImage: boolean;
-	extractionStatus?: 'ready' | 'empty' | 'ocr_unavailable' | 'unsupported';
+	extractionStatus?: 'ready' | 'empty' | 'ocr_unavailable' | 'unsupported' | 'generated';
+	generated?: boolean;
 };
 
 export type ChatMessageStatus = (typeof CHAT_MESSAGE_STATUSES)[keyof typeof CHAT_MESSAGE_STATUSES];
@@ -23,6 +25,9 @@ export type ChatMessage = {
 	status?: ChatMessageStatus;
 	attachments?: ChatAttachment[];
 	createdAt?: string;
+	branchGroupId?: string | null;
+	replyToId?: string | null;
+	isActive?: boolean;
 };
 
 export type PreviewFile = {
