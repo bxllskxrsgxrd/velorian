@@ -3,7 +3,7 @@ import { describe, expect, it, vi } from 'vitest';
 import { MessageList } from './MessageList';
 
 describe('MessageList branches', () => {
-	it('shows the active edited request and switches to the previous version', () => {
+	it('shows the active edited request and switches to the previous version', async () => {
 		const onActivateBranch = vi.fn();
 		render(
 			<MessageList
@@ -24,7 +24,7 @@ describe('MessageList branches', () => {
 		);
 
 		expect(screen.getByText('Изменённый запрос')).toBeInTheDocument();
-		expect(screen.getByText('Новый ответ')).toBeInTheDocument();
+		expect(await screen.findByText('Новый ответ')).toBeInTheDocument();
 		expect(screen.queryByText('Старый ответ')).not.toBeInTheDocument();
 		fireEvent.click(screen.getByRole('button', { name: 'Предыдущая версия' }));
 		expect(onActivateBranch).toHaveBeenCalledWith('u1');

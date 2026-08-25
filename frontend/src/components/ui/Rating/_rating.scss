@@ -1,0 +1,8 @@
+.rating { display: inline-flex; align-items: center; gap: 2px; }
+.rating__star { display: grid; place-items: center; width: 24px; height: 24px; padding: 3px; border: 0; color: var(--color-text-tertiary, var(--color-text-secondary)); background: transparent; }
+button.rating__star { border-radius: 6px; cursor: pointer; }
+button.rating__star:hover, button.rating__star:focus-visible { color: var(--color-accent); background: var(--color-accent-soft-hover); outline: none; box-shadow: var(--focus-ring); }
+.rating__star--active { color: var(--color-accent); }
+.rating__star svg { width: 16px; height: 16px; }
+.rating--readonly .rating__star { width: 18px; height: 18px; padding: 1px; }
+.rating__empty { margin-left: 5px; color: var(--color-text-secondary); font-size: 12px; }

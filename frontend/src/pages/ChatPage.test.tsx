@@ -2,6 +2,8 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatPage } from './ChatPage';
 import { ToastProvider } from '../components/Toast/ToastProvider';
+import { ApiError } from '../api/httpClient';
+import type { StreamEvent } from '../api/chatApi';
 
 const api = vi.hoisted(() => ({
 	createConversation: vi.fn(),
@@ -44,5 +46,41 @@ describe('ChatPage retry', () => {
 		expect(messageList).not.toBeNull();
 		await waitFor(() => expect(within(messageList as HTMLElement).getAllByText('Повтори меня')).toHaveLength(2));
 		expect(api.streamChat).toHaveBeenCalledWith(expect.objectContaining({ retryMessageId: 'user-1' }));
+	});
+
+	it('maps an HTTP failure before stream metadata from pending to the dedicated error UI', async () => {
+		api.streamChat.mockRejectedValueOnce(new ApiError('AI_SERVICE_ERROR', 502, 'request-502'));
+		const { container } = render(<ToastProvider><ChatPage user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn()} onOpenKnowledge={vi.fn()} /></ToastProvider>);
+
+		const prompt = await screen.findByRole('textbox', { name: /введите запрос/i });
+		fireEvent.change(prompt, { target: { value: 'Запрос с ошибкой' } });
+		fireEvent.click(screen.getByRole('button', { name: 'Отправить сообщение' }));
+
+		const safeText = await screen.findByText(/AI-сервис временно недоступен/i);
+		const alert = safeText.closest('[role="alert"]');
+		expect(alert).not.toBeNull();
+		if (!alert) throw new Error('Error UI is missing');
+		expect(alert).toHaveTextContent('request-502');
+		expect(alert.closest('.message')).toHaveClass('message--error');
+		expect(alert.closest('.message')?.querySelector('.message__content')).toBeNull();
+		expect(container.querySelector('.message__content--pending')).not.toBeInTheDocument();
+	});
+
+	it('maps an error event after stream metadata from streaming to the dedicated error UI', async () => {
+		api.getConversation.mockResolvedValueOnce({ ...conversation, messages: [] });
+		api.streamChat.mockImplementationOnce(async ({ onEvent }: { onEvent: (event: StreamEvent) => void }) => {
+			onEvent({ type: 'meta', conversationId: conversation.id, conversationTitle: conversation.title, userMessage: { id: 'user-stream', role: 'user', content: 'Потоковая ошибка', status: 'done', attachments: [] }, assistantMessageId: 'assistant-stream', requestId: 'stream-request' });
+			onEvent({ type: 'delta', content: 'Начало ответа' });
+			onEvent({ type: 'error', code: 'AI_TIMEOUT', message: 'internal', requestId: 'timeout-request' });
+			throw new ApiError('AI_TIMEOUT', 200, 'timeout-request');
+		});
+		const { container } = render(<ToastProvider><ChatPage user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn()} onOpenKnowledge={vi.fn()} /></ToastProvider>);
+		fireEvent.change(await screen.findByRole('textbox', { name: /введите запрос/i }), { target: { value: 'Потоковая ошибка' } });
+		fireEvent.click(screen.getByRole('button', { name: 'Отправить сообщение' }));
+		const errorText = await screen.findByText(/AI-сервис не успел ответить/i);
+		const alert = errorText.closest('[role="alert"]');
+		expect(alert).not.toBeNull();
+		expect(alert?.closest('.message')).toHaveClass('message--error');
+		expect(container.querySelector('.message__content--pending')).not.toBeInTheDocument();
 	});
 });

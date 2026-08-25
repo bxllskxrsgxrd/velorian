@@ -1,15 +1,16 @@
-import { useState } from 'react';
+import { lazy, Suspense, useState } from 'react';
 import { CHAT_MESSAGE_STATUSES } from '../../constants/chatMessageStatuses';
 import { CHAT_ROLES } from '../../constants/chatRoles';
 import type { ChatAttachment, ChatMessage } from '../../types/chat';
 import { SubmitLoadingIcon } from '../icons/SubmitLoadingIcon/SubmitLoadingIcon';
 import { EditIcon } from '../icons/AppIcons';
 import './_messageBubble.scss';
-import { AssistantMessageContent } from './AssistantMessageContent';
 import { MessageAttachment } from './MessageAttachment';
 import { MessageError } from './MessageError';
 import { MessageRating } from './MessageRating';
 import { UserMessageContent } from './UserMessageContent';
+
+const AssistantMessageContent = lazy(() => import('./AssistantMessageContent'));
 
 type MessageBubbleProps = {
 	message: ChatMessage;
@@ -97,7 +98,7 @@ export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, bran
 					{isUser ? (
 						<UserMessageContent content={message.content} />
 					) : (
-						<AssistantMessageContent content={message.content} isStreaming={isStreaming} />
+						<Suspense fallback={<span className="message__markdown-loading">Форматирование ответа…</span>}><AssistantMessageContent content={message.content} isStreaming={isStreaming} /></Suspense>
 					)}
 				</div>
 			)}

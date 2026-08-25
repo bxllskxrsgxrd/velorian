@@ -7,12 +7,14 @@ import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager
 from pathlib import Path
+from typing import Literal
+from urllib.parse import quote
 from uuid import uuid4
 
 from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
-from fastapi.responses import FileResponse, JSONResponse, StreamingResponse
+from fastapi.responses import JSONResponse, StreamingResponse
 from groq import APIConnectionError, APIStatusError, APITimeoutError, AsyncGroq, RateLimitError
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from pydantic import BaseModel, Field
@@ -30,6 +32,7 @@ from .models import Attachment, Conversation, DocumentChunk, Message, User, utc_
 from .rag import chunk_text, estimate_tokens, retrieve_chunks
 from .rate_limit import rate_limiter
 from .ratings import router as ratings_router
+from .storage import build_storage_key, get_file_storage
 
 
 logger = logging.getLogger("velorian")
@@ -303,15 +306,14 @@ def _extract_generated_files(answer: str, prompt: str) -> tuple[str, list[tuple[
 	return _sanitize_markdown_headings(clean_answer), files
 
 
-def _store_generated_files(db: Session, user_id: str, conversation_id: str, message: Message, files: list[tuple[str, str]]) -> None:
-	storage_dir = settings.upload_dir / user_id / conversation_id
-	storage_dir.mkdir(parents=True, exist_ok=True)
+async def _store_generated_files(db: Session, user_id: str, conversation_id: str, message: Message, files: list[tuple[str, str]]) -> None:
+	storage = get_file_storage()
 	for name, content in files[:5]:
 		attachment_id = str(uuid4())
-		storage_path = storage_dir / attachment_id
 		data = content.encode("utf-8")
-		storage_path.write_bytes(data)
 		content_type = mimetypes.guess_type(name)[0] or "text/plain"
+		storage_key = build_storage_key(user_id, "conversations", conversation_id, message.id)
+		await storage.save(storage_key, data, content_type)
 		db.add(Attachment(
 			id=attachment_id,
 			conversation_id=conversation_id,
@@ -319,21 +321,30 @@ def _store_generated_files(db: Session, user_id: str, conversation_id: str, mess
 			name=name,
 			content_type=content_type,
 			size=len(data),
-			storage_path=str(storage_path),
+			storage_path="",
+			storage_key=storage_key,
 			extracted_text=content,
 			extraction_status="generated",
 		))
 
 
-def _copy_message_attachments(db: Session, source: Message, target: Message) -> None:
+async def _copy_message_attachments(db: Session, user_id: str, source: Message, target: Message) -> None:
+	storage = get_file_storage()
 	for source_attachment in source.attachments:
+		if source_attachment.storage_key:
+			content = await storage.get(source_attachment.storage_key)
+		else:
+			content = await asyncio.to_thread(Path(source_attachment.storage_path).read_bytes)
+		storage_key = build_storage_key(user_id, "conversations", target.conversation_id, target.id)
+		await storage.save(storage_key, content, source_attachment.content_type)
 		db.add(Attachment(
 			conversation_id=target.conversation_id,
 			message_id=target.id,
 			name=source_attachment.name,
 			content_type=source_attachment.content_type,
 			size=source_attachment.size,
-			storage_path=source_attachment.storage_path,
+			storage_path="",
+			storage_key=storage_key,
 			extracted_text=source_attachment.extracted_text,
 			extraction_status=source_attachment.extraction_status,
 		))
@@ -341,7 +352,10 @@ def _copy_message_attachments(db: Session, source: Message, target: Message) -> 
 
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
-	settings.upload_dir.mkdir(parents=True, exist_ok=True)
+	settings.validate_production()
+	if settings.file_storage_driver == "local":
+		settings.upload_dir.mkdir(parents=True, exist_ok=True)
+	get_file_storage()
 	if settings.database_url.startswith("sqlite"):
 		Path(settings.database_url.removeprefix("sqlite:///")).parent.mkdir(parents=True, exist_ok=True)
 	if settings.is_production and settings.auth_secret == "velorian-development-secret-change-me":
@@ -588,18 +602,22 @@ def activate_message_branch(message_id: str, user: User = Depends(get_current_us
 
 
 @app.delete(f"{settings.api_prefix}/conversations/{{conversation_id}}", tags=["conversations"])
-def delete_conversation(conversation_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def delete_conversation(conversation_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	conversation = _owned_conversation(db, conversation_id, user.id)
-	paths = [Path(path) for path in db.scalars(select(Attachment.storage_path).where(Attachment.conversation_id == conversation.id))]
+	files = db.execute(select(Attachment.storage_key, Attachment.storage_path).where(Attachment.conversation_id == conversation.id)).all()
 	db.delete(conversation)
 	db.commit()
-	for path in paths:
-		path.unlink(missing_ok=True)
+	storage = get_file_storage()
+	for storage_key, storage_path in files:
+		if storage_key:
+			await storage.delete(storage_key)
+		elif storage_path:
+			await asyncio.to_thread(Path(storage_path).unlink, missing_ok=True)
 	return Response(status_code=204)
 
 
 @app.get(f"{settings.api_prefix}/attachments/{{attachment_id}}", tags=["attachments"])
-def download_attachment(
+async def download_attachment(
 	attachment_id: str,
 	download: bool = False,
 	user: User = Depends(get_current_user),
@@ -612,15 +630,12 @@ def download_attachment(
 	)
 	if attachment is None:
 		raise AppError(404, "ATTACHMENT_NOT_FOUND", "Файл не найден")
-	path = Path(attachment.storage_path)
-	if not path.is_file():
+	try:
+		content = await get_file_storage().get(attachment.storage_key) if attachment.storage_key else await asyncio.to_thread(Path(attachment.storage_path).read_bytes)
+	except (FileNotFoundError, OSError):
 		raise AppError(404, "ATTACHMENT_MISSING", "Файл отсутствует в хранилище")
-	return FileResponse(
-		path,
-		media_type=attachment.content_type,
-		filename=attachment.name,
-		content_disposition_type="attachment" if download else "inline",
-	)
+	disposition = "attachment" if download else "inline"
+	return Response(content, media_type=attachment.content_type, headers={"Content-Disposition": f"{disposition}; filename*=UTF-8''{quote(attachment.name)}"})
 
 
 async def _read_upload(upload: UploadFile, total_size: int) -> tuple[bytes, int]:
@@ -671,7 +686,7 @@ async def _extract_file(file_name: str, content_type: str, content: bytes) -> Ex
 		return local_result
 
 
-def _build_ai_messages(db: Session, conversation_id: str, user_id: str, prompt: str, current_message: Message) -> list[dict[str, str]]:
+def _build_ai_messages(db: Session, conversation_id: str, user_id: str, prompt: str, current_message: Message, knowledge_search: bool = False) -> list[dict[str, str]]:
 	history = list(db.scalars(
 		select(Message)
 		.where(
@@ -727,7 +742,7 @@ def _build_ai_messages(db: Session, conversation_id: str, user_id: str, prompt: 
 		if last_user is not None:
 			last_user["content"] += "\n\n<document_context>\n" + document_context + "\n</document_context>"
 
-	knowledge_items = retrieve_knowledge(db, user_id, prompt)
+	knowledge_items = retrieve_knowledge(db, user_id, prompt) if knowledge_search else []
 	if knowledge_items:
 		knowledge_context = "\n\n---\n\n".join(
 			f"[База знаний: {item.title}]\n{item.content[:6000]}" for item in knowledge_items
@@ -764,6 +779,7 @@ async def stream_chat(
 	conversation_id: str,
 	prompt: str = Form(default=""),
 	web_search: bool = Form(default=False),
+	search_mode: Literal["none", "web", "knowledge"] = Form(default="none"),
 	retry_message_id: str | None = Form(default=None),
 	edit_message_id: str | None = Form(default=None),
 	files: list[UploadFile] = File(default=[]),
@@ -774,6 +790,9 @@ async def stream_chat(
 	if client is None:
 		raise AppError(503, "AI_NOT_CONFIGURED", "AI-сервис не настроен")
 	conversation = _owned_conversation(db, conversation_id, user.id)
+	if web_search and search_mode == "none":
+		search_mode = "web"
+	web_search = search_mode == "web"
 
 	prompt = prompt.strip()
 	title_source = prompt
@@ -821,7 +840,7 @@ async def stream_chat(
 		)
 		db.add(user_message)
 		db.flush()
-		_copy_message_attachments(db, source_user_message, user_message)
+		await _copy_message_attachments(db, user.id, source_user_message, user_message)
 	elif retry_message_id:
 		source_user_message = db.scalar(
 			select(Message).options(selectinload(Message.attachments)).where(
@@ -837,7 +856,7 @@ async def stream_chat(
 		db.add(user_message)
 		db.flush()
 		user_message.branch_group_id = user_message.id
-		_copy_message_attachments(db, source_user_message, user_message)
+		await _copy_message_attachments(db, user.id, source_user_message, user_message)
 	else:
 		if not prompt and not files and automatic_paste is None:
 			raise AppError(422, "EMPTY_MESSAGE", "Введите сообщение или прикрепите файл")
@@ -862,10 +881,8 @@ async def stream_chat(
 			finally:
 				await upload.close()
 			attachment_id = str(uuid4())
-			storage_dir = settings.upload_dir / user.id / conversation.id
-			storage_dir.mkdir(parents=True, exist_ok=True)
-			storage_path = storage_dir / attachment_id
-			await asyncio.to_thread(storage_path.write_bytes, content)
+			storage_key = build_storage_key(user.id, "conversations", conversation.id, user_message.id)
+			await get_file_storage().save(storage_key, content, content_type)
 			attachment = Attachment(
 				id=attachment_id,
 				conversation_id=conversation.id,
@@ -873,7 +890,8 @@ async def stream_chat(
 				name=file_name,
 				content_type=content_type,
 				size=len(content),
-				storage_path=str(storage_path),
+				storage_path="",
+				storage_key=storage_key,
 				extracted_text=extracted.text,
 				extraction_status=extracted.status,
 			)
@@ -889,10 +907,8 @@ async def stream_chat(
 				raise AppError(413, "FILES_TOO_LARGE", "Общий размер файлов превышает лимит")
 			extracted = await _extract_file(file_name, "text/plain", content)
 			attachment_id = str(uuid4())
-			storage_dir = settings.upload_dir / user.id / conversation.id
-			storage_dir.mkdir(parents=True, exist_ok=True)
-			storage_path = storage_dir / attachment_id
-			await asyncio.to_thread(storage_path.write_bytes, content)
+			storage_key = build_storage_key(user.id, "conversations", conversation.id, user_message.id)
+			await get_file_storage().save(storage_key, content, "text/plain")
 			attachment = Attachment(
 				id=attachment_id,
 				conversation_id=conversation.id,
@@ -900,7 +916,8 @@ async def stream_chat(
 				name=file_name,
 				content_type="text/plain",
 				size=len(content),
-				storage_path=str(storage_path),
+				storage_path="",
+				storage_key=storage_key,
 				extracted_text=extracted.text,
 				extraction_status=extracted.status,
 			)
@@ -926,7 +943,7 @@ async def stream_chat(
 	conversation.updated_at = utc_now()
 	db.commit()
 
-	ai_messages = _build_ai_messages(db, conversation.id, user.id, prompt, user_message)
+	ai_messages = _build_ai_messages(db, conversation.id, user.id, prompt, user_message, knowledge_search=search_mode == "knowledge")
 	request_id = _request_id(request)
 	user_payload = _message_payload(user_message)
 	assistant_id = assistant_message.id
@@ -973,7 +990,7 @@ async def stream_chat(
 			answer, generated_files = _extract_generated_files(answer, prompt)
 			assistant_message.content = answer
 			assistant_message.status = "done"
-			_store_generated_files(db, user.id, conversation.id, assistant_message, generated_files)
+			await _store_generated_files(db, user.id, conversation.id, assistant_message, generated_files)
 			conversation.updated_at = utc_now()
 			db.commit()
 			completed_message = db.scalar(

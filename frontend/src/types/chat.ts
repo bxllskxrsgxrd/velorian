@@ -17,6 +17,7 @@ export type ChatAttachment = {
 };
 
 export type ChatMessageStatus = (typeof CHAT_MESSAGE_STATUSES)[keyof typeof CHAT_MESSAGE_STATUSES];
+export type SearchMode = 'none' | 'web' | 'knowledge';
 
 export type MessageRating = {
 	id: string;
@@ -80,4 +81,9 @@ export type KnowledgeItem = {
 	createdAt: string;
 	updatedAt: string;
 	downloadUrl?: string | null;
+};
+
+export type KnowledgePageResult = {
+	items: KnowledgeItem[];
+	pageInfo: { nextCursor: string | null; hasMore: boolean };
 };

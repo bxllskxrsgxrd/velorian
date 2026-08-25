@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import type { MessageRating as MessageRatingData } from '../../types/chat';
-import { StarIcon } from '../icons/AppIcons';
+import { Rating } from '../ui/Rating/Rating';
 
 type MessageRatingProps = {
 	rating?: MessageRatingData | null;
@@ -16,9 +16,7 @@ export function MessageRating({ rating, onRate, onRemove, onSaveToKnowledge }: M
 		<div className="message__rating" aria-label="Оценка ответа">
 			<div className="message__rating-row">
 				<span>Оценить:</span>
-				{[1, 2, 3, 4, 5].map((score) => (
-					<button className={(rating?.score ?? 0) >= score ? 'message__rating-star message__rating-star--active' : 'message__rating-star'} type="button" key={score} onClick={() => onRate(score, rating?.comment ?? undefined)} aria-label={`Оценка ${score} из 5`} aria-pressed={rating?.score === score}><StarIcon /></button>
-				))}
+				<Rating value={rating?.score} onChange={(score) => { if (score) onRate(score, rating?.comment ?? undefined); }} label="Оценка ответа" />
 				{rating && <button className="message__rating-link" type="button" onClick={() => setCommentOpen((current) => !current)}>Комментарий</button>}
 				{rating && <button className="message__rating-link" type="button" onClick={onRemove}>Убрать</button>}
 				{onSaveToKnowledge && <button className="message__rating-save" type="button" onClick={onSaveToKnowledge}>В базу знаний</button>}

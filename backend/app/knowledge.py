@@ -1,10 +1,16 @@
+import asyncio
+import base64
+import binascii
 import hashlib
+import json
+from datetime import datetime
 from pathlib import Path
+from typing import Literal
+from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
-from fastapi.responses import FileResponse
 from pydantic import BaseModel, Field
-from sqlalchemy import or_, select
+from sqlalchemy import and_, asc, desc, or_, select
 from sqlalchemy.orm import Session
 
 from .auth import get_current_user
@@ -12,7 +18,9 @@ from .config import settings
 from .database import get_db
 from .errors import AppError
 from .file_processing import extract_text, validate_file_name
+from .knowledge_retrieval import knowledge_retrieval_service
 from .models import Attachment, Conversation, KnowledgeItem, Message, MessageRating, User, utc_now
+from .storage import build_storage_key, get_file_storage
 
 
 router = APIRouter(prefix=f"{settings.api_prefix}/knowledge", tags=["knowledge"])
@@ -22,12 +30,14 @@ class KnowledgeCreatePayload(BaseModel):
 	title: str = Field(min_length=1, max_length=255)
 	content: str = Field(min_length=1, max_length=2_000_000)
 	is_active: bool = True
+	rating: int | None = Field(default=None, ge=1, le=5)
 
 
 class KnowledgeUpdatePayload(BaseModel):
 	title: str | None = Field(default=None, min_length=1, max_length=255)
 	content: str | None = Field(default=None, min_length=1, max_length=2_000_000)
 	is_active: bool | None = None
+	rating: int | None = Field(default=None, ge=1, le=5)
 
 
 def knowledge_payload(item: KnowledgeItem) -> dict:
@@ -45,7 +55,7 @@ def knowledge_payload(item: KnowledgeItem) -> dict:
 		"metadata": item.item_metadata or {},
 		"createdAt": item.created_at.isoformat(),
 		"updatedAt": item.updated_at.isoformat(),
-		"downloadUrl": f"{settings.api_prefix}/knowledge/{item.id}/file" if item.storage_path or item.source_file_id else None,
+		"downloadUrl": f"{settings.api_prefix}/knowledge/{item.id}/file" if item.storage_key or item.storage_path or item.source_file_id else None,
 	}
 
 
@@ -61,6 +71,11 @@ def list_knowledge_items(
 	search: str = Query(default="", max_length=200),
 	source_type: str | None = Query(default=None, max_length=32),
 	is_active: bool | None = None,
+	min_rating: int | None = Query(default=None, ge=1, le=5),
+	unrated: bool = False,
+	sort: Literal["date_desc", "date_asc", "rating_desc", "rating_asc"] = "date_desc",
+	limit: int = Query(default=20, ge=1, le=100),
+	cursor: str | None = Query(default=None, max_length=512),
 	user: User = Depends(get_current_user),
 	db: Session = Depends(get_db),
 ):
@@ -72,8 +87,47 @@ def list_knowledge_items(
 		statement = statement.where(KnowledgeItem.source_type == source_type)
 	if is_active is not None:
 		statement = statement.where(KnowledgeItem.is_active == is_active)
-	items = db.scalars(statement.order_by(KnowledgeItem.updated_at.desc()).limit(500)).all()
-	return {"items": [knowledge_payload(item) for item in items]}
+	if unrated:
+		statement = statement.where(KnowledgeItem.rating.is_(None))
+	elif min_rating is not None:
+		statement = statement.where(KnowledgeItem.rating >= min_rating)
+	order = {
+		"date_desc": (desc(KnowledgeItem.updated_at), desc(KnowledgeItem.id)),
+		"date_asc": (asc(KnowledgeItem.updated_at), asc(KnowledgeItem.id)),
+		"rating_desc": (desc(KnowledgeItem.rating).nullslast(), desc(KnowledgeItem.updated_at), desc(KnowledgeItem.id)),
+		"rating_asc": (asc(KnowledgeItem.rating).nullslast(), desc(KnowledgeItem.updated_at), desc(KnowledgeItem.id)),
+	}[sort]
+	if cursor:
+		try:
+			decoded = json.loads(base64.urlsafe_b64decode(cursor + "=" * (-len(cursor) % 4)).decode())
+			if decoded["sort"] != sort:
+				raise ValueError
+			cursor_updated = datetime.fromisoformat(decoded["updated"])
+			cursor_id = str(decoded["id"])
+			cursor_rating = decoded.get("rating")
+		except (ValueError, TypeError, KeyError, json.JSONDecodeError, UnicodeDecodeError, binascii.Error):
+			raise AppError(422, "INVALID_CURSOR", "Некорректный курсор страницы")
+		date_desc_after = or_(KnowledgeItem.updated_at < cursor_updated, and_(KnowledgeItem.updated_at == cursor_updated, KnowledgeItem.id < cursor_id))
+		date_asc_after = or_(KnowledgeItem.updated_at > cursor_updated, and_(KnowledgeItem.updated_at == cursor_updated, KnowledgeItem.id > cursor_id))
+		if sort == "date_desc":
+			statement = statement.where(date_desc_after)
+		elif sort == "date_asc":
+			statement = statement.where(date_asc_after)
+		elif cursor_rating is None:
+			statement = statement.where(KnowledgeItem.rating.is_(None), date_desc_after)
+		else:
+			rating_after = KnowledgeItem.rating < cursor_rating if sort == "rating_desc" else KnowledgeItem.rating > cursor_rating
+			statement = statement.where(or_(rating_after, KnowledgeItem.rating.is_(None), and_(KnowledgeItem.rating == cursor_rating, date_desc_after)))
+	items = list(db.scalars(statement.order_by(*order).limit(limit + 1)))
+	has_more = len(items) > limit
+	items = items[:limit]
+	if has_more:
+		last = items[-1]
+		cursor_payload = json.dumps({"sort": sort, "updated": last.updated_at.isoformat(), "id": last.id, "rating": last.rating}, separators=(",", ":"))
+		next_cursor = base64.urlsafe_b64encode(cursor_payload.encode()).decode().rstrip("=")
+	else:
+		next_cursor = None
+	return {"items": [knowledge_payload(item) for item in items], "pageInfo": {"nextCursor": next_cursor, "hasMore": has_more}}
 
 
 @router.post("")
@@ -85,6 +139,7 @@ def create_manual_knowledge_item(payload: KnowledgeCreatePayload, user: User = D
 		content=payload.content,
 		mime_type="text/plain",
 		is_active=payload.is_active,
+		rating=payload.rating,
 	)
 	db.add(item)
 	db.commit()
@@ -95,6 +150,7 @@ def create_manual_knowledge_item(payload: KnowledgeCreatePayload, user: User = D
 async def upload_knowledge_file(
 	file: UploadFile = File(...),
 	title: str = Form(default=""),
+	rating: int | None = Form(default=None, ge=1, le=5),
 	user: User = Depends(get_current_user),
 	db: Session = Depends(get_db),
 ):
@@ -117,15 +173,14 @@ async def upload_knowledge_file(
 		content=extracted.text,
 		mime_type=file.content_type or "application/octet-stream",
 		original_filename=name,
+		rating=rating,
 		item_metadata={"sha256": checksum, "extractionStatus": extracted.status},
 	)
 	db.add(item)
 	db.flush()
-	storage_dir = settings.upload_dir / "knowledge" / user.id
-	storage_dir.mkdir(parents=True, exist_ok=True)
-	storage_path = storage_dir / item.id
-	storage_path.write_bytes(content)
-	item.storage_path = str(storage_path)
+	storage_key = build_storage_key(user.id, "knowledge", item.id)
+	await get_file_storage().save(storage_key, content, item.mime_type)
+	item.storage_key = storage_key
 	db.commit()
 	return {"item": knowledge_payload(item)}
 
@@ -197,27 +252,35 @@ def update_knowledge_item(item_id: str, payload: KnowledgeUpdatePayload, user: U
 		item.content = payload.content
 	if payload.is_active is not None:
 		item.is_active = payload.is_active
+	if "rating" in payload.model_fields_set:
+		item.rating = payload.rating
 	item.updated_at = utc_now()
 	db.commit()
 	return {"item": knowledge_payload(item)}
 
 
 @router.delete("/{item_id}", status_code=204)
-def delete_knowledge_item(item_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def delete_knowledge_item(item_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	item = owned_knowledge_item(db, item_id, user.id)
 	storage_path = Path(item.storage_path) if item.storage_path else None
+	storage_key = item.storage_key
 	db.delete(item)
 	db.commit()
-	if storage_path is not None:
-		storage_path.unlink(missing_ok=True)
+	if storage_key:
+		await get_file_storage().delete(storage_key)
+	elif storage_path is not None:
+		await asyncio.to_thread(storage_path.unlink, missing_ok=True)
 	return Response(status_code=204)
 
 
 @router.get("/{item_id}/file")
-def download_knowledge_file(item_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def download_knowledge_file(item_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	item = owned_knowledge_item(db, item_id, user.id)
-	if item.storage_path:
-		path = Path(item.storage_path)
+	storage_key: str | None = None
+	legacy_path: Path | None = None
+	if item.storage_key or item.storage_path:
+		storage_key = item.storage_key
+		legacy_path = Path(item.storage_path) if item.storage_path else None
 		name = item.original_filename or item.title
 	elif item.source_file_id:
 		attachment = db.scalar(
@@ -227,28 +290,19 @@ def download_knowledge_file(item_id: str, user: User = Depends(get_current_user)
 		)
 		if attachment is None:
 			raise AppError(404, "ATTACHMENT_NOT_FOUND", "Исходный файл не найден")
-		path = Path(attachment.storage_path)
+		storage_key = attachment.storage_key
+		legacy_path = Path(attachment.storage_path) if attachment.storage_path else None
 		name = attachment.name
 	else:
 		raise AppError(404, "KNOWLEDGE_FILE_NOT_FOUND", "У элемента нет файла")
-	if not path.is_file():
+	try:
+		content = await get_file_storage().get(storage_key) if storage_key else await asyncio.to_thread(legacy_path.read_bytes) if legacy_path else None
+	except (FileNotFoundError, OSError):
+		content = None
+	if content is None:
 		raise AppError(404, "ATTACHMENT_MISSING", "Файл отсутствует в хранилище")
-	return FileResponse(path, media_type=item.mime_type, filename=name, content_disposition_type="attachment")
+	return Response(content, media_type=item.mime_type, headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
 
 
 def retrieve_knowledge(db: Session, user_id: str, query: str, limit: int = 4) -> list[KnowledgeItem]:
-	items = list(db.scalars(
-		select(KnowledgeItem)
-		.where(KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True))
-		.order_by(KnowledgeItem.updated_at.desc())
-		.limit(300)
-	))
-	terms = {term.lower() for term in query.split() if len(term) > 2}
-	if not terms:
-		return items[:limit]
-	scored = sorted(
-		((sum((item.title + " " + item.content).lower().count(term) for term in terms), item) for item in items),
-		key=lambda pair: pair[0],
-		reverse=True,
-	)
-	return [item for score, item in scored if score > 0][:limit]
+	return knowledge_retrieval_service.search(db, user_id, query, limit)

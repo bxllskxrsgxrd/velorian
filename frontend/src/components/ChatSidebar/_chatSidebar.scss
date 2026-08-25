@@ -26,12 +26,14 @@
 	&__collapse:hover { background: var(--color-accent-soft-hover) !important; }
 	&__mobile-close { display: none; }
 
-	&__new, &__search, &__search-trigger { min-height: 42px; align-items: center; gap: 9px; border-radius: var(--radius-medium); }
-	&__new, &__search { display: flex; }
+	&__new, &__knowledge, &__search, &__search-trigger { min-height: 42px; align-items: center; gap: 9px; border-radius: var(--radius-medium); }
+	&__new, &__knowledge, &__search { display: flex; }
 	&__search-trigger { display: none; place-items: center; width: 46px; padding: 0; }
 	&__new { width: 100%; padding: 9px 11px; border-color: color-mix(in srgb, var(--color-accent) 55%, var(--color-border)) !important; text-align: left; }
 	&__new svg { flex: 0 0 auto; }
 	&__new:hover { background: var(--color-accent-soft-hover); }
+	&__knowledge { width: 100%; padding: 9px 11px; border-color: transparent !important; background: transparent !important; text-align: left; }
+	&__knowledge:hover, &__knowledge--active { color: var(--color-accent) !important; background: var(--color-accent-soft-hover) !important; }
 	&__search { padding: 0 11px; border: 1px solid var(--color-border); background: var(--color-bg-elevated); }
 	&__search > svg { flex: 0 0 auto; color: var(--color-text-secondary); }
 	&__search input { min-width: 0; width: 100%; padding: 8px 0; border: 0; outline: none; background: transparent; }
@@ -69,12 +71,12 @@
 	&__visually-hidden { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); }
 
 	&--collapsed { width: 68px; flex-basis: 68px; padding-inline: 10px; overflow: visible; }
-	&--collapsed &__brand strong, &--collapsed &__new span, &--collapsed &__search, &--collapsed &__account-copy, &--collapsed &__account > svg, &--collapsed &__collapse { display: none; }
+	&--collapsed &__brand strong, &--collapsed &__new span, &--collapsed &__knowledge span, &--collapsed &__search, &--collapsed &__account-copy, &--collapsed &__account > svg, &--collapsed &__collapse { display: none; }
 	&--collapsed &__header { justify-content: center; }
 	&--collapsed &__mark { cursor: pointer; }
 	&--collapsed &__mark:hover .chat-sidebar__logo, &--collapsed &__mark:focus-visible .chat-sidebar__logo { opacity: 0; }
 	&--collapsed &__mark:hover .chat-sidebar__expand, &--collapsed &__mark:focus-visible .chat-sidebar__expand { opacity: 1; }
-	&--collapsed &__new, &--collapsed &__account { width: 46px; grid-template-columns: 36px; justify-content: center; padding: 6px; }
+	&--collapsed &__new, &--collapsed &__knowledge, &--collapsed &__account { width: 46px; grid-template-columns: 36px; justify-content: center; padding: 6px; }
 	&--collapsed &__search-trigger { display: grid; }
 	&--collapsed &__conversations { visibility: hidden; pointer-events: none; }
 	&--collapsed &__account-menu { left: 54px; right: auto; bottom: 0; width: 240px; }
@@ -87,7 +89,7 @@
 		transition: transform var(--transition-normal);
 		&--open { transform: translateX(0); }
 		&--collapsed { width: 286px; flex-basis: 286px; padding: 14px 12px; }
-		&--collapsed &__brand strong, &--collapsed &__new span { display: inline; }
+		&--collapsed &__brand strong, &--collapsed &__new span, &--collapsed &__knowledge span { display: inline; }
 		&--collapsed &__search { display: flex; }
 		&--collapsed &__search-trigger { display: none; }
 		&--collapsed &__conversations { display: flex; }

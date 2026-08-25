@@ -1,12 +1,13 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
 import type { PreviewFile } from '../../types/chat';
 import { getFileCodeLanguage } from '../../utils/codeLanguage';
 import { isTextPreview } from '../../utils/files';
 import { reportError } from '../../utils/reportError';
 import { DeleteAttachmentIcon } from '../icons/DeleteAttachmentIcon';
-import { HighlightedCode } from '../MessageBubble/AssistantMessageContent';
 import { IconButton } from '../ui/IconButton/IconButton';
 import './_filePreviewModal.scss';
+
+const HighlightedCode = lazy(() => import('../MessageBubble/AssistantMessageContent').then((module) => ({ default: module.HighlightedCode })));
 
 type FilePreviewModalProps = {
 	file: PreviewFile;
@@ -61,12 +62,12 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 			const textContent = textPreview?.url === file.url ? textPreview.content : 'Загрузка…';
 
 			return (
-				<HighlightedCode
+				<Suspense fallback={<pre className="file-preview__text">{textContent}</pre>}><HighlightedCode
 					code={textContent}
 					language={getFileCodeLanguage(file.name)}
 					className="file-preview__text"
 					ariaLabel={`Содержимое файла ${file.name}`}
-				/>
+				/></Suspense>
 			);
 		}
 

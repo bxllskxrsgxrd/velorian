@@ -1,7 +1,10 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import { USER_MESSAGE_INLINE_CHAR_LIMIT } from '../../constants/limits';
-import { PromptBar, WEB_SEARCH_MARKER } from './PromptBar';
+import { PromptBar } from './PromptBar';
+import { promptMarker } from '../../constants/promptTools';
+
+const WEB_SEARCH_MARKER = promptMarker('web');
 
 function renderPromptBar(onSendMessage = vi.fn().mockResolvedValue(undefined), onFilesSelect = vi.fn()) {
 	render(
@@ -21,7 +24,7 @@ function renderPromptBar(onSendMessage = vi.fn().mockResolvedValue(undefined), o
 
 function enableWebSearch() {
 	fireEvent.click(screen.getByLabelText('Открыть меню действий'));
-	fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Поиск в сети' }));
+	fireEvent.click(screen.getByRole('menuitemradio', { name: 'Поиск в сети' }));
 }
 
 describe('PromptBar web search', () => {
@@ -43,15 +46,15 @@ describe('PromptBar web search', () => {
 		const markerWithoutSpace = WEB_SEARCH_MARKER.trimEnd();
 		fireEvent.change(textarea, { target: { value: markerWithoutSpace } });
 		fireEvent.click(screen.getByLabelText('Открыть меню действий'));
-		expect(screen.getByRole('menuitemcheckbox', { name: 'Отключить поиск в сети' })).toHaveAttribute('aria-checked', 'true');
-		fireEvent.click(screen.getByRole('menuitemcheckbox', { name: 'Отключить поиск в сети' }));
+		expect(screen.getByRole('menuitemradio', { name: 'Отключить поиск в сети' })).toHaveAttribute('aria-checked', 'true');
+		fireEvent.click(screen.getByRole('menuitemradio', { name: 'Отключить поиск в сети' }));
 		enableWebSearch();
 
 		fireEvent.change(textarea, { target: { value: markerWithoutSpace.slice(0, -1) } });
 		expect(textarea).toHaveValue('');
 
 		fireEvent.click(screen.getByLabelText('Открыть меню действий'));
-		expect(screen.getByRole('menuitemcheckbox', { name: 'Поиск в сети' })).toHaveAttribute('aria-checked', 'false');
+		expect(screen.getByRole('menuitemradio', { name: 'Поиск в сети' })).toHaveAttribute('aria-checked', 'false');
 	});
 
 	it('removes the marker before sending the web-search request', async () => {
@@ -60,7 +63,16 @@ describe('PromptBar web search', () => {
 		fireEvent.change(screen.getByRole('textbox'), { target: { value: `${WEB_SEARCH_MARKER}курс рубля` } });
 		fireEvent.click(screen.getByLabelText('Отправить сообщение'));
 
-		await waitFor(() => expect(onSendMessage).toHaveBeenCalledWith('курс рубля', [], true));
+		await waitFor(() => expect(onSendMessage).toHaveBeenCalledWith('курс рубля', [], 'web'));
+	});
+
+	it('enables knowledge search as an exclusive mode and submits it explicitly', async () => {
+		const { onSendMessage } = renderPromptBar();
+		fireEvent.click(screen.getByLabelText('Открыть меню действий'));
+		fireEvent.click(screen.getByRole('menuitemradio', { name: 'Поиск по базе знаний' }));
+		fireEvent.change(screen.getByRole('textbox'), { target: { value: `${promptMarker('knowledge')}мой оффер` } });
+		fireEvent.click(screen.getByLabelText('Отправить сообщение'));
+		await waitFor(() => expect(onSendMessage).toHaveBeenCalledWith('мой оффер', [], 'knowledge'));
 	});
 
 	it('turns a large Unicode paste into a text attachment without duplicating it', () => {

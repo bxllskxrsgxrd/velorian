@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { USER_MESSAGE_INLINE_CHAR_LIMIT } from '../../constants/limits';
+import { PROMPT_TOOLS, promptMarker, stripPromptMarker } from '../../constants/promptTools';
+import type { SearchMode } from '../../types/chat';
 import { reportError } from '../../utils/reportError';
 import { createPastedTextFile } from '../../utils/pastedTextFile';
 import { MicrophoneIcon } from '../icons/MicrophoneIcon';
@@ -31,22 +33,13 @@ type PromptBarProps = {
 	files: File[];
 	fileError?: string;
 	isGenerating: boolean;
-	onSendMessage: (prompt: string, files: File[], webSearch: boolean) => Promise<void>;
+	onSendMessage: (prompt: string, files: File[], searchMode: SearchMode) => Promise<void>;
 	onStop: () => void;
 	onRemoveFile: (index: number) => void;
 	onOpenFile: (file: File) => void;
 	onFilesSelect: (files: File[]) => void;
 	onClearFiles: () => void;
 };
-
-const WEB_SEARCH_MARKER_TEXT = '🌐 Поиск в сети';
-export const WEB_SEARCH_MARKER = `${WEB_SEARCH_MARKER_TEXT} `;
-
-function removeWebSearchMarker(value: string) {
-	if (value.startsWith(WEB_SEARCH_MARKER)) return value.slice(WEB_SEARCH_MARKER.length);
-	if (value.startsWith(WEB_SEARCH_MARKER_TEXT)) return value.slice(WEB_SEARCH_MARKER_TEXT.length);
-	return value;
-}
 
 export function PromptBar({
 	files,
@@ -61,7 +54,7 @@ export function PromptBar({
 }: PromptBarProps) {
 	const [isMultiline, setIsMultiline] = useState(false);
 	const [value, setValue] = useState('');
-	const [webSearch, setWebSearch] = useState(false);
+	const [searchMode, setSearchMode] = useState<SearchMode>('none');
 	const [isListening, setIsListening] = useState(false);
 	const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 	const speechWindow = window as typeof window & {
@@ -69,7 +62,7 @@ export function PromptBar({
 		webkitSpeechRecognition?: SpeechRecognitionConstructor;
 	};
 	const voiceInputAvailable = Boolean(speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition);
-	const promptValue = webSearch ? removeWebSearchMarker(value) : value;
+	const promptValue = stripPromptMarker(value, searchMode);
 	const isSendDisabled = isGenerating || (!promptValue.trim() && files.length === 0);
 	const promptBarClassName = [
 		'prompt-bar',
@@ -94,23 +87,19 @@ export function PromptBar({
 
 	function handleChange(event: React.ChangeEvent<HTMLTextAreaElement>) {
 		const nextValue = event.currentTarget.value;
-		if (webSearch && !nextValue.startsWith(WEB_SEARCH_MARKER_TEXT)) {
-			const currentPrompt = removeWebSearchMarker(value);
+		if (searchMode !== 'none' && !nextValue.startsWith(PROMPT_TOOLS[searchMode].marker)) {
+			const currentPrompt = stripPromptMarker(value, searchMode);
 			const promptPosition = currentPrompt ? nextValue.lastIndexOf(currentPrompt) : -1;
-			setWebSearch(false);
-			setValue(
-				promptPosition >= 0 ? nextValue.slice(promptPosition) : nextValue.startsWith('🌐') ? currentPrompt : nextValue,
-			);
+			setSearchMode('none');
+			setValue(promptPosition >= 0 ? nextValue.slice(promptPosition) : currentPrompt);
 			return;
 		}
 		setValue(nextValue);
 	}
 
-	function handleWebSearchChange(enabled: boolean) {
-		setWebSearch(enabled);
-		setValue((current) =>
-			enabled ? `${WEB_SEARCH_MARKER}${removeWebSearchMarker(current)}` : removeWebSearchMarker(current),
-		);
+	function handleSearchModeChange(mode: SearchMode) {
+		setValue((current) => `${promptMarker(mode)}${stripPromptMarker(current, searchMode)}`);
+		setSearchMode(mode);
 	}
 
 	function handleEnterDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -129,18 +118,18 @@ export function PromptBar({
 	async function handleSubmit(event: React.SyntheticEvent<HTMLFormElement>) {
 		event.preventDefault();
 		if (isSendDisabled) return;
-		const prompt = removeWebSearchMarker(value).trim();
+		const prompt = stripPromptMarker(value, searchMode).trim();
 		const submittedFiles = [...files];
-		const submittedWithWebSearch = webSearch;
+		const submittedSearchMode = searchMode;
 		setValue('');
-		setWebSearch(false);
+		setSearchMode('none');
 		onClearFiles();
 		try {
-			await onSendMessage(prompt, submittedFiles, submittedWithWebSearch);
+			await onSendMessage(prompt, submittedFiles, submittedSearchMode);
 		} catch (error) {
 			reportError('Не удалось отправить сообщение', error);
-			setWebSearch(submittedWithWebSearch);
-			setValue(submittedWithWebSearch ? `${WEB_SEARCH_MARKER}${prompt}` : prompt);
+			setSearchMode(submittedSearchMode);
+			setValue(`${promptMarker(submittedSearchMode)}${prompt}`);
 			onFilesSelect(submittedFiles);
 		}
 	}
@@ -194,8 +183,8 @@ export function PromptBar({
 				<div className="prompt-bar__actions">
 					<PromptActionsMenu
 						onFilesSelect={onFilesSelect}
-						webSearch={webSearch}
-						onWebSearchChange={handleWebSearchChange}
+						searchMode={searchMode}
+						onSearchModeChange={handleSearchModeChange}
 					/>
 				</div>
 				<AutoResizeTextarea

@@ -1,15 +1,18 @@
-import { useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect, useState } from 'react';
+import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { getCurrentUser, logout } from './api/chatApi';
 import { AuthPage } from './components/AuthPage/AuthPage';
 import { ChatPage } from './pages/ChatPage';
-import { KnowledgePage } from './pages/KnowledgePage';
 import type { AuthUser } from './types/chat';
 import { reportError } from './utils/reportError';
+
+const KnowledgePage = lazy(() => import('./pages/KnowledgePage'));
 
 function App() {
 	const [user, setUser] = useState<AuthUser | null>(null);
 	const [loading, setLoading] = useState(true);
-	const [path, setPath] = useState(window.location.pathname);
+	const navigate = useNavigate();
+	const location = useLocation();
 
 	useEffect(() => {
 		getCurrentUser()
@@ -21,31 +24,16 @@ function App() {
 			.finally(() => setLoading(false));
 	}, []);
 
-	useEffect(() => {
-		const handlePopState = () => setPath(window.location.pathname);
-		window.addEventListener('popstate', handlePopState);
-		return () => window.removeEventListener('popstate', handlePopState);
-	}, []);
-
-	function navigate(nextPath: string) {
-		window.history.pushState({}, '', nextPath);
-		setPath(nextPath);
-	}
-
 	if (loading) return <div className="app-loading">Загрузка Velorian…</div>;
 	if (!user) return <AuthPage onAuthenticated={setUser} />;
-	if (path === '/knowledge') return <KnowledgePage user={user} onBack={() => navigate('/')} />;
+	const handleLogout = async () => { await logout(); setUser(null); navigate('/'); };
+	const initialConversationId = new URLSearchParams(location.search).get('conversation') ?? undefined;
 
-	return (
-		<ChatPage
-			user={user}
-			onLogout={async () => {
-				await logout();
-				setUser(null);
-			}}
-			onOpenKnowledge={() => navigate('/knowledge')}
-		/>
-	);
+	return <Suspense fallback={<div className="app-loading">Загрузка раздела…</div>}><Routes>
+		<Route path="/" element={<ChatPage user={user} onLogout={handleLogout} onOpenKnowledge={() => navigate('/knowledge')} initialConversationId={initialConversationId} />} />
+		<Route path="/knowledge" element={<KnowledgePage user={user} onLogout={handleLogout} />} />
+		<Route path="*" element={<Navigate to="/" replace />} />
+	</Routes></Suspense>;
 }
 
 export default App;

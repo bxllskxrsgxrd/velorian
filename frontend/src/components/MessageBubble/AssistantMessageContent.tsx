@@ -237,3 +237,5 @@ export function AssistantMessageContent({ content, isStreaming }: AssistantMessa
 		</div>
 	);
 }
+
+export default AssistantMessageContent;

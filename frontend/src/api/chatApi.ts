@@ -1,4 +1,4 @@
-import type { AuthUser, ChatAttachment, ChatMessage, Conversation, ConversationSummary, KnowledgeItem, MessageRating } from '../types/chat';
+import type { AuthUser, ChatAttachment, ChatMessage, Conversation, ConversationSummary, KnowledgeItem, KnowledgePageResult, MessageRating, SearchMode } from '../types/chat';
 import { reportError } from '../utils/reportError';
 import { API_ORIGIN, ApiError, apiFetch, requestJson, setCsrfToken } from './httpClient';
 
@@ -102,7 +102,7 @@ type StreamChatOptions = {
 	conversationId: string;
 	prompt?: string;
 	files?: File[];
-	webSearch?: boolean;
+	searchMode?: SearchMode;
 	retryMessageId?: string;
 	editMessageId?: string;
 	signal: AbortSignal;
@@ -112,7 +112,7 @@ type StreamChatOptions = {
 async function runChatStream(options: StreamChatOptions): Promise<void> {
 	const formData = new FormData();
 	formData.append('prompt', options.prompt ?? '');
-	formData.append('web_search', String(Boolean(options.webSearch)));
+	formData.append('search_mode', options.searchMode ?? 'none');
 	if (options.retryMessageId) formData.append('retry_message_id', options.retryMessageId);
 	if (options.editMessageId) formData.append('edit_message_id', options.editMessageId);
 	options.files?.forEach((file) => formData.append('files', file));
@@ -167,29 +167,36 @@ export async function saveMessageToKnowledge(messageId: string): Promise<Knowled
 	return (await requestJson<{ items: KnowledgeItem[] }>(`/knowledge/messages/${messageId}`, { method: 'POST' })).items.map(normalizeKnowledgeItem);
 }
 
-export async function listKnowledge(params: { search?: string; sourceType?: string; isActive?: boolean } = {}): Promise<KnowledgeItem[]> {
+export async function listKnowledge(params: { search?: string; sourceType?: string; isActive?: boolean; minRating?: number; unrated?: boolean; sort?: string; limit?: number; cursor?: string } = {}): Promise<KnowledgePageResult> {
 	const query = new URLSearchParams();
 	if (params.search) query.set('search', params.search);
 	if (params.sourceType) query.set('source_type', params.sourceType);
 	if (params.isActive !== undefined) query.set('is_active', String(params.isActive));
-	return (await requestJson<{ items: KnowledgeItem[] }>(`/knowledge${query.size ? `?${query}` : ''}`)).items.map(normalizeKnowledgeItem);
+	if (params.minRating !== undefined) query.set('min_rating', String(params.minRating));
+	if (params.unrated) query.set('unrated', 'true');
+	if (params.sort) query.set('sort', params.sort);
+	if (params.limit) query.set('limit', String(params.limit));
+	if (params.cursor) query.set('cursor', params.cursor);
+	const result = await requestJson<KnowledgePageResult>(`/knowledge${query.size ? `?${query}` : ''}`);
+	return { ...result, items: result.items.map(normalizeKnowledgeItem) };
 }
 
-export async function createKnowledgeItem(title: string, content: string): Promise<KnowledgeItem> {
-	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>('/knowledge', { method: 'POST', body: JSON.stringify({ title, content }) })).item);
+export async function createKnowledgeItem(title: string, content: string, rating?: number): Promise<KnowledgeItem> {
+	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>('/knowledge', { method: 'POST', body: JSON.stringify({ title, content, rating }) })).item);
 }
 
-export async function uploadKnowledgeFile(file: File, title = ''): Promise<KnowledgeItem> {
+export async function uploadKnowledgeFile(file: File, title = '', rating?: number): Promise<KnowledgeItem> {
 	const body = new FormData();
 	body.append('file', file);
 	body.append('title', title);
+	if (rating) body.append('rating', String(rating));
 	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>('/knowledge/files', { method: 'POST', body })).item);
 }
 
-export async function updateKnowledgeItem(id: string, patch: { title?: string; content?: string; isActive?: boolean }): Promise<KnowledgeItem> {
+export async function updateKnowledgeItem(id: string, patch: { title?: string; content?: string; isActive?: boolean; rating?: number | null }): Promise<KnowledgeItem> {
 	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>(`/knowledge/${id}`, {
 		method: 'PATCH',
-		body: JSON.stringify({ title: patch.title, content: patch.content, is_active: patch.isActive }),
+		body: JSON.stringify({ title: patch.title, content: patch.content, is_active: patch.isActive, rating: patch.rating }),
 	})).item);
 }
 

@@ -12,3 +12,4 @@ Pillow==12.3.0
 pytesseract==0.3.13
 prometheus-client==0.26.0
 psycopg[binary]==3.3.4
+boto3>=1.40,<2

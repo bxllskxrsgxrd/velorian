@@ -26,6 +26,7 @@ type ChatSidebarProps = {
 	onOpenKnowledge: () => void;
 	onClose: () => void;
 	onToggleCollapsed: () => void;
+	activeSection?: 'chat' | 'knowledge';
 };
 
 type DialogState = { type: 'rename' | 'delete'; conversation: ConversationSummary } | null;
@@ -82,6 +83,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 					<button className="chat-sidebar__mobile-close" type="button" onClick={props.onClose} aria-label="Закрыть меню">×</button>
 				</div>
 				<button className="chat-sidebar__new" type="button" onClick={props.onNew} title="Новый чат"><NewChatIcon /><span>Новый чат</span></button>
+				<button className={`chat-sidebar__knowledge${props.activeSection === 'knowledge' ? ' chat-sidebar__knowledge--active' : ''}`} type="button" onClick={props.onOpenKnowledge} title="База знаний" aria-current={props.activeSection === 'knowledge' ? 'page' : undefined}><KnowledgeIcon /><span>База знаний</span></button>
 				<button className="chat-sidebar__search-trigger" type="button" onClick={openCollapsedSearch} aria-label="Развернуть панель и найти чат" title="Поиск диалогов"><SearchIcon /></button>
 				<label className="chat-sidebar__search">
 					<span className="chat-sidebar__visually-hidden">Поиск диалогов</span>
@@ -93,7 +95,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 					{props.conversations.map((conversation) => (
 						<div className={conversation.id === props.activeConversationId ? 'chat-sidebar__item chat-sidebar__item--active' : 'chat-sidebar__item'} key={conversation.id}>
 							<button className="chat-sidebar__select" type="button" onClick={() => props.onSelect(conversation.id)} title={conversation.title}>
-								<span className="chat-sidebar__conversation-icon" aria-hidden="true">◻</span><span>{conversation.title}</span>
+								<span>{conversation.title}</span>
 							</button>
 							<button className="chat-sidebar__more" type="button" onClick={() => setConversationMenuId((current) => current === conversation.id ? null : conversation.id)} aria-label={`Действия с чатом «${conversation.title}»`}><MoreIcon /></button>
 							{conversationMenuId === conversation.id && (
@@ -108,7 +110,6 @@ export function ChatSidebar(props: ChatSidebarProps) {
 				<div className="chat-sidebar__account-wrap">
 					{accountOpen && (
 						<div className="chat-sidebar__account-menu">
-							<button type="button" onClick={props.onOpenKnowledge}><KnowledgeIcon /><span>База знаний</span></button>
 							<button type="button" onClick={() => setSettingsOpen((current) => !current)}><SettingsIcon /><span>Настройки</span><ChevronIcon /></button>
 							{settingsOpen && (
 								<div className="chat-sidebar__settings-panel">

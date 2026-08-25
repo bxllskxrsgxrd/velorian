@@ -320,6 +320,18 @@ def test_large_inline_text_becomes_utf8_attachment(authenticated_client, monkeyp
 	assert "Юникод и переносы" in completions.calls[0]["messages"][-1]["content"]
 
 
+def test_stream_error_is_persisted_as_error_status(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions("")))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Ошибка"}).json()["conversation"]["id"]
+	response = authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Пустой ответ"})
+	assert '"type": "error"' in response.text
+	messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
+	assert messages[-1]["status"] == "error"
+	assert messages[-1]["role"] == "assistant"
+
+
 def test_rating_upsert_delete_and_no_duplicates(authenticated_client, monkeypatch):
 	from app.database import SessionLocal
 	from app.models import MessageRating
@@ -389,6 +401,52 @@ def test_knowledge_manual_file_rated_message_and_ownership(client, monkeypatch):
 	client.headers.update({"X-CSRF-Token": second.json()["csrfToken"]})
 	assert client.get(f"/api/knowledge/{manual_id}").status_code == 404
 	assert client.patch(f"/api/knowledge/{manual_id}", json={"title": "Взлом"}).status_code == 404
+
+
+def test_knowledge_rating_filters_sort_and_pagination(authenticated_client):
+	first = authenticated_client.post("/api/knowledge", json={"title": "Пять", "content": "Высокий рейтинг", "rating": 5})
+	second = authenticated_client.post("/api/knowledge", json={"title": "Три", "content": "Средний рейтинг", "rating": 3})
+	third = authenticated_client.post("/api/knowledge", json={"title": "Без оценки", "content": "Нет рейтинга"})
+	assert first.status_code == second.status_code == third.status_code == 200
+	assert authenticated_client.post("/api/knowledge", json={"title": "Ошибка", "content": "Невалидно", "rating": 6}).status_code == 422
+
+	high = authenticated_client.get("/api/knowledge?min_rating=4&sort=rating_desc").json()
+	assert [item["title"] for item in high["items"]] == ["Пять"]
+	unrated = authenticated_client.get("/api/knowledge?unrated=true").json()
+	assert [item["title"] for item in unrated["items"]] == ["Без оценки"]
+	page_one = authenticated_client.get("/api/knowledge?limit=1&sort=rating_desc").json()
+	assert page_one["pageInfo"]["hasMore"] is True
+	page_two = authenticated_client.get(f"/api/knowledge?limit=1&sort=rating_desc&cursor={page_one['pageInfo']['nextCursor']}").json()
+	assert page_two["items"][0]["id"] != page_one["items"][0]["id"]
+	updated = authenticated_client.patch(f"/api/knowledge/{second.json()['item']['id']}", json={"rating": 4})
+	assert updated.json()["item"]["rating"] == 4
+
+
+def test_knowledge_search_is_opt_in_and_owner_scoped(client, monkeypatch):
+	import app.main as main_module
+
+	owner = client.post("/api/auth/register", json={"email": "retrieval-owner@example.com", "password": "strong-password"})
+	client.headers.update({"X-CSRF-Token": owner.json()["csrfToken"]})
+	client.post("/api/knowledge", json={"title": "Альфа", "content": "Собственный секрет альфа", "rating": 5})
+	client.post("/api/auth/logout")
+	client.headers.update({"X-CSRF-Token": client.get("/api/auth/csrf").json()["csrfToken"]})
+	other = client.post("/api/auth/register", json={"email": "retrieval-other@example.com", "password": "strong-password"})
+	client.headers.update({"X-CSRF-Token": other.json()["csrfToken"]})
+	client.post("/api/knowledge", json={"title": "Чужое", "content": "Чужой секрет альфа", "rating": 5})
+	client.post("/api/auth/logout")
+	client.headers.update({"X-CSRF-Token": client.get("/api/auth/csrf").json()["csrfToken"]})
+	login = client.post("/api/auth/login", json={"email": "retrieval-owner@example.com", "password": "strong-password"})
+	client.headers.update({"X-CSRF-Token": login.json()["csrfToken"]})
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = client.post("/api/conversations", json={"title": "Поиск знаний"}).json()["conversation"]["id"]
+	client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Расскажи про альфа", "search_mode": "none"})
+	client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Расскажи про альфа", "search_mode": "knowledge"})
+	assert "<knowledge_context>" not in completions.calls[0]["messages"][-1]["content"]
+	knowledge_prompt = completions.calls[1]["messages"][-1]["content"]
+	assert "Собственный секрет альфа" in knowledge_prompt
+	assert "Чужой секрет альфа" not in knowledge_prompt
 
 
 def test_lower_rating_deactivates_saved_knowledge(authenticated_client, monkeypatch):

@@ -71,6 +71,7 @@ class Attachment(Base):
 	content_type: Mapped[str] = mapped_column(String(160))
 	size: Mapped[int] = mapped_column(Integer)
 	storage_path: Mapped[str] = mapped_column(String(1024))
+	storage_key: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
 	extraction_status: Mapped[str] = mapped_column(String(32), default="ready")
 	extracted_text: Mapped[str] = mapped_column(Text, default="")
 	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
@@ -118,6 +119,7 @@ class KnowledgeItem(Base):
 	__table_args__ = (
 		UniqueConstraint("user_id", "source_message_id", name="uq_knowledge_user_source_message"),
 		UniqueConstraint("user_id", "source_file_id", name="uq_knowledge_user_source_file"),
+		CheckConstraint("rating IS NULL OR (rating >= 1 AND rating <= 5)", name="ck_knowledge_item_rating"),
 		Index("ix_knowledge_user_active", "user_id", "is_active"),
 		Index("ix_knowledge_user_source", "user_id", "source_type"),
 	)
@@ -132,6 +134,7 @@ class KnowledgeItem(Base):
 	mime_type: Mapped[str] = mapped_column(String(160), default="text/plain")
 	original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
 	storage_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+	storage_key: Mapped[str | None] = mapped_column(String(1024), nullable=True, index=True)
 	rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
 	is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 	item_metadata: Mapped[dict] = mapped_column("metadata", JSON, default=dict)

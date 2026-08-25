@@ -51,10 +51,36 @@ class Settings:
 	rate_limit_window_seconds: int = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 	ocr_languages: str = os.getenv("OCR_LANGUAGES", "rus+eng")
 	knowledge_rating_threshold: int = int(os.getenv("KNOWLEDGE_RATING_THRESHOLD", "4"))
+	knowledge_search_driver: str = os.getenv("KNOWLEDGE_SEARCH_DRIVER", "text").strip().lower()
+	file_storage_driver: str = os.getenv("FILE_STORAGE_DRIVER", "local").strip().lower()
+	s3_endpoint: str | None = os.getenv("S3_ENDPOINT")
+	s3_region: str = os.getenv("S3_REGION", "us-east-1")
+	s3_bucket: str | None = os.getenv("S3_BUCKET")
+	s3_access_key: str | None = os.getenv("S3_ACCESS_KEY")
+	s3_secret_key: str | None = os.getenv("S3_SECRET_KEY")
+	database_pool_size: int = int(os.getenv("DATABASE_POOL_SIZE", "10"))
+	database_max_overflow: int = int(os.getenv("DATABASE_MAX_OVERFLOW", "20"))
 
 	@property
 	def is_production(self) -> bool:
 		return self.app_env == "production"
+
+	def validate_production(self) -> None:
+		if not self.is_production:
+			return
+		if self.database_url.startswith("sqlite"):
+			raise RuntimeError("Production requires PostgreSQL DATABASE_URL; SQLite is allowed only for development and tests")
+		if not self.database_url.startswith(("postgresql://", "postgresql+psycopg://")):
+			raise RuntimeError("Production DATABASE_URL must use PostgreSQL")
+		if self.file_storage_driver != "s3":
+			raise RuntimeError("Production requires FILE_STORAGE_DRIVER=s3")
+		missing = [name for name, value in {
+			"S3_BUCKET": self.s3_bucket,
+			"S3_ACCESS_KEY": self.s3_access_key,
+			"S3_SECRET_KEY": self.s3_secret_key,
+		}.items() if not value]
+		if missing:
+			raise RuntimeError(f"Missing production object storage settings: {', '.join(missing)}")
 
 
 settings = Settings()

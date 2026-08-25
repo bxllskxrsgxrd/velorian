@@ -5,14 +5,16 @@ import { IconButton } from '../ui/IconButton/IconButton';
 import './_promptActionsMenu.scss';
 import { AttachFilesAction } from './PromptActionsMenuButtons/AttachFilesAction';
 import { PromptActionButton } from './PromptActionsMenuButtons/PromptActionButton';
+import { PROMPT_TOOLS } from '../../constants/promptTools';
+import type { SearchMode } from '../../types/chat';
 
 type PromptActionsMenuProps = {
 	onFilesSelect: (files: File[]) => void;
-	webSearch: boolean;
-	onWebSearchChange: (enabled: boolean) => void;
+	searchMode: SearchMode;
+	onSearchModeChange: (mode: SearchMode) => void;
 };
 
-export function PromptActionsMenu({ onFilesSelect, webSearch, onWebSearchChange }: PromptActionsMenuProps) {
+export function PromptActionsMenu({ onFilesSelect, searchMode, onSearchModeChange }: PromptActionsMenuProps) {
 	const [open, setOpen] = useState(false);
 	const buttonRef = useRef<HTMLButtonElement>(null);
 	const rootRef = useRef<HTMLDivElement>(null);
@@ -27,8 +29,8 @@ export function PromptActionsMenu({ onFilesSelect, webSearch, onWebSearchChange 
 		closeMenu();
 	}
 
-	function handleWebSearchClick() {
-		onWebSearchChange(!webSearch);
+	function handleSearchModeClick(mode: Exclude<SearchMode, 'none'>) {
+		onSearchModeChange(searchMode === mode ? 'none' : mode);
 		closeMenu();
 	}
 
@@ -69,14 +71,11 @@ export function PromptActionsMenu({ onFilesSelect, webSearch, onWebSearchChange 
 			{open && (
 				<div className="prompt-actions__menu" role="menu">
 					<AttachFilesAction onFilesSelect={handleFilesSelect} />
-					<PromptActionButton
-						role="menuitemcheckbox"
-						aria-checked={webSearch}
-						className={webSearch ? 'prompt-action-btn--active' : ''}
-						onClick={handleWebSearchClick}
-					>
-						{webSearch ? 'Отключить поиск в сети' : 'Поиск в сети'}
-					</PromptActionButton>
+					{(Object.keys(PROMPT_TOOLS) as Array<Exclude<SearchMode, 'none'>>).map((mode) => {
+						const tool = PROMPT_TOOLS[mode];
+						const active = searchMode === mode;
+						return <PromptActionButton key={mode} role="menuitemradio" aria-checked={active} className={active ? 'prompt-action-btn--active' : ''} onClick={() => handleSearchModeClick(mode)}>{active ? tool.activeLabel : tool.label}</PromptActionButton>;
+					})}
 				</div>
 			)}
 		</div>

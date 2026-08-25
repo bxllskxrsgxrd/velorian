@@ -34,4 +34,14 @@ describe('streamChat', () => {
 			headers: expect.objectContaining({ 'X-CSRF-Token': 'csrf-value', 'X-Request-ID': expect.any(String) }),
 		}));
 	});
+
+	it('sends knowledge search as an implementation-independent search mode', async () => {
+		setCsrfToken('test-csrf');
+		const encoder = new TextEncoder();
+		const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(new ReadableStream({ start(controller) { controller.enqueue(encoder.encode('{"type":"done","messageId":"a"}\n')); controller.close(); } }), { status: 200 }));
+		await streamChat({ conversationId: 'c', searchMode: 'knowledge', signal: new AbortController().signal, onEvent: vi.fn() });
+		const body = fetchMock.mock.calls[0][1]?.body as FormData;
+		expect(body.get('search_mode')).toBe('knowledge');
+		expect(body.has('userId')).toBe(false);
+	});
 });

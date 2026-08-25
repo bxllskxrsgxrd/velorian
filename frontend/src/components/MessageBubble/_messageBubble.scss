@@ -41,8 +41,6 @@
 
 	&__rating { display: flex; flex-direction: column; gap: 6px; color: var(--color-text-secondary); font-size: 12px; }
 	&__rating-row { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
-	&__rating-star { display: grid; place-items: center; width: 25px; height: 25px; padding: 3px; border: 0; color: var(--color-border); background: transparent; cursor: pointer; }
-	&__rating-star--active, &__rating-star:hover { color: #ffd479; }
 	&__rating-link, &__rating-save { padding: 4px 7px; border: 0; border-radius: 7px; color: var(--color-text-secondary); background: transparent; cursor: pointer; }
 	&__rating-link:hover { color: var(--color-text-primary); }
 	&__rating-save { margin-left: 4px; color: var(--color-accent); background: var(--color-accent-soft); }

@@ -1,6 +1,6 @@
 from collections.abc import Callable
 
-from sqlalchemy import Column, DateTime, MetaData, String, Table, insert, select
+from sqlalchemy import Column, DateTime, MetaData, String, Table, inspect, insert, select, text
 from sqlalchemy.engine import Connection
 
 from .models import utc_now
@@ -22,8 +22,23 @@ def _create_ratings_and_knowledge(connection: Connection) -> None:
 		Base.metadata.tables[table_name].create(bind=connection, checkfirst=True)
 
 
+def _add_storage_keys(connection: Connection) -> None:
+	inspector = inspect(connection)
+	for table_name in ("attachments", "knowledge_items"):
+		columns = {column["name"] for column in inspector.get_columns(table_name)}
+		if "storage_key" not in columns:
+			connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN storage_key VARCHAR(1024)"))
+	index_statements = (
+		"CREATE INDEX IF NOT EXISTS ix_attachments_storage_key ON attachments (storage_key)",
+		"CREATE INDEX IF NOT EXISTS ix_knowledge_items_storage_key ON knowledge_items (storage_key)",
+	)
+	for statement in index_statements:
+		connection.execute(text(statement))
+
+
 MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260825_01_ratings_and_knowledge", _create_ratings_and_knowledge),
+	("20260825_02_storage_keys", _add_storage_keys),
 )
 
 

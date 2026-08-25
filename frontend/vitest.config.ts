@@ -6,6 +6,7 @@ export default defineConfig({
 	plugins: [react()],
 	resolve: { alias: { '@': resolve(process.cwd(), 'src') } },
 	test: {
+		include: ['src/**/*.{test,spec}.{ts,tsx}'],
 		environment: 'jsdom',
 		setupFiles: ['./src/test/setup.ts'],
 		css: false,
