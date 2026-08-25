@@ -1,5 +1,7 @@
 import { ACCENT_THEMES, ACCENT_THEME_LABELS, type AccentTheme } from '../../theme/accentTheme';
 import type { AuthUser, ConversationSummary } from '../../types/chat';
+import { NewChatIcon } from '../icons/NewChatIcon';
+import { VelorianIcon } from '../icons/VelorianIcon';
 import './_chatSidebar.scss';
 
 type ChatSidebarProps = {
@@ -41,7 +43,9 @@ export function ChatSidebar({
 		<aside className={isOpen ? 'chat-sidebar chat-sidebar--open' : 'chat-sidebar'} aria-label="Навигация по чатам">
 			<div className="chat-sidebar__header">
 				<div>
-					<span className="chat-sidebar__mark">V</span>
+					<span className="chat-sidebar__mark">
+						<VelorianIcon />
+					</span>
 					<strong>Velorian</strong>
 				</div>
 				<button className="chat-sidebar__mobile-close" type="button" onClick={onClose} aria-label="Закрыть меню">
@@ -49,7 +53,7 @@ export function ChatSidebar({
 				</button>
 			</div>
 			<button className="chat-sidebar__new" type="button" onClick={onNew}>
-				＋ Новый чат
+				<NewChatIcon /> Новый чат
 			</button>
 			<label className="chat-sidebar__search">
 				<span className="chat-sidebar__visually-hidden">Поиск диалогов</span>

@@ -2,6 +2,7 @@ import { StrictMode } from "react";
 import { createRoot } from "react-dom/client";
 import App from "./App.tsx";
 import "./scss/default/_index.scss";
+import "./scss/default/_reset.scss"
 import { initializeAccentTheme } from "./theme/accentTheme";
 
 initializeAccentTheme();

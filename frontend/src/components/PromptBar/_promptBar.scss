@@ -79,33 +79,33 @@
 			height: 100%;
 
 			padding: 6px 8px;
-				border-radius: var(--radius-medium);
+			border-radius: var(--radius-medium);
 
-				border: 1px solid var(--color-border);
-				background: var(--color-bg-elevated);
+			border: 1px solid var(--color-border);
+			background: var(--color-bg-elevated);
 
 			display: flex;
 			align-items: center;
 			justify-content: center;
 			gap: 8px;
 
-				color: var(--color-text-primary);
+			color: var(--color-text-primary);
 			font: inherit;
 			text-align: left;
 
-				&:hover {
-					background: var(--color-accent-soft);
-					border-color: color-mix(in srgb, var(--color-accent) 46%, var(--color-border));
-					cursor: pointer;
-				}
+			&:hover {
+				background: var(--color-accent-soft);
+				border-color: color-mix(in srgb, var(--color-accent) 46%, var(--color-border));
+				cursor: pointer;
+			}
 
-				&:active {
-					background: var(--color-accent-soft-hover);
-				}
+			&:active {
+				background: var(--color-accent-soft-hover);
+			}
 
-				&:focus-visible {
-					outline: 1px solid var(--color-accent-focus);
-					outline-offset: 2px;
+			&:focus-visible {
+				outline: 1px solid var(--color-accent-focus);
+				outline-offset: 2px;
 			}
 		}
 
@@ -120,19 +120,19 @@
 
 			padding: 4px;
 
-				color: var(--color-bg-canvas);
-				background: var(--color-text-secondary);
+			color: var(--color-bg-canvas);
+			background: var(--color-text-secondary);
 
 			& svg {
 				width: 8px;
 				height: 8px;
 
-					fill: currentColor;
+				fill: currentColor;
 			}
 
-				&:hover {
-					background: var(--color-error);
-				}
+			&:hover {
+				background: var(--color-error);
+			}
 		}
 
 		&-open-button--image {
@@ -161,32 +161,42 @@
 	}
 
 	&__input-container {
+		--textarea-leading-inset: 40px;
+		--textarea-trailing-inset: 40px;
+
 		width: 100%;
 
 		display: grid;
-		grid-template-columns: auto minmax(0, 1fr) auto;
-		grid-template-areas: 'actions textarea send';
+		grid-template-columns: auto minmax(0, 1fr) auto auto;
+		grid-template-areas: 'actions textarea voice send';
 		align-items: center;
 
+		column-gap: 0;
 		row-gap: 0;
-
-		transition: row-gap 180ms ease;
 	}
 
-	&__options {
-		display: flex;
-		align-items: center;
-		justify-content: flex-end;
-		gap: 12px;
-		padding: 0 4px 8px;
-		font-size: 12px;
+	&__voice {
 		color: var(--color-text-secondary);
+		grid-area: voice;
 	}
 
-	&__voice { border: 0; padding: 3px 0; color: var(--color-text-secondary); background: transparent; cursor: pointer; }
-	&__voice--active { color: var(--color-error); }
-	&__error { padding: 0 4px 8px; color: var(--color-error); font-size: 12px; }
-	&__stop { width: 12px; height: 12px; border-radius: 3px; background: currentColor; }
+	&__voice--active {
+		color: var(--color-error);
+	}
+
+	&__error {
+		width: 100%;
+		padding: 0 4px 8px;
+		color: var(--color-error);
+		font-size: 12px;
+	}
+
+	&__stop {
+		width: 12px;
+		height: 12px;
+		border-radius: 3px;
+		background: currentColor;
+	}
 
 	&__actions {
 		grid-area: actions;
@@ -218,8 +228,22 @@
 
 	&--multiline {
 		.prompt-bar__input-container {
-			grid-template-areas: 'actions textarea send';
-			align-items: end;
+			grid-template-areas:
+				'textarea textarea textarea textarea'
+				'actions . voice send';
+			row-gap: 8px;
+			align-items: center;
+		}
+
+		.resizeTextarea {
+			padding-left: var(--textarea-leading-inset);
+			padding-right: var(--textarea-trailing-inset);
+		}
+	}
+
+	&--with-voice {
+		.prompt-bar__input-container {
+			--textarea-trailing-inset: 72px;
 		}
 	}
 

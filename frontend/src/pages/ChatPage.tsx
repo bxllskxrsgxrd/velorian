@@ -20,6 +20,7 @@ import type { AuthUser, ChatAttachment, ChatMessage, ConversationSummary, Previe
 import { attachmentToPreviewFile, createChatAttachment, fileToPreviewFile } from '../utils/files';
 import { reportError } from '../utils/reportError';
 import './_chatPage.scss';
+import { ArrowDownIcon } from '../components/icons/ArrowDownIcon';
 
 type ChatPageProps = {
 	user: AuthUser;
@@ -463,21 +464,20 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 						) : (
 							<div className="chat-page__start">
 								<h1 className="chat-page__heading">Введи запрос</h1>
-								<p>Файлы участвуют в контексте автоматически</p>
 							</div>
 						)}
 					</main>
-					{showScrollButton && (
-						<button
-							className="chat-page__scroll-bottom"
-							type="button"
-							onClick={scrollToBottom}
-							aria-label="К новым сообщениям"
-						>
-							↓
-						</button>
-					)}
 					<div className="chat-page__prompt">
+						{showScrollButton && (
+							<button
+								className="chat-page__scroll-bottom"
+								type="button"
+								onClick={scrollToBottom}
+								aria-label="К новым сообщениям"
+							>
+								<ArrowDownIcon />
+							</button>
+						)}
 						<PromptBar
 							files={files}
 							fileError={fileError}

@@ -1,9 +1,10 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { reportError } from '../../utils/reportError';
+import { MicrophoneIcon } from '../icons/MicrophoneIcon';
 import { SendIcon } from '../icons/SendIcon';
 import { PromptActionsMenu } from '../PromptActionsMenu/PromptActionsMenu';
 import { AutoResizeTextarea } from '../ui/AutoResizeTextarea/AutoResizeTextarea';
 import { IconButton } from '../ui/IconButton/IconButton';
-import { reportError } from '../../utils/reportError';
 import './_promptBar.scss';
 import { AttachmentPreview } from './AttachmentPreview';
 
@@ -68,16 +69,26 @@ export function PromptBar({
 	const voiceInputAvailable = Boolean(speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition);
 	const promptValue = webSearch ? removeWebSearchMarker(value) : value;
 	const isSendDisabled = isGenerating || (!promptValue.trim() && files.length === 0);
+	const promptBarClassName = [
+		'prompt-bar',
+		isMultiline && 'prompt-bar--multiline',
+		voiceInputAvailable && 'prompt-bar--with-voice',
+	]
+		.filter(Boolean)
+		.join(' ');
 
-	useEffect(() => () => {
-		const recognition = recognitionRef.current;
-		if (!recognition) return;
-		recognition.onresult = null;
-		recognition.onend = null;
-		recognition.onerror = null;
-		recognition.stop();
-		recognitionRef.current = null;
-	}, []);
+	useEffect(
+		() => () => {
+			const recognition = recognitionRef.current;
+			if (!recognition) return;
+			recognition.onresult = null;
+			recognition.onend = null;
+			recognition.onerror = null;
+			recognition.stop();
+			recognitionRef.current = null;
+		},
+		[],
+	);
 
 	function handleChange(event: React.ChangeEvent<HTMLTextAreaElement>) {
 		const nextValue = event.currentTarget.value;
@@ -85,7 +96,9 @@ export function PromptBar({
 			const currentPrompt = removeWebSearchMarker(value);
 			const promptPosition = currentPrompt ? nextValue.lastIndexOf(currentPrompt) : -1;
 			setWebSearch(false);
-			setValue(promptPosition >= 0 ? nextValue.slice(promptPosition) : nextValue.startsWith('🌐') ? currentPrompt : nextValue);
+			setValue(
+				promptPosition >= 0 ? nextValue.slice(promptPosition) : nextValue.startsWith('🌐') ? currentPrompt : nextValue,
+			);
 			return;
 		}
 		setValue(nextValue);
@@ -93,7 +106,9 @@ export function PromptBar({
 
 	function handleWebSearchChange(enabled: boolean) {
 		setWebSearch(enabled);
-		setValue((current) => enabled ? `${WEB_SEARCH_MARKER}${removeWebSearchMarker(current)}` : removeWebSearchMarker(current));
+		setValue((current) =>
+			enabled ? `${WEB_SEARCH_MARKER}${removeWebSearchMarker(current)}` : removeWebSearchMarker(current),
+		);
 	}
 
 	function handleEnterDown(event: React.KeyboardEvent<HTMLTextAreaElement>) {
@@ -147,7 +162,7 @@ export function PromptBar({
 	}
 
 	return (
-		<form className={isMultiline ? 'prompt-bar prompt-bar--multiline' : 'prompt-bar'} onSubmit={handleSubmit}>
+		<form className={promptBarClassName} onSubmit={handleSubmit}>
 			{files.length > 0 && (
 				<div className="prompt-bar__attachments">
 					{files.map((file, index) => (
@@ -160,24 +175,45 @@ export function PromptBar({
 					))}
 				</div>
 			)}
-			{fileError && <div className="prompt-bar__error" role="alert">{fileError}</div>}
-			{voiceInputAvailable && (
-				<div className="prompt-bar__options">
-					<button className={isListening ? 'prompt-bar__voice prompt-bar__voice--active' : 'prompt-bar__voice'} type="button" onClick={toggleVoiceInput}>
-						{isListening ? 'Остановить запись' : 'Голосовой ввод'}
-					</button>
+			{fileError && (
+				<div className="prompt-bar__error" role="alert">
+					{fileError}
 				</div>
 			)}
+
 			<div className="prompt-bar__input-container">
 				<div className="prompt-bar__actions">
-					<PromptActionsMenu onFilesSelect={onFilesSelect} webSearch={webSearch} onWebSearchChange={handleWebSearchChange} />
+					<PromptActionsMenu
+						onFilesSelect={onFilesSelect}
+						webSearch={webSearch}
+						onWebSearchChange={handleWebSearchChange}
+					/>
 				</div>
-				<AutoResizeTextarea value={value} onChange={handleChange} onMultilineChange={setIsMultiline} onKeyDown={handleEnterDown} />
+				<AutoResizeTextarea
+					value={value}
+					onChange={handleChange}
+					onMultilineChange={setIsMultiline}
+					onKeyDown={handleEnterDown}
+				/>
+				{voiceInputAvailable && (
+					<IconButton
+						className={isListening ? 'prompt-bar__voice prompt-bar__voice--active' : 'prompt-bar__voice'}
+						onClick={toggleVoiceInput}
+						aria-label={isListening ? 'Остановить запись' : 'Голосовой ввод'}
+					>
+						<MicrophoneIcon />
+					</IconButton>
+				)}
+
 				<div className="prompt-bar__send">
 					{isGenerating ? (
-						<IconButton type="button" onClick={onStop} aria-label="Остановить генерацию"><span className="prompt-bar__stop" /></IconButton>
+						<IconButton onClick={onStop} aria-label="Остановить генерацию">
+							<span className="prompt-bar__stop" />
+						</IconButton>
 					) : (
-						<IconButton disabled={isSendDisabled} type="submit" aria-label="Отправить сообщение"><SendIcon /></IconButton>
+						<IconButton disabled={isSendDisabled} type="submit" aria-label="Отправить сообщение">
+							<SendIcon />
+						</IconButton>
 					)}
 				</div>
 			</div>

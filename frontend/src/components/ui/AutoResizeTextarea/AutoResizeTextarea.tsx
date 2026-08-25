@@ -1,4 +1,4 @@
-import React, { useEffect } from 'react';
+import React, { useLayoutEffect } from 'react';
 import { useTextareaMultiline } from '../../../hooks/useTextareaMultiline';
 import './_autoResizeTextarea.scss';
 
@@ -16,7 +16,7 @@ export function AutoResizeTextarea({
 	value,
 
 	onChange,
-	placeholder = 'Что Ищем?',
+	placeholder = 'Введите запрос для Velorian',
 	onMultilineChange,
 	onKeyDown,
 }: AutoResizeTextareaProps) {
@@ -25,7 +25,7 @@ export function AutoResizeTextarea({
 		value,
 	});
 
-	useEffect(() => {
+	useLayoutEffect(() => {
 		onMultilineChange?.(isMultiline);
 	}, [isMultiline, onMultilineChange]);
 

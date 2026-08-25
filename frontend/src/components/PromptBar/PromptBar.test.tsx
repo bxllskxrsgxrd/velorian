@@ -24,6 +24,15 @@ function enableWebSearch() {
 }
 
 describe('PromptBar web search', () => {
+	it('moves the textarea into the multiline layout when the prompt wraps to multiple lines', async () => {
+		renderPromptBar();
+		const textarea = screen.getByRole('textbox');
+
+		fireEvent.change(textarea, { target: { value: 'первая строка\nвторая строка' } });
+
+		await waitFor(() => expect(textarea.closest('form')).toHaveClass('prompt-bar--multiline'));
+	});
+
 	it('keeps search after deleting the separator and disables it when the marker is edited', () => {
 		renderPromptBar();
 		enableWebSearch();
