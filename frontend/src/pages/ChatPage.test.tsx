@@ -1,6 +1,7 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatPage } from './ChatPage';
+import { ToastProvider } from '../components/Toast/ToastProvider';
 
 const api = vi.hoisted(() => ({
 	createConversation: vi.fn(),
@@ -35,7 +36,7 @@ describe('ChatPage retry', () => {
 	});
 
 	it('adds an optimistic copy of the user message when retry starts', async () => {
-		render(<ChatPage user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn()} />);
+		render(<ToastProvider><ChatPage user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn()} onOpenKnowledge={vi.fn()} /></ToastProvider>);
 
 		fireEvent.click(await screen.findByRole('button', { name: 'Повторить' }));
 

@@ -1,8 +1,9 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import { USER_MESSAGE_INLINE_CHAR_LIMIT } from '../../constants/limits';
 import { PromptBar, WEB_SEARCH_MARKER } from './PromptBar';
 
-function renderPromptBar(onSendMessage = vi.fn().mockResolvedValue(undefined)) {
+function renderPromptBar(onSendMessage = vi.fn().mockResolvedValue(undefined), onFilesSelect = vi.fn()) {
 	render(
 		<PromptBar
 			files={[]}
@@ -11,11 +12,11 @@ function renderPromptBar(onSendMessage = vi.fn().mockResolvedValue(undefined)) {
 			onStop={vi.fn()}
 			onRemoveFile={vi.fn()}
 			onOpenFile={vi.fn()}
-			onFilesSelect={vi.fn()}
+			onFilesSelect={onFilesSelect}
 			onClearFiles={vi.fn()}
 		/>,
 	);
-	return onSendMessage;
+	return { onSendMessage, onFilesSelect };
 }
 
 function enableWebSearch() {
@@ -54,11 +55,25 @@ describe('PromptBar web search', () => {
 	});
 
 	it('removes the marker before sending the web-search request', async () => {
-		const onSendMessage = renderPromptBar();
+		const { onSendMessage } = renderPromptBar();
 		enableWebSearch();
 		fireEvent.change(screen.getByRole('textbox'), { target: { value: `${WEB_SEARCH_MARKER}курс рубля` } });
 		fireEvent.click(screen.getByLabelText('Отправить сообщение'));
 
 		await waitFor(() => expect(onSendMessage).toHaveBeenCalledWith('курс рубля', [], true));
+	});
+
+	it('turns a large Unicode paste into a text attachment without duplicating it', () => {
+		const onFilesSelect = vi.fn();
+		renderPromptBar(undefined, onFilesSelect);
+		const largeText = `Привет\n${'данные '.repeat(USER_MESSAGE_INLINE_CHAR_LIMIT)}`;
+		const textarea = screen.getByRole('textbox');
+		fireEvent.paste(textarea, { clipboardData: { getData: () => largeText } });
+
+		expect(textarea).toHaveValue('');
+		expect(onFilesSelect).toHaveBeenCalledOnce();
+		const file = onFilesSelect.mock.calls[0][0][0] as File;
+		expect(file.name).toMatch(/^pasted-text-.*\.txt$/);
+		expect(file.type).toContain('text/plain');
 	});
 });

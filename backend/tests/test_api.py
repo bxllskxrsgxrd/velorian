@@ -60,14 +60,19 @@ def test_auth_session_and_structured_error(client):
 	)
 	assert registered.status_code == 200
 	assert registered.json()["user"]["email"] == "first@example.com"
+	client.headers.update({"X-CSRF-Token": registered.json()["csrfToken"]})
 	assert client.get("/api/auth/me").status_code == 200
 
 	client.post("/api/auth/logout")
 	assert client.get("/api/auth/me").status_code == 401
-	assert client.post(
+	csrf = client.get("/api/auth/csrf").json()["csrfToken"]
+	client.headers.update({"X-CSRF-Token": csrf})
+	login = client.post(
 		"/api/auth/login",
 		json={"email": "first@example.com", "password": "strong-password"},
-	).status_code == 200
+	)
+	assert login.status_code == 200
+	client.headers.update({"X-CSRF-Token": login.json()["csrfToken"]})
 
 	validation = client.post("/api/auth/login", json={"email": "a", "password": "x"})
 	assert validation.status_code == 422
@@ -296,3 +301,122 @@ def test_rejects_broken_supported_file(authenticated_client):
 	)
 	assert response.status_code == 422
 	assert response.json()["error"]["code"] == "FILE_PROCESSING_FAILED"
+
+
+def test_large_inline_text_becomes_utf8_attachment(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Новый чат"}).json()["conversation"]["id"]
+	large_text = "Юникод и переносы\n" + "важные данные " * 1000
+	response = authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": large_text})
+	assert '"type": "done"' in response.text
+	conversation = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]
+	user_message = conversation["messages"][0]
+	assert user_message["content"] == ""
+	assert user_message["attachments"][0]["name"].startswith("pasted-text-")
+	assert user_message["attachments"][0]["name"].endswith(".txt")
+	assert "Юникод и переносы" in completions.calls[0]["messages"][-1]["content"]
+
+
+def test_rating_upsert_delete_and_no_duplicates(authenticated_client, monkeypatch):
+	from app.database import SessionLocal
+	from app.models import MessageRating
+
+	import app.main as main_module
+	monkeypatch.setattr(main_module, "client", FakeGroq())
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Рейтинг"}).json()["conversation"]["id"]
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Ответь"})
+	message_id = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"][-1]["id"]
+
+	created = authenticated_client.put(f"/api/messages/{message_id}/rating", json={"score": 4, "comment": "Полезно"})
+	assert created.status_code == 200
+	assert created.json()["rating"]["score"] == 4
+	updated = authenticated_client.put(f"/api/messages/{message_id}/rating", json={"score": 5, "comment": "Отлично"})
+	assert updated.json()["rating"]["score"] == 5
+	with SessionLocal() as db:
+		assert db.query(MessageRating).filter(MessageRating.message_id == message_id).count() == 1
+	conversation = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]
+	assert conversation["messages"][-1]["rating"]["comment"] == "Отлично"
+	assert authenticated_client.delete(f"/api/messages/{message_id}/rating").status_code == 204
+
+
+def test_cannot_rate_another_users_message(client, monkeypatch):
+	import app.main as main_module
+	monkeypatch.setattr(main_module, "client", FakeGroq())
+	first = client.post("/api/auth/register", json={"email": "rating-owner@example.com", "password": "strong-password"})
+	client.headers.update({"X-CSRF-Token": first.json()["csrfToken"]})
+	conversation_id = client.post("/api/conversations", json={"title": "Чужой"}).json()["conversation"]["id"]
+	client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Ответ"})
+	message_id = client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"][-1]["id"]
+	client.post("/api/auth/logout")
+	csrf = client.get("/api/auth/csrf").json()["csrfToken"]
+	client.headers.update({"X-CSRF-Token": csrf})
+	second = client.post("/api/auth/register", json={"email": "rating-other@example.com", "password": "strong-password"})
+	client.headers.update({"X-CSRF-Token": second.json()["csrfToken"]})
+	response = client.put(f"/api/messages/{message_id}/rating", json={"score": 5})
+	assert response.status_code == 404
+
+
+def test_knowledge_manual_file_rated_message_and_ownership(client, monkeypatch):
+	import app.main as main_module
+	monkeypatch.setattr(main_module, "client", FakeGroq())
+	first = client.post("/api/auth/register", json={"email": "knowledge-owner@example.com", "password": "strong-password"})
+	client.headers.update({"X-CSRF-Token": first.json()["csrfToken"]})
+	manual = client.post("/api/knowledge", json={"title": "Оффер", "content": "Проверенный текст"})
+	assert manual.status_code == 200
+	manual_id = manual.json()["item"]["id"]
+	file_item = client.post("/api/knowledge/files", data={"title": "Файл"}, files={"file": ("notes.txt", "данные файла".encode(), "text/plain")})
+	assert file_item.status_code == 200
+
+	conversation_id = client.post("/api/conversations", json={"title": "Знания"}).json()["conversation"]["id"]
+	client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Полезный ответ"})
+	message_id = client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"][-1]["id"]
+	client.put(f"/api/messages/{message_id}/rating", json={"score": 4})
+	saved = client.post(f"/api/knowledge/messages/{message_id}")
+	assert saved.status_code == 200
+	assert saved.json()["items"][0]["sourceType"] == "rated_content"
+
+	updated = client.patch(f"/api/knowledge/{manual_id}", json={"title": "Новый оффер", "content": "Новый текст", "is_active": False})
+	assert updated.json()["item"]["isActive"] is False
+	assert len(client.get("/api/knowledge?search=Новый").json()["items"]) == 1
+
+	client.post("/api/auth/logout")
+	csrf = client.get("/api/auth/csrf").json()["csrfToken"]
+	client.headers.update({"X-CSRF-Token": csrf})
+	second = client.post("/api/auth/register", json={"email": "knowledge-other@example.com", "password": "strong-password"})
+	client.headers.update({"X-CSRF-Token": second.json()["csrfToken"]})
+	assert client.get(f"/api/knowledge/{manual_id}").status_code == 404
+	assert client.patch(f"/api/knowledge/{manual_id}", json={"title": "Взлом"}).status_code == 404
+
+
+def test_lower_rating_deactivates_saved_knowledge(authenticated_client, monkeypatch):
+	import app.main as main_module
+	monkeypatch.setattr(main_module, "client", FakeGroq())
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Порог"}).json()["conversation"]["id"]
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Ответ"})
+	message_id = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"][-1]["id"]
+	authenticated_client.put(f"/api/messages/{message_id}/rating", json={"score": 5})
+	authenticated_client.post(f"/api/knowledge/messages/{message_id}")
+	authenticated_client.put(f"/api/messages/{message_id}/rating", json={"score": 2})
+	items = authenticated_client.get("/api/knowledge").json()["items"]
+	assert items[0]["isActive"] is False
+	assert items[0]["rating"] == 2
+
+
+def test_csrf_rejects_missing_invalid_and_rotated_tokens(client):
+	valid = client.headers.pop("X-CSRF-Token")
+	missing = client.post("/api/conversations", json={"title": "Нет токена"})
+	assert missing.status_code == 403
+	assert missing.json()["error"]["code"] == "CSRF_INVALID"
+	client.headers.update({"X-CSRF-Token": "invalid"})
+	assert client.post("/api/conversations", json={"title": "Плохой токен"}).status_code == 403
+	client.headers.update({"X-CSRF-Token": valid})
+	registered = client.post("/api/auth/register", json={"email": "csrf@example.com", "password": "strong-password"})
+	assert registered.status_code == 200
+	rotated = registered.json()["csrfToken"]
+	assert rotated != valid
+	assert client.post("/api/conversations", json={"title": "Старый токен"}).status_code == 403
+	client.headers.update({"X-CSRF-Token": rotated})
+	assert client.post("/api/conversations", json={"title": "Новый токен"}).status_code == 200

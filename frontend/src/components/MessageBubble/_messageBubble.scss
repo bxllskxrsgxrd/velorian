@@ -32,13 +32,23 @@
 		}
 	}
 
-	&--error .message__content {
-		width: fit-content;
-		padding: 10px 14px;
-		color: var(--color-error);
-		background: color-mix(in srgb, var(--color-error) 9%, transparent);
-		border-color: color-mix(in srgb, var(--color-error) 28%, transparent);
-	}
+	&__error-card { width: min(100%, 620px); display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 14px; border: 1px solid color-mix(in srgb, var(--color-error) 38%, var(--color-border)); border-radius: var(--radius-medium); color: var(--color-text-primary); background: color-mix(in srgb, var(--color-error) 10%, var(--color-bg-surface)); }
+	&__error-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; color: var(--color-error); background: color-mix(in srgb, var(--color-error) 16%, transparent); }
+	&__error-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+	&__error-copy span { color: var(--color-text-secondary); font-size: 14px; }
+	&__error-copy small { color: color-mix(in srgb, var(--color-text-secondary) 75%, transparent); font-size: 11px; }
+	&__error-card > button { padding: 7px 10px; border: 1px solid color-mix(in srgb, var(--color-error) 40%, var(--color-border)); border-radius: 9px; color: var(--color-text-primary); background: var(--color-bg-elevated); cursor: pointer; }
+
+	&__rating { display: flex; flex-direction: column; gap: 6px; color: var(--color-text-secondary); font-size: 12px; }
+	&__rating-row { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
+	&__rating-star { display: grid; place-items: center; width: 25px; height: 25px; padding: 3px; border: 0; color: var(--color-border); background: transparent; cursor: pointer; }
+	&__rating-star--active, &__rating-star:hover { color: #ffd479; }
+	&__rating-link, &__rating-save { padding: 4px 7px; border: 0; border-radius: 7px; color: var(--color-text-secondary); background: transparent; cursor: pointer; }
+	&__rating-link:hover { color: var(--color-text-primary); }
+	&__rating-save { margin-left: 4px; color: var(--color-accent); background: var(--color-accent-soft); }
+	&__rating-comment { display: flex; align-items: flex-end; gap: 6px; width: min(100%, 520px); }
+	&__rating-comment textarea { min-height: 64px; flex: 1; resize: vertical; padding: 8px; border: 1px solid var(--color-border); border-radius: 9px; color: var(--color-text-primary); background: var(--color-bg-elevated); }
+	&__rating-comment button { padding: 7px 9px; border: 0; border-radius: 8px; color: var(--color-on-accent); background: var(--color-accent); cursor: pointer; }
 
 	&__actions {
 		display: flex;

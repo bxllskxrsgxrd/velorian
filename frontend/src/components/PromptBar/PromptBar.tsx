@@ -1,5 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
+import { USER_MESSAGE_INLINE_CHAR_LIMIT } from '../../constants/limits';
 import { reportError } from '../../utils/reportError';
+import { createPastedTextFile } from '../../utils/pastedTextFile';
 import { MicrophoneIcon } from '../icons/MicrophoneIcon';
 import { SendIcon } from '../icons/SendIcon';
 import { PromptActionsMenu } from '../PromptActionsMenu/PromptActionsMenu';
@@ -117,6 +119,13 @@ export function PromptBar({
 		event.currentTarget.form?.requestSubmit();
 	}
 
+	function handlePaste(event: React.ClipboardEvent<HTMLTextAreaElement>) {
+		const pastedText = event.clipboardData.getData('text/plain');
+		if (pastedText.length <= USER_MESSAGE_INLINE_CHAR_LIMIT) return;
+		event.preventDefault();
+		onFilesSelect([createPastedTextFile(pastedText)]);
+	}
+
 	async function handleSubmit(event: React.SyntheticEvent<HTMLFormElement>) {
 		event.preventDefault();
 		if (isSendDisabled) return;
@@ -194,6 +203,7 @@ export function PromptBar({
 					onChange={handleChange}
 					onMultilineChange={setIsMultiline}
 					onKeyDown={handleEnterDown}
+					onPaste={handlePaste}
 				/>
 				{voiceInputAvailable && (
 					<IconButton

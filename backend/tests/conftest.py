@@ -28,6 +28,8 @@ def cleanup_test_files():
 @pytest.fixture
 def client():
 	with TestClient(app) as test_client:
+		csrf = test_client.get("/api/auth/csrf").json()["csrfToken"]
+		test_client.headers.update({"X-CSRF-Token": csrf})
 		yield test_client
 
 
@@ -38,4 +40,5 @@ def authenticated_client(client):
 		json={"email": f"user-{os.urandom(5).hex()}@example.com", "password": "strong-password"},
 	)
 	assert response.status_code == 200
+	client.headers.update({"X-CSRF-Token": response.json()["csrfToken"]})
 	return client

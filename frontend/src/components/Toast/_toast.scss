@@ -1,0 +1,5 @@
+.toast-region { position: fixed; z-index: 1200; top: 18px; right: 18px; display: flex; flex-direction: column; gap: 8px; width: min(360px, calc(100vw - 36px)); pointer-events: none; }
+.toast { padding: 11px 13px; border: 1px solid var(--color-border); border-radius: var(--radius-medium); color: var(--color-text-primary); background: var(--color-bg-elevated); box-shadow: var(--shadow-surface); font-size: 14px; }
+.toast--success { border-color: color-mix(in srgb, var(--color-success) 45%, var(--color-border)); }
+.toast--error { border-color: color-mix(in srgb, var(--color-error) 45%, var(--color-border)); }
+.toast--info { border-color: color-mix(in srgb, var(--color-accent) 35%, var(--color-border)); }

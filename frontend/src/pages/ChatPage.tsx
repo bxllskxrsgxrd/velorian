@@ -6,6 +6,9 @@ import {
 	getConversation,
 	listConversations,
 	renameConversation,
+	removeMessageRating,
+	saveMessageToKnowledge,
+	setMessageRating,
 	streamChat,
 } from '../api/chatApi';
 import { ChatSidebar } from '../components/ChatSidebar/ChatSidebar';
@@ -23,10 +26,13 @@ import { attachmentToPreviewFile, createChatAttachment, fileToPreviewFile } from
 import { reportError } from '../utils/reportError';
 import './_chatPage.scss';
 import { ArrowDownIcon } from '../components/icons/ArrowDownIcon';
+import { useToast } from '../components/Toast/ToastContext';
+import { getUserErrorMessage } from '../errors/userErrorMessages';
 
 type ChatPageProps = {
 	user: AuthUser;
 	onLogout: () => Promise<void>;
+	onOpenKnowledge: () => void;
 };
 
 function downloadText(name: string, content: string, type: string) {
@@ -47,7 +53,8 @@ function getStoredSidebarCollapsed() {
 	}
 }
 
-export function ChatPage({ user, onLogout }: ChatPageProps) {
+export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
+	const { showToast } = useToast();
 	const [conversations, setConversations] = useState<ConversationSummary[]>([]);
 	const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
@@ -67,6 +74,7 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 	const isNearBottomRef = useRef(true);
 	const loadSequenceRef = useRef(0);
 	const skipNextLoadRef = useRef(false);
+	const ratingSequenceRef = useRef(new Map<string, number>());
 
 	const {
 		isDragging,
@@ -315,7 +323,7 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 						setMessages((current) =>
 							current.map((message) =>
 								message.id === currentAssistantId
-									? { ...message, content: event.message, status: CHAT_MESSAGE_STATUSES.ERROR }
+									? { ...message, content: getUserErrorMessage(event.code), errorCode: event.code, requestId: event.requestId, status: CHAT_MESSAGE_STATUSES.ERROR }
 									: message,
 							),
 						);
@@ -384,6 +392,43 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 		setMessages((current) => current.map((message) => message.role === CHAT_ROLES.USER && (message.branchGroupId || message.id) === groupId
 			? { ...message, isActive: message.id === messageId }
 			: message));
+	}
+
+	async function handleRateMessage(message: ChatMessage, score: number, comment?: string) {
+		const sequence = (ratingSequenceRef.current.get(message.id) ?? 0) + 1;
+		ratingSequenceRef.current.set(message.id, sequence);
+		const previous = message.rating;
+		const optimistic = { id: previous?.id ?? `rating-${message.id}`, score, comment: comment || null, createdAt: previous?.createdAt ?? new Date().toISOString(), updatedAt: new Date().toISOString() };
+		setMessages((current) => current.map((entry) => entry.id === message.id ? { ...entry, rating: optimistic } : entry));
+		try {
+			const rating = await setMessageRating(message.id, score, comment);
+			if (ratingSequenceRef.current.get(message.id) === sequence) setMessages((current) => current.map((entry) => entry.id === message.id ? { ...entry, rating } : entry));
+		} catch (error) {
+			if (ratingSequenceRef.current.get(message.id) === sequence) {
+				setMessages((current) => current.map((entry) => entry.id === message.id ? { ...entry, rating: previous } : entry));
+				showToast(error instanceof Error ? error.message : 'Не удалось сохранить оценку', 'error');
+			}
+		}
+	}
+
+	async function handleRemoveRating(message: ChatMessage) {
+		const previous = message.rating;
+		setMessages((current) => current.map((entry) => entry.id === message.id ? { ...entry, rating: null } : entry));
+		try {
+			await removeMessageRating(message.id);
+		} catch (error) {
+			setMessages((current) => current.map((entry) => entry.id === message.id ? { ...entry, rating: previous } : entry));
+			showToast(error instanceof Error ? error.message : 'Не удалось удалить оценку', 'error');
+		}
+	}
+
+	async function handleSaveToKnowledge(message: ChatMessage) {
+		try {
+			await saveMessageToKnowledge(message.id);
+			showToast('Ответ сохранён в базу знаний', 'success');
+		} catch (error) {
+			showToast(error instanceof Error ? error.message : 'Не удалось сохранить ответ', 'error');
+		}
 	}
 
 	function handleNewConversation() {
@@ -471,6 +516,7 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 				onAccentChange={handleAccentChange}
 				onExport={handleExport}
 				onLogout={() => void onLogout()}
+				onOpenKnowledge={onOpenKnowledge}
 				onClose={() => setIsSidebarOpen(false)}
 				onToggleCollapsed={() => setIsSidebarCollapsed((current) => {
 					const next = !current;
@@ -513,6 +559,9 @@ export function ChatPage({ user, onLogout }: ChatPageProps) {
 								onEdit={handleEditMessage}
 								canEdit={!isGenerating}
 								onActivateBranch={(messageId) => void handleActivateBranch(messageId).catch((error: unknown) => reportActionError(error, 'Не удалось переключить версию'))}
+								onRate={(message, score, comment) => void handleRateMessage(message, score, comment)}
+								onRemoveRating={(message) => void handleRemoveRating(message)}
+								onSaveToKnowledge={(message) => void handleSaveToKnowledge(message)}
 							/>
 						) : (
 							<div className="chat-page__start">

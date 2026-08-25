@@ -25,6 +25,7 @@ function renderSidebar(isCollapsed = false) {
 			onAccentChange={vi.fn()}
 			onExport={vi.fn()}
 			onLogout={vi.fn()}
+			onOpenKnowledge={vi.fn()}
 			onClose={vi.fn()}
 			onToggleCollapsed={onToggleCollapsed}
 		/>,

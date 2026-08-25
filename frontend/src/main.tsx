@@ -4,11 +4,14 @@ import App from "./App.tsx";
 import "./scss/default/_index.scss";
 import "./scss/default/_reset.scss"
 import { initializeAccentTheme } from "./theme/accentTheme";
+import { ToastProvider } from "./components/Toast/ToastProvider";
 
 initializeAccentTheme();
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
-    <App />
+    <ToastProvider>
+      <App />
+    </ToastProvider>
   </StrictMode>,
 );

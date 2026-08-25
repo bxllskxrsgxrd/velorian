@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { ACCENT_THEMES, ACCENT_THEME_LABELS, type AccentTheme } from '../../theme/accentTheme';
 import type { AuthUser, ConversationSummary } from '../../types/chat';
-import { ChevronIcon, EditIcon, LogoutIcon, MoreIcon, SearchIcon, SettingsIcon, SidebarIcon, TrashIcon, UserIcon } from '../icons/AppIcons';
+import { ChevronIcon, EditIcon, KnowledgeIcon, LogoutIcon, MoreIcon, SearchIcon, SettingsIcon, SidebarIcon, TrashIcon, UserIcon } from '../icons/AppIcons';
 import { NewChatIcon } from '../icons/NewChatIcon';
 import { VelorianIcon } from '../icons/VelorianIcon';
 import { ModalDialog } from '../ui/ModalDialog/ModalDialog';
@@ -23,6 +23,7 @@ type ChatSidebarProps = {
 	onAccentChange: (theme: AccentTheme) => void;
 	onExport: (format: 'markdown' | 'json') => void;
 	onLogout: () => void;
+	onOpenKnowledge: () => void;
 	onClose: () => void;
 	onToggleCollapsed: () => void;
 };
@@ -107,6 +108,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 				<div className="chat-sidebar__account-wrap">
 					{accountOpen && (
 						<div className="chat-sidebar__account-menu">
+							<button type="button" onClick={props.onOpenKnowledge}><KnowledgeIcon /><span>База знаний</span></button>
 							<button type="button" onClick={() => setSettingsOpen((current) => !current)}><SettingsIcon /><span>Настройки</span><ChevronIcon /></button>
 							{settingsOpen && (
 								<div className="chat-sidebar__settings-panel">

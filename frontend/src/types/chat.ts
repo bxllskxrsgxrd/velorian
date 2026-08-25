@@ -18,6 +18,14 @@ export type ChatAttachment = {
 
 export type ChatMessageStatus = (typeof CHAT_MESSAGE_STATUSES)[keyof typeof CHAT_MESSAGE_STATUSES];
 
+export type MessageRating = {
+	id: string;
+	score: number;
+	comment?: string | null;
+	createdAt: string;
+	updatedAt: string;
+};
+
 export type ChatMessage = {
 	id: string;
 	role: ChatRole;
@@ -28,6 +36,9 @@ export type ChatMessage = {
 	branchGroupId?: string | null;
 	replyToId?: string | null;
 	isActive?: boolean;
+	rating?: MessageRating | null;
+	errorCode?: string;
+	requestId?: string;
 };
 
 export type PreviewFile = {
@@ -52,4 +63,21 @@ export type Conversation = ConversationSummary & {
 export type AuthUser = {
 	id: string;
 	email: string;
+};
+
+export type KnowledgeItem = {
+	id: string;
+	sourceType: 'assistant_message' | 'uploaded_file' | 'manual' | 'rated_content';
+	sourceMessageId?: string | null;
+	sourceFileId?: string | null;
+	title: string;
+	content: string;
+	mimeType: string;
+	originalFilename?: string | null;
+	rating?: number | null;
+	isActive: boolean;
+	metadata: Record<string, unknown>;
+	createdAt: string;
+	updatedAt: string;
+	downloadUrl?: string | null;
 };

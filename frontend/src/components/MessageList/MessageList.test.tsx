@@ -17,6 +17,9 @@ describe('MessageList branches', () => {
 				onRetry={vi.fn()}
 				onEdit={vi.fn()}
 				onActivateBranch={onActivateBranch}
+				onRate={vi.fn()}
+				onRemoveRating={vi.fn()}
+				onSaveToKnowledge={vi.fn()}
 			/>,
 		);
 

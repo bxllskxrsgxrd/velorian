@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, DateTime, ForeignKey, Integer, String, Text
+from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -24,6 +24,8 @@ class User(Base):
 	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 	conversations: Mapped[list["Conversation"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+	ratings: Mapped[list["MessageRating"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+	knowledge_items: Mapped[list["KnowledgeItem"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class Conversation(Base):
@@ -55,6 +57,8 @@ class Message(Base):
 
 	conversation: Mapped[Conversation] = relationship(back_populates="messages")
 	attachments: Mapped[list["Attachment"]] = relationship(back_populates="message", cascade="all, delete-orphan")
+	ratings: Mapped[list["MessageRating"]] = relationship(back_populates="message", cascade="all, delete-orphan")
+	knowledge_items: Mapped[list["KnowledgeItem"]] = relationship(back_populates="source_message")
 
 
 class Attachment(Base):
@@ -74,6 +78,7 @@ class Attachment(Base):
 	conversation: Mapped[Conversation] = relationship(back_populates="attachments")
 	message: Mapped[Message] = relationship(back_populates="attachments")
 	chunks: Mapped[list["DocumentChunk"]] = relationship(back_populates="attachment", cascade="all, delete-orphan")
+	knowledge_items: Mapped[list["KnowledgeItem"]] = relationship(back_populates="source_file")
 
 
 class DocumentChunk(Base):
@@ -86,3 +91,53 @@ class DocumentChunk(Base):
 	content: Mapped[str] = mapped_column(Text)
 
 	attachment: Mapped[Attachment] = relationship(back_populates="chunks")
+
+
+class MessageRating(Base):
+	__tablename__ = "message_ratings"
+	__table_args__ = (
+		UniqueConstraint("user_id", "message_id", name="uq_message_rating_user_message"),
+		CheckConstraint("score >= 1 AND score <= 5", name="ck_message_rating_score"),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+	user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+	chat_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+	message_id: Mapped[str] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), index=True)
+	score: Mapped[int] = mapped_column(Integer)
+	comment: Mapped[str | None] = mapped_column(Text, nullable=True)
+	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+	user: Mapped[User] = relationship(back_populates="ratings")
+	message: Mapped[Message] = relationship(back_populates="ratings")
+
+
+class KnowledgeItem(Base):
+	__tablename__ = "knowledge_items"
+	__table_args__ = (
+		UniqueConstraint("user_id", "source_message_id", name="uq_knowledge_user_source_message"),
+		UniqueConstraint("user_id", "source_file_id", name="uq_knowledge_user_source_file"),
+		Index("ix_knowledge_user_active", "user_id", "is_active"),
+		Index("ix_knowledge_user_source", "user_id", "source_type"),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+	user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+	source_type: Mapped[str] = mapped_column(String(32))
+	source_message_id: Mapped[str | None] = mapped_column(ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
+	source_file_id: Mapped[str | None] = mapped_column(ForeignKey("attachments.id", ondelete="SET NULL"), nullable=True)
+	title: Mapped[str] = mapped_column(String(255))
+	content: Mapped[str] = mapped_column(Text, default="")
+	mime_type: Mapped[str] = mapped_column(String(160), default="text/plain")
+	original_filename: Mapped[str | None] = mapped_column(String(255), nullable=True)
+	storage_path: Mapped[str | None] = mapped_column(String(1024), nullable=True)
+	rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
+	is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
+	item_metadata: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
+	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+	user: Mapped[User] = relationship(back_populates="knowledge_items")
+	source_message: Mapped[Message | None] = relationship(back_populates="knowledge_items")
+	source_file: Mapped[Attachment | None] = relationship(back_populates="knowledge_items")

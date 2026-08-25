@@ -13,9 +13,11 @@ export function useDragAndDrop() {
 
 	function addFiles(newFiles: File[]) {
 		if (newFiles.length === 0) return;
-		const result = validateAndMergeFiles(files, newFiles);
-		setFileError(result.error);
-		setFiles(result.files);
+		setFiles((currentFiles) => {
+			const result = validateAndMergeFiles(currentFiles, newFiles);
+			setFileError(result.error);
+			return result.files;
+		});
 	}
 
 	// функция переноса файла в дроп зону

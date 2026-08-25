@@ -10,6 +10,7 @@ type AutoResizeTextareaProps = {
 	placeholder?: string;
 	onMultilineChange?: (isMultiline: boolean) => void;
 	onKeyDown?: (e: React.KeyboardEvent<HTMLTextAreaElement>) => void;
+	onPaste?: (e: React.ClipboardEvent<HTMLTextAreaElement>) => void;
 };
 
 export function AutoResizeTextarea({
@@ -19,6 +20,7 @@ export function AutoResizeTextarea({
 	placeholder = 'Введите запрос для Velorian',
 	onMultilineChange,
 	onKeyDown,
+	onPaste,
 }: AutoResizeTextareaProps) {
 	// Создаю объект, в который передаю ссылки
 	const { textareaRef, isMultiline } = useTextareaMultiline({
@@ -38,6 +40,7 @@ export function AutoResizeTextarea({
 			placeholder={placeholder}
 			onChange={onChange}
 			onKeyDown={onKeyDown}
+			onPaste={onPaste}
 			className="resizeTextarea"
 		></textarea>
 	);

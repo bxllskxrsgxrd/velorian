@@ -25,8 +25,12 @@ SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False
 
 def init_database() -> None:
 	from . import models  # noqa: F401
+	from .migrations import run_migrations
 
-	Base.metadata.create_all(bind=engine)
+	existing_tables = [table for name, table in Base.metadata.tables.items() if name not in {"message_ratings", "knowledge_items"}]
+	Base.metadata.create_all(bind=engine, tables=existing_tables)
+	with engine.begin() as connection:
+		run_migrations(connection)
 	columns = {column["name"] for column in inspect(engine).get_columns("messages")}
 	boolean_default = "1" if engine.dialect.name == "sqlite" else "TRUE"
 	statements = {

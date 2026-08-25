@@ -1,32 +1,8 @@
-import type { AuthUser, ChatAttachment, ChatMessage, Conversation, ConversationSummary } from '../types/chat';
+import type { AuthUser, ChatAttachment, ChatMessage, Conversation, ConversationSummary, KnowledgeItem, MessageRating } from '../types/chat';
 import { reportError } from '../utils/reportError';
+import { API_ORIGIN, ApiError, apiFetch, requestJson, setCsrfToken } from './httpClient';
 
-const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '/api').replace(/\/$/, '');
-const API_ORIGIN = new URL(API_BASE_URL, window.location.origin).origin;
-
-type ApiErrorPayload = {
-	error?: {
-		code?: string;
-		message?: string;
-		request_id?: string;
-	};
-};
-
-export class ApiError extends Error {
-	readonly code: string;
-	readonly status: number;
-	readonly requestId?: string;
-	readonly responseBody?: unknown;
-
-	constructor(message: string, code = 'API_ERROR', status = 0, requestId?: string, responseBody?: unknown) {
-		super(message);
-		this.name = 'ApiError';
-		this.code = code;
-		this.status = status;
-		this.requestId = requestId;
-		this.responseBody = responseBody;
-	}
-}
+export { ApiError } from './httpClient';
 
 function resolveAttachmentUrl(url: string) {
 	return url.startsWith('/') ? `${API_ORIGIN}${url}` : url;
@@ -48,42 +24,15 @@ function normalizeMessage(message: ChatMessage): ChatMessage {
 	};
 }
 
-async function parseApiError(response: Response): Promise<ApiError> {
-	let payload: ApiErrorPayload | null = null;
-	try {
-		payload = (await response.json()) as ApiErrorPayload;
-	} catch (error) {
-		reportError('Не удалось разобрать ответ с ошибкой API', error, { status: response.status });
-	}
-	return new ApiError(
-		payload?.error?.message ?? `Ошибка сервера: ${response.status}`,
-		payload?.error?.code ?? 'HTTP_ERROR',
-		response.status,
-		payload?.error?.request_id,
-		payload,
-	);
+function normalizeKnowledgeItem(item: KnowledgeItem): KnowledgeItem {
+	return { ...item, downloadUrl: item.downloadUrl?.startsWith('/') ? `${API_ORIGIN}${item.downloadUrl}` : item.downloadUrl };
 }
 
-async function requestJson<T>(path: string, init?: RequestInit): Promise<T> {
-	const method = init?.method ?? 'GET';
+function parseStreamEvent(line: string): StreamEvent {
 	try {
-		const response = await fetch(`${API_BASE_URL}${path}`, {
-			...init,
-			credentials: 'include',
-			headers: {
-				...(init?.body instanceof FormData ? {} : { 'Content-Type': 'application/json' }),
-				...init?.headers,
-			},
-		});
-		if (!response.ok) throw await parseApiError(response);
-		return (await response.json()) as T;
+		return JSON.parse(line) as StreamEvent;
 	} catch (error) {
-		reportError(`API ${method} ${path}`, error, {
-			code: error instanceof ApiError ? error.code : undefined,
-			status: error instanceof ApiError ? error.status : undefined,
-			requestId: error instanceof ApiError ? error.requestId : undefined,
-		});
-		throw error;
+		throw new ApiError('MALFORMED_RESPONSE', 200, undefined, error instanceof Error ? error.message : String(error));
 	}
 }
 
@@ -92,16 +41,17 @@ export async function getCurrentUser(): Promise<AuthUser> {
 }
 
 export async function authenticate(mode: 'login' | 'register', email: string, password: string): Promise<AuthUser> {
-	return (
-		await requestJson<{ user: AuthUser }>(`/auth/${mode}`, {
+	const payload = await requestJson<{ user: AuthUser; csrfToken: string }>(`/auth/${mode}`, {
 			method: 'POST',
 			body: JSON.stringify({ email, password }),
-		})
-	).user;
+		});
+	setCsrfToken(payload.csrfToken);
+	return payload.user;
 }
 
 export async function logout(): Promise<void> {
 	await requestJson('/auth/logout', { method: 'POST' });
+	setCsrfToken(null);
 }
 
 export async function listConversations(): Promise<ConversationSummary[]> {
@@ -132,20 +82,7 @@ export async function renameConversation(id: string, title: string): Promise<Con
 }
 
 export async function deleteConversation(id: string): Promise<void> {
-	try {
-		const response = await fetch(`${API_BASE_URL}/conversations/${id}`, {
-			method: 'DELETE',
-			credentials: 'include',
-		});
-		if (!response.ok) throw await parseApiError(response);
-	} catch (error) {
-		reportError('API DELETE /conversations/:id', error, {
-			code: error instanceof ApiError ? error.code : undefined,
-			status: error instanceof ApiError ? error.status : undefined,
-			requestId: error instanceof ApiError ? error.requestId : undefined,
-		});
-		throw error;
-	}
+	await apiFetch(`/conversations/${id}`, { method: 'DELETE' });
 }
 
 export type StreamEvent =
@@ -180,14 +117,12 @@ async function runChatStream(options: StreamChatOptions): Promise<void> {
 	if (options.editMessageId) formData.append('edit_message_id', options.editMessageId);
 	options.files?.forEach((file) => formData.append('files', file));
 
-	const response = await fetch(`${API_BASE_URL}/conversations/${options.conversationId}/stream`, {
+	const response = await apiFetch(`/conversations/${options.conversationId}/stream`, {
 		method: 'POST',
 		body: formData,
 		signal: options.signal,
-		credentials: 'include',
 	});
-	if (!response.ok) throw await parseApiError(response);
-	if (!response.body) throw new ApiError('Браузер не поддерживает потоковые ответы', 'STREAM_UNAVAILABLE');
+	if (!response.body) throw new ApiError('STREAM_UNAVAILABLE', 0, undefined, 'ReadableStream is unavailable');
 
 	const reader = response.body.getReader();
 	const decoder = new TextDecoder();
@@ -200,21 +135,66 @@ async function runChatStream(options: StreamChatOptions): Promise<void> {
 		buffer = lines.pop() ?? '';
 		for (const line of lines) {
 			if (!line.trim()) continue;
-			const event = JSON.parse(line) as StreamEvent;
+			const event = parseStreamEvent(line);
 			if (event.type === 'meta') event.userMessage = normalizeMessage(event.userMessage);
 			if (event.type === 'done' && event.message) event.message = normalizeMessage(event.message);
 			options.onEvent(event);
-			if (event.type === 'error') throw new ApiError(event.message, event.code, 200, event.requestId);
+			if (event.type === 'error') throw new ApiError(event.code, 200, event.requestId, event.message);
 		}
 		if (done) break;
 	}
 	if (buffer.trim()) {
-		const event = JSON.parse(buffer) as StreamEvent;
+		const event = parseStreamEvent(buffer);
 		if (event.type === 'meta') event.userMessage = normalizeMessage(event.userMessage);
 		if (event.type === 'done' && event.message) event.message = normalizeMessage(event.message);
 		options.onEvent(event);
-		if (event.type === 'error') throw new ApiError(event.message, event.code, 200, event.requestId);
+		if (event.type === 'error') throw new ApiError(event.code, 200, event.requestId, event.message);
 	}
+}
+
+export async function setMessageRating(messageId: string, score: number, comment?: string): Promise<MessageRating> {
+	return (await requestJson<{ rating: MessageRating }>(`/messages/${messageId}/rating`, {
+		method: 'PUT',
+		body: JSON.stringify({ score, comment: comment || null }),
+	})).rating;
+}
+
+export async function removeMessageRating(messageId: string): Promise<void> {
+	await apiFetch(`/messages/${messageId}/rating`, { method: 'DELETE' });
+}
+
+export async function saveMessageToKnowledge(messageId: string): Promise<KnowledgeItem[]> {
+	return (await requestJson<{ items: KnowledgeItem[] }>(`/knowledge/messages/${messageId}`, { method: 'POST' })).items.map(normalizeKnowledgeItem);
+}
+
+export async function listKnowledge(params: { search?: string; sourceType?: string; isActive?: boolean } = {}): Promise<KnowledgeItem[]> {
+	const query = new URLSearchParams();
+	if (params.search) query.set('search', params.search);
+	if (params.sourceType) query.set('source_type', params.sourceType);
+	if (params.isActive !== undefined) query.set('is_active', String(params.isActive));
+	return (await requestJson<{ items: KnowledgeItem[] }>(`/knowledge${query.size ? `?${query}` : ''}`)).items.map(normalizeKnowledgeItem);
+}
+
+export async function createKnowledgeItem(title: string, content: string): Promise<KnowledgeItem> {
+	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>('/knowledge', { method: 'POST', body: JSON.stringify({ title, content }) })).item);
+}
+
+export async function uploadKnowledgeFile(file: File, title = ''): Promise<KnowledgeItem> {
+	const body = new FormData();
+	body.append('file', file);
+	body.append('title', title);
+	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>('/knowledge/files', { method: 'POST', body })).item);
+}
+
+export async function updateKnowledgeItem(id: string, patch: { title?: string; content?: string; isActive?: boolean }): Promise<KnowledgeItem> {
+	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>(`/knowledge/${id}`, {
+		method: 'PATCH',
+		body: JSON.stringify({ title: patch.title, content: patch.content, is_active: patch.isActive }),
+	})).item);
+}
+
+export async function deleteKnowledgeItem(id: string): Promise<void> {
+	await apiFetch(`/knowledge/${id}`, { method: 'DELETE' });
 }
 
 export async function activateMessageBranch(messageId: string): Promise<ChatMessage> {
@@ -229,7 +209,7 @@ export async function streamChat(options: StreamChatOptions): Promise<void> {
 	try {
 		await runChatStream(options);
 	} catch (error) {
-		if (!(error instanceof DOMException && error.name === 'AbortError')) {
+		if (!(error instanceof ApiError && error.code === 'REQUEST_ABORTED')) {
 			reportError('Потоковый запрос к AI', error, {
 				code: error instanceof ApiError ? error.code : undefined,
 				status: error instanceof ApiError ? error.status : undefined,

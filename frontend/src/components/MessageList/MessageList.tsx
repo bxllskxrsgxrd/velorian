@@ -1,4 +1,5 @@
 import type { ChatAttachment, ChatMessage } from '../../types/chat';
+import { KNOWLEDGE_RATING_THRESHOLD } from '../../constants/limits';
 import { MessageBubble } from '../MessageBubble/MessageBubble';
 import './_messageList.scss';
 
@@ -9,6 +10,9 @@ type MessageListProps = {
 	onEdit: (message: ChatMessage, content: string) => void;
 	onActivateBranch: (messageId: string) => void;
 	canEdit?: boolean;
+	onRate: (message: ChatMessage, score: number, comment?: string) => void;
+	onRemoveRating: (message: ChatMessage) => void;
+	onSaveToKnowledge: (message: ChatMessage) => void;
 };
 
 type BranchInfo = { variants: ChatMessage[]; active: ChatMessage };
@@ -59,7 +63,7 @@ function getRetryMessageIds(messages: ChatMessage[]) {
 	return result;
 }
 
-export function MessageList({ messages, onOpenAttachment, onRetry, onEdit, onActivateBranch, canEdit = true }: MessageListProps) {
+export function MessageList({ messages, onOpenAttachment, onRetry, onEdit, onActivateBranch, onRate, onRemoveRating, onSaveToKnowledge, canEdit = true }: MessageListProps) {
 	const { displayed, branches } = buildDisplay(messages);
 	const retryMessageIds = getRetryMessageIds(displayed);
 	return (
@@ -75,6 +79,9 @@ export function MessageList({ messages, onOpenAttachment, onRetry, onEdit, onAct
 						message={message}
 						onRetry={retryMessageId ? () => onRetry(retryMessageId) : undefined}
 						onEdit={message.role === 'user' && canEdit ? (content) => onEdit(message, content) : undefined}
+						onRate={message.role === 'assistant' && message.status === 'done' ? (score, comment) => onRate(message, score, comment) : undefined}
+						onRemoveRating={message.role === 'assistant' && message.status === 'done' ? () => onRemoveRating(message) : undefined}
+						onSaveToKnowledge={message.role === 'assistant' && (message.rating?.score ?? 0) >= KNOWLEDGE_RATING_THRESHOLD ? () => onSaveToKnowledge(message) : undefined}
 						branch={branchInfo ? {
 							index: branchIndex,
 							total: branchInfo.variants.length,

@@ -7,6 +7,8 @@ import { EditIcon } from '../icons/AppIcons';
 import './_messageBubble.scss';
 import { AssistantMessageContent } from './AssistantMessageContent';
 import { MessageAttachment } from './MessageAttachment';
+import { MessageError } from './MessageError';
+import { MessageRating } from './MessageRating';
 import { UserMessageContent } from './UserMessageContent';
 
 type MessageBubbleProps = {
@@ -15,9 +17,12 @@ type MessageBubbleProps = {
 	onRetry?: () => void;
 	onEdit?: (content: string) => void;
 	branch?: { index: number; total: number; onPrevious?: () => void; onNext?: () => void };
+	onRate?: (score: number, comment?: string) => void;
+	onRemoveRating?: () => void;
+	onSaveToKnowledge?: () => void;
 };
 
-export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, branch }: MessageBubbleProps) {
+export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, branch, onRate, onRemoveRating, onSaveToKnowledge }: MessageBubbleProps) {
 	const [isEditing, setIsEditing] = useState(false);
 	const [draft, setDraft] = useState(message.content);
 	const isUser = message.role === CHAT_ROLES.USER;
@@ -80,7 +85,9 @@ export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, bran
 				</div>
 			)}
 
-			{isUser && isEditing ? (
+			{isError ? (
+				<MessageError message={message.content} requestId={message.requestId} onRetry={onRetry} />
+			) : isUser && isEditing ? (
 				<div className="message__editor">
 					<textarea autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} />
 					<div><button type="button" onClick={() => { setDraft(message.content); setIsEditing(false); }}>Отмена</button><button type="button" disabled={!draft.trim() || draft.trim() === message.content.trim()} onClick={() => { onEdit?.(draft.trim()); setIsEditing(false); }}>Отправить</button></div>
@@ -94,13 +101,16 @@ export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, bran
 					)}
 				</div>
 			)}
+			{!isUser && !isPending && !isStreaming && !isError && !isCancelled && onRate && onRemoveRating && (
+				<MessageRating rating={message.rating} onRate={onRate} onRemove={onRemoveRating} onSaveToKnowledge={onSaveToKnowledge} />
+			)}
 			{isUser && !isEditing && (onEdit || (branch && branch.total > 1)) && (
 				<div className="message__user-actions">
 					{branch && branch.total > 1 && <div className="message__branches"><button type="button" onClick={branch.onPrevious} disabled={!branch.onPrevious} aria-label="Предыдущая версия">‹</button><span>{branch.index + 1} / {branch.total}</span><button type="button" onClick={branch.onNext} disabled={!branch.onNext} aria-label="Следующая версия">›</button></div>}
 					{onEdit && <button type="button" onClick={() => { setDraft(message.content); setIsEditing(true); }} aria-label="Редактировать сообщение"><EditIcon size={15} /></button>}
 				</div>
 			)}
-			{!isUser && !isPending && !isStreaming && (isError || isCancelled) && onRetry && (
+			{!isUser && !isPending && !isStreaming && isCancelled && onRetry && (
 				<div className="message__actions">
 					<button type="button" onClick={onRetry}>
 						Повторить
