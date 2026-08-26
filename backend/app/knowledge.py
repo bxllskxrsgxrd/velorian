@@ -158,7 +158,9 @@ async def upload_knowledge_file(
 	content = await file.read(settings.max_file_size + 1)
 	await file.close()
 	if len(content) > settings.max_file_size:
-		raise AppError(413, "FILE_TOO_LARGE", f"Файл {name} превышает лимит")
+		raise AppError(413, "FILE_SIZE_LIMIT_EXCEEDED", f"Файл {name} превышает лимит", {
+			"fileName": name, "actualSize": len(content), "maximumSize": settings.max_file_size,
+		})
 	extracted = extract_text(name, file.content_type or "application/octet-stream", content)
 	if extracted.status not in {"ready", "empty", "ocr_unavailable"}:
 		raise AppError(422, "FILE_PROCESSING_FAILED", f"Не удалось обработать файл {name}")
@@ -306,3 +308,7 @@ async def download_knowledge_file(item_id: str, user: User = Depends(get_current
 
 def retrieve_knowledge(db: Session, user_id: str, query: str, limit: int = 4) -> list[KnowledgeItem]:
 	return knowledge_retrieval_service.search(db, user_id, query, limit)
+
+
+def list_knowledge(db: Session, user_id: str, limit: int = 20) -> list[KnowledgeItem]:
+	return knowledge_retrieval_service.list(db, user_id, limit)

@@ -46,6 +46,21 @@ class KnowledgeRetrievalService:
 	def search(self, db: Session, user_id: str, query: str, limit: int = 4) -> list[KnowledgeItem]:
 		return self.retriever.search(db, user_id, query, limit)
 
+	def list(self, db: Session, user_id: str, limit: int = 20) -> list[KnowledgeItem]:
+		return list(db.scalars(
+			select(KnowledgeItem)
+			.where(KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True))
+			.order_by(KnowledgeItem.updated_at.desc())
+			.limit(limit)
+		))
+
+	def get(self, db: Session, user_id: str, item_id: str) -> KnowledgeItem | None:
+		return db.scalar(select(KnowledgeItem).where(
+			KnowledgeItem.id == item_id,
+			KnowledgeItem.user_id == user_id,
+			KnowledgeItem.is_active.is_(True),
+		))
+
 
 def create_knowledge_retrieval_service() -> KnowledgeRetrievalService:
 	if settings.knowledge_search_driver == "text":

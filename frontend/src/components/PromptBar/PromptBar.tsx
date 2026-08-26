@@ -1,7 +1,7 @@
 import React, { useEffect, useRef, useState } from 'react';
 import { USER_MESSAGE_INLINE_CHAR_LIMIT } from '../../constants/limits';
 import { PROMPT_TOOLS, promptMarker, stripPromptMarker } from '../../constants/promptTools';
-import type { SearchMode } from '../../types/chat';
+import type { ChatMessageError, SearchMode } from '../../types/chat';
 import { reportError } from '../../utils/reportError';
 import { createPastedTextFile } from '../../utils/pastedTextFile';
 import { MicrophoneIcon } from '../icons/MicrophoneIcon';
@@ -31,7 +31,7 @@ type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
 type PromptBarProps = {
 	files: File[];
-	fileError?: string;
+	fileError?: ChatMessageError | null;
 	isGenerating: boolean;
 	onSendMessage: (prompt: string, files: File[], searchMode: SearchMode) => Promise<void>;
 	onStop: () => void;
@@ -175,7 +175,8 @@ export function PromptBar({
 			)}
 			{fileError && (
 				<div className="prompt-bar__error" role="alert">
-					{fileError}
+					<strong className="prompt-bar__error-title">{fileError.title}</strong>
+					<span className="prompt-bar__error-description">{fileError.description}</span>
 				</div>
 			)}
 

@@ -1,4 +1,6 @@
 import type { AuthUser, ChatAttachment, ChatMessage, Conversation, ConversationSummary, KnowledgeItem, KnowledgePageResult, MessageRating, SearchMode } from '../types/chat';
+import type { AttachmentLimits } from '../constants/attachmentLimits';
+import { getUserFacingError } from '../errors/userErrorMessages';
 import { reportError } from '../utils/reportError';
 import { API_ORIGIN, ApiError, apiFetch, requestJson, setCsrfToken } from './httpClient';
 
@@ -18,9 +20,14 @@ function normalizeAttachment(attachment: Omit<ChatAttachment, 'isImage'> & { isI
 }
 
 function normalizeMessage(message: ChatMessage): ChatMessage {
+	const persistedError = message.error;
+	const persistedErrorCode = persistedError?.code ?? message.errorCode;
 	return {
 		...message,
 		attachments: message.attachments?.map(normalizeAttachment) ?? [],
+		error: message.status === 'error'
+			? getUserFacingError(persistedErrorCode ?? 'HISTORICAL_MESSAGE_ERROR', 0, persistedError?.requestId ?? message.requestId)
+			: undefined,
 	};
 }
 
@@ -38,6 +45,10 @@ function parseStreamEvent(line: string): StreamEvent {
 
 export async function getCurrentUser(): Promise<AuthUser> {
 	return (await requestJson<{ user: AuthUser }>('/auth/me')).user;
+}
+
+export async function getRuntimeConfig(): Promise<{ attachmentLimits: AttachmentLimits }> {
+	return requestJson<{ attachmentLimits: AttachmentLimits }>('/config');
 }
 
 export async function authenticate(mode: 'login' | 'register', email: string, password: string): Promise<AuthUser> {

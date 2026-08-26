@@ -36,9 +36,28 @@ def _add_storage_keys(connection: Connection) -> None:
 		connection.execute(text(statement))
 
 
+def _add_message_error_fields(connection: Connection) -> None:
+	columns = {column["name"] for column in inspect(connection).get_columns("messages")}
+	statements = {
+		"error_code": "ALTER TABLE messages ADD COLUMN error_code VARCHAR(64)",
+		"request_id": "ALTER TABLE messages ADD COLUMN request_id VARCHAR(128)",
+	}
+	for column, statement in statements.items():
+		if column not in columns:
+			connection.execute(text(statement))
+
+
+def _add_message_search_mode(connection: Connection) -> None:
+	columns = {column["name"] for column in inspect(connection).get_columns("messages")}
+	if "search_mode" not in columns:
+		connection.execute(text("ALTER TABLE messages ADD COLUMN search_mode VARCHAR(16) NOT NULL DEFAULT 'none'"))
+
+
 MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260825_01_ratings_and_knowledge", _create_ratings_and_knowledge),
 	("20260825_02_storage_keys", _add_storage_keys),
+	("20260826_01_message_error_fields", _add_message_error_fields),
+	("20260826_02_message_search_mode", _add_message_search_mode),
 )
 
 

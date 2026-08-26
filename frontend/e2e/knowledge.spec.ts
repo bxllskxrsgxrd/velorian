@@ -24,3 +24,26 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	await page.getByLabel('Рейтинг', { exact: true }).selectOption('4');
 	await filterRequest;
 });
+
+test('agent can browse and search the current user knowledge through chat', async ({ page }) => {
+	await installMockApi(page);
+	await page.goto('/knowledge');
+	await page.getByRole('button', { name: 'Добавить данные' }).click();
+	const dialog = page.getByRole('dialog');
+	await dialog.getByLabel('Название').fill('Facebook Hooks');
+	await dialog.getByLabel('Содержимое').fill('Для health-офферов используем curiosity angle.');
+	await dialog.getByRole('button', { name: 'Добавить' }).click();
+
+	await page.getByRole('button', { name: 'Новый чат' }).click();
+	await page.getByRole('textbox', { name: 'Введите запрос' }).fill('Что находится в моей базе знаний?');
+	await page.getByRole('button', { name: 'Отправить сообщение' }).click();
+	await expect(page.getByText(/В вашей базе знаний: Facebook Hooks/)).toBeVisible();
+
+	await page.getByLabel('Открыть меню действий').click();
+	await page.getByRole('menuitemradio', { name: 'Поиск по базе знаний' }).click();
+	await page.getByRole('textbox', { name: 'Введите запрос' }).pressSequentially('Какой angle использовать для health Facebook?');
+	const send = page.getByRole('button', { name: 'Отправить сообщение' });
+	await expect(send).toBeEnabled();
+	await send.click();
+	await expect(page.getByText(/curiosity angle/)).toBeVisible();
+});

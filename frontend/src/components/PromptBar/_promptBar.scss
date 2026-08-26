@@ -186,10 +186,18 @@
 
 	&__error {
 		width: 100%;
-		padding: 0 4px 8px;
-		color: var(--color-error);
+		display: flex;
+		flex-direction: column;
+		gap: 2px;
+		padding: 8px 10px;
+		border: 1px solid color-mix(in srgb, var(--color-error) 35%, var(--color-border));
+		border-radius: var(--radius-small);
+		background: color-mix(in srgb, var(--color-error) 8%, var(--color-bg-surface));
 		font-size: 12px;
 	}
+
+	&__error-title { color: var(--color-error); }
+	&__error-description { color: var(--color-text-secondary); }
 
 	&__stop {
 		width: 12px;

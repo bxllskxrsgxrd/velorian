@@ -1,21 +1,21 @@
 import { ErrorIcon } from '../icons/AppIcons';
+import type { ChatMessageError } from '../../types/chat';
 
 type MessageErrorProps = {
-	message: string;
-	requestId?: string;
+	error: ChatMessageError;
 	onRetry?: () => void;
 };
 
-export function MessageError({ message, requestId, onRetry }: MessageErrorProps) {
+export function MessageError({ error, onRetry }: MessageErrorProps) {
 	return (
-		<div className="message__error-card" role="alert" aria-live="assertive">
-			<span className="message__error-icon"><ErrorIcon /></span>
-			<div className="message__error-copy">
-				<strong>Не удалось получить ответ</strong>
-				<span>{message || 'Попробуйте повторить запрос через несколько секунд.'}</span>
-				{requestId && <small>Код обращения: {requestId}</small>}
+		<div className="message__error">
+			<span className="message__error-icon" aria-hidden="true"><ErrorIcon /></span>
+			<div className="message__error-content">
+				<strong className="message__error-title">{error.title}</strong>
+				<span className="message__error-description">{error.description}</span>
+				{error.requestId && <small className="message__error-request-id">Код обращения: {error.requestId}</small>}
+				{error.retryable && onRetry && <div className="message__error-actions"><button type="button" onClick={onRetry}>Повторить</button></div>}
 			</div>
-			{onRetry && <button type="button" onClick={onRetry}>Повторить</button>}
 		</div>
 	);
 }

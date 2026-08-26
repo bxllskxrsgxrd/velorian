@@ -32,12 +32,14 @@
 		}
 	}
 
-	&__error-card { width: min(100%, 620px); display: grid; grid-template-columns: 36px minmax(0, 1fr) auto; align-items: center; gap: 12px; padding: 14px; border: 1px solid color-mix(in srgb, var(--color-error) 38%, var(--color-border)); border-radius: var(--radius-medium); color: var(--color-text-primary); background: color-mix(in srgb, var(--color-error) 10%, var(--color-bg-surface)); }
+	&__error { width: min(100%, 620px); display: grid; grid-template-columns: 36px minmax(0, 1fr); align-items: start; gap: 12px; padding: 14px; border: 1px solid color-mix(in srgb, var(--color-error) 42%, var(--color-border)); border-radius: var(--radius-medium); color: var(--color-text-primary); background: color-mix(in srgb, var(--color-error) 12%, var(--color-bg-surface)); box-shadow: 0 8px 24px color-mix(in srgb, var(--color-error) 8%, transparent); }
 	&__error-icon { display: grid; place-items: center; width: 36px; height: 36px; border-radius: 50%; color: var(--color-error); background: color-mix(in srgb, var(--color-error) 16%, transparent); }
-	&__error-copy { min-width: 0; display: flex; flex-direction: column; gap: 2px; }
-	&__error-copy span { color: var(--color-text-secondary); font-size: 14px; }
-	&__error-copy small { color: color-mix(in srgb, var(--color-text-secondary) 75%, transparent); font-size: 11px; }
-	&__error-card > button { padding: 7px 10px; border: 1px solid color-mix(in srgb, var(--color-error) 40%, var(--color-border)); border-radius: 9px; color: var(--color-text-primary); background: var(--color-bg-elevated); cursor: pointer; }
+	&__error-content { min-width: 0; display: flex; flex-direction: column; gap: 3px; }
+	&__error-title { color: var(--color-text-primary); }
+	&__error-description { color: var(--color-text-secondary); font-size: 14px; }
+	&__error-request-id { color: color-mix(in srgb, var(--color-text-secondary) 75%, transparent); font-size: 11px; }
+	&__error-actions { margin-top: 7px; }
+	&__error-actions button { padding: 7px 10px; border: 1px solid color-mix(in srgb, var(--color-error) 40%, var(--color-border)); border-radius: 9px; color: var(--color-text-primary); background: var(--color-bg-elevated); cursor: pointer; }
 
 	&__rating { display: flex; flex-direction: column; gap: 6px; color: var(--color-text-secondary); font-size: 12px; }
 	&__rating-row { display: flex; align-items: center; gap: 3px; flex-wrap: wrap; }
@@ -253,5 +255,7 @@
 		&__media {
 			max-width: 100%;
 		}
+
+		&__error { grid-template-columns: 32px minmax(0, 1fr); }
 	}
 }

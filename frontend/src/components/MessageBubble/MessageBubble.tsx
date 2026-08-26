@@ -9,6 +9,7 @@ import { MessageAttachment } from './MessageAttachment';
 import { MessageError } from './MessageError';
 import { MessageRating } from './MessageRating';
 import { UserMessageContent } from './UserMessageContent';
+import { getUserFacingError } from '../../errors/userErrorMessages';
 
 const AssistantMessageContent = lazy(() => import('./AssistantMessageContent'));
 
@@ -32,6 +33,15 @@ export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, bran
 	const isStreaming = !isUser && message.status === CHAT_MESSAGE_STATUSES.STREAMING;
 	const isError = !isUser && message.status === CHAT_MESSAGE_STATUSES.ERROR;
 	const isCancelled = !isUser && message.status === CHAT_MESSAGE_STATUSES.CANCELLED;
+	const isHistoricalCancelledError = isCancelled && !message.content.trim();
+	const shouldRenderError = isError || isHistoricalCancelledError;
+	const error = shouldRenderError
+		? message.error ?? getUserFacingError(
+			message.errorCode ?? (isHistoricalCancelledError ? 'AI_REQUEST_INTERRUPTED' : 'HISTORICAL_MESSAGE_ERROR'),
+			0,
+			message.requestId,
+		)
+		: undefined;
 
 	const attachments = message.attachments ?? [];
 
@@ -50,10 +60,18 @@ export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, bran
 	const messageClassName = [
 		'message',
 		isUser ? 'message--user' : 'message--assistant',
-		(isError || isCancelled) && 'message--error',
+		shouldRenderError && 'message--error',
 	]
 		.filter(Boolean)
 		.join(' ');
+
+	if (shouldRenderError) {
+		return (
+			<div className={messageClassName} id={`message-${message.id}`} role="alert" aria-live="assertive">
+				<MessageError error={error!} onRetry={onRetry} />
+			</div>
+		);
+	}
 
 	return (
 		<div className={messageClassName} id={`message-${message.id}`}>
@@ -86,9 +104,7 @@ export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, bran
 				</div>
 			)}
 
-			{isError ? (
-				<MessageError message={message.content} requestId={message.requestId} onRetry={onRetry} />
-			) : isUser && isEditing ? (
+			{isUser && isEditing ? (
 				<div className="message__editor">
 					<textarea autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} />
 					<div><button type="button" onClick={() => { setDraft(message.content); setIsEditing(false); }}>Отмена</button><button type="button" disabled={!draft.trim() || draft.trim() === message.content.trim()} onClick={() => { onEdit?.(draft.trim()); setIsEditing(false); }}>Отправить</button></div>
@@ -102,7 +118,7 @@ export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, bran
 					)}
 				</div>
 			)}
-			{!isUser && !isPending && !isStreaming && !isError && !isCancelled && onRate && onRemoveRating && (
+			{!isUser && !isPending && !isStreaming && !isCancelled && onRate && onRemoveRating && (
 				<MessageRating rating={message.rating} onRate={onRate} onRemove={onRemoveRating} onSaveToKnowledge={onSaveToKnowledge} />
 			)}
 			{isUser && !isEditing && (onEdit || (branch && branch.total > 1)) && (

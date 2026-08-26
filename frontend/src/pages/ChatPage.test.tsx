@@ -4,6 +4,7 @@ import { ChatPage } from './ChatPage';
 import { ToastProvider } from '../components/Toast/ToastProvider';
 import { ApiError } from '../api/httpClient';
 import type { StreamEvent } from '../api/chatApi';
+import { MemoryRouter, Route, Routes } from 'react-router-dom';
 
 const api = vi.hoisted(() => ({
 	createConversation: vi.fn(),
@@ -23,6 +24,14 @@ const conversation = {
 	updatedAt: '2026-08-21T00:00:00Z',
 };
 
+function renderChatPage() {
+	return render(
+		<MemoryRouter initialEntries={[`/chat/${conversation.id}`]}>
+			<ToastProvider><Routes><Route path="/chat/:conversationId" element={<ChatPage user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn()} onOpenKnowledge={vi.fn()} />} /></Routes></ToastProvider>
+		</MemoryRouter>,
+	);
+}
+
 describe('ChatPage retry', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -38,7 +47,7 @@ describe('ChatPage retry', () => {
 	});
 
 	it('adds an optimistic copy of the user message when retry starts', async () => {
-		render(<ToastProvider><ChatPage user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn()} onOpenKnowledge={vi.fn()} /></ToastProvider>);
+		renderChatPage();
 
 		fireEvent.click(await screen.findByRole('button', { name: 'Повторить' }));
 
@@ -50,7 +59,7 @@ describe('ChatPage retry', () => {
 
 	it('maps an HTTP failure before stream metadata from pending to the dedicated error UI', async () => {
 		api.streamChat.mockRejectedValueOnce(new ApiError('AI_SERVICE_ERROR', 502, 'request-502'));
-		const { container } = render(<ToastProvider><ChatPage user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn()} onOpenKnowledge={vi.fn()} /></ToastProvider>);
+		const { container } = renderChatPage();
 
 		const prompt = await screen.findByRole('textbox', { name: /введите запрос/i });
 		fireEvent.change(prompt, { target: { value: 'Запрос с ошибкой' } });
@@ -74,10 +83,10 @@ describe('ChatPage retry', () => {
 			onEvent({ type: 'error', code: 'AI_TIMEOUT', message: 'internal', requestId: 'timeout-request' });
 			throw new ApiError('AI_TIMEOUT', 200, 'timeout-request');
 		});
-		const { container } = render(<ToastProvider><ChatPage user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn()} onOpenKnowledge={vi.fn()} /></ToastProvider>);
+		const { container } = renderChatPage();
 		fireEvent.change(await screen.findByRole('textbox', { name: /введите запрос/i }), { target: { value: 'Потоковая ошибка' } });
 		fireEvent.click(screen.getByRole('button', { name: 'Отправить сообщение' }));
-		const errorText = await screen.findByText(/AI-сервис не успел ответить/i);
+		const errorText = await screen.findByText(/Сервер не успел завершить запрос/i);
 		const alert = errorText.closest('[role="alert"]');
 		expect(alert).not.toBeNull();
 		expect(alert?.closest('.message')).toHaveClass('message--error');

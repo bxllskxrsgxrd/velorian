@@ -5,7 +5,7 @@ export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL ?? '/api').replac
 export const API_ORIGIN = new URL(API_BASE_URL, window.location.origin).origin;
 
 type ApiErrorPayload = {
-	error?: { code?: string; message?: string; request_id?: string };
+	error?: { code?: string; message?: string; request_id?: string; details?: Record<string, unknown> };
 };
 
 export class ApiError extends Error {
@@ -14,8 +14,9 @@ export class ApiError extends Error {
 	readonly requestId?: string;
 	readonly developerMessage?: string;
 	readonly responseBody?: unknown;
+	readonly details?: Record<string, unknown>;
 
-	constructor(code: string, status: number, requestId?: string, developerMessage?: string, responseBody?: unknown) {
+	constructor(code: string, status: number, requestId?: string, developerMessage?: string, responseBody?: unknown, details?: Record<string, unknown>) {
 		super(getUserErrorMessage(code, status));
 		this.name = 'ApiError';
 		this.code = code;
@@ -23,6 +24,7 @@ export class ApiError extends Error {
 		this.requestId = requestId;
 		this.developerMessage = developerMessage;
 		this.responseBody = responseBody;
+		this.details = details;
 	}
 }
 
@@ -74,6 +76,7 @@ export async function parseApiError(response: Response): Promise<ApiError> {
 		payload?.error?.request_id ?? response.headers.get('X-Request-ID') ?? undefined,
 		payload?.error?.message,
 		payload,
+		payload?.error?.details,
 	);
 }
 
@@ -120,6 +123,7 @@ export async function apiFetch(path: string, init: RequestInit = {}, retryCsrf =
 				status: normalized.status,
 				errorCode: normalized.code,
 				cause: normalized.developerMessage,
+				diagnostics: normalized.details,
 				durationMs: Math.round(performance.now() - started),
 			});
 		}

@@ -27,6 +27,14 @@ export type MessageRating = {
 	updatedAt: string;
 };
 
+export type ChatMessageError = {
+	code: string;
+	title: string;
+	description: string;
+	requestId?: string;
+	retryable: boolean;
+};
+
 export type ChatMessage = {
 	id: string;
 	role: ChatRole;
@@ -38,8 +46,11 @@ export type ChatMessage = {
 	replyToId?: string | null;
 	isActive?: boolean;
 	rating?: MessageRating | null;
+	error?: ChatMessageError | null;
+	/** @deprecated Kept while older API responses are normalized. */
 	errorCode?: string;
 	requestId?: string;
+	searchMode?: SearchMode;
 };
 
 export type PreviewFile = {

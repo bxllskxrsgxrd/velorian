@@ -141,8 +141,8 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 
 	return <div className="knowledge-shell">
 		<ChatSidebar user={user} conversations={filteredConversations} activeConversationId={null} search={conversationSearch} accentTheme={accent} isOpen={sidebarOpen} isCollapsed={sidebarCollapsed} activeSection="knowledge"
-			onSearchChange={setConversationSearch} onSelect={(id) => navigate(`/?conversation=${encodeURIComponent(id)}`)}
-			onNew={() => void createConversation().then((created) => navigate(`/?conversation=${encodeURIComponent(created.id)}`)).catch((error: unknown) => showToast(error instanceof Error ? error.message : 'Не удалось создать чат', 'error'))}
+			onSearchChange={setConversationSearch} onSelect={(id) => navigate(`/chat/${encodeURIComponent(id)}`)}
+			onNew={() => void createConversation().then((created) => navigate(`/chat/${encodeURIComponent(created.id)}`)).catch((error: unknown) => showToast(error instanceof Error ? error.message : 'Не удалось создать чат', 'error'))}
 			onDelete={(id) => void deleteConversation(id).then(() => setConversations((current) => current.filter((item) => item.id !== id)))}
 			onRename={(conversation, nextTitle) => void renameConversation(conversation.id, nextTitle).then((updated) => setConversations((current) => current.map((item) => item.id === updated.id ? updated : item)))}
 			onAccentChange={(theme) => { setAccent(theme); setAccentTheme(theme); }} onExport={() => showToast('Откройте чат для экспорта', 'info')} onLogout={() => void onLogout()} onOpenKnowledge={() => undefined}

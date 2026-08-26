@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useNavigate, useParams } from 'react-router-dom';
 import {
 	activateMessageBranch,
 	createConversation,
@@ -28,13 +29,12 @@ import { reportError } from '../utils/reportError';
 import './_chatPage.scss';
 import { ArrowDownIcon } from '../components/icons/ArrowDownIcon';
 import { useToast } from '../components/Toast/ToastContext';
-import { getUserErrorMessage } from '../errors/userErrorMessages';
+import { getUserFacingError } from '../errors/userErrorMessages';
 
 type ChatPageProps = {
 	user: AuthUser;
 	onLogout: () => Promise<void>;
 	onOpenKnowledge: () => void;
-	initialConversationId?: string;
 };
 
 function downloadText(name: string, content: string, type: string) {
@@ -55,10 +55,12 @@ function getStoredSidebarCollapsed() {
 	}
 }
 
-export function ChatPage({ user, onLogout, onOpenKnowledge, initialConversationId }: ChatPageProps) {
+export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	const { showToast } = useToast();
+	const navigate = useNavigate();
+	const { conversationId: routeConversationId } = useParams<{ conversationId: string }>();
 	const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-	const [activeConversationId, setActiveConversationId] = useState<string | null>(null);
+	const activeConversationId = routeConversationId ?? null;
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [previewFile, setPreviewFile] = useState<PreviewFile | null>(null);
 	const [isGenerating, setIsGenerating] = useState(false);
@@ -78,6 +80,8 @@ export function ChatPage({ user, onLogout, onOpenKnowledge, initialConversationI
 	const skipNextLoadRef = useRef(false);
 	const ratingSequenceRef = useRef(new Map<string, number>());
 	const localRetryPayloadsRef = useRef(new Map<string, { prompt: string; files: File[]; searchMode: SearchMode }>());
+	const initialRouteConversationIdRef = useRef(routeConversationId);
+	const suppressInitialFallbackRef = useRef(false);
 
 	const {
 		isDragging,
@@ -89,7 +93,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge, initialConversationI
 		handleDrop,
 		removeFile,
 		clearFiles,
-	} = useDragAndDrop();
+	} = useDragAndDrop(activeConversationId);
 
 	const hasMessages = messages.length > 0;
 	const filteredConversations = useMemo(() => {
@@ -103,8 +107,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge, initialConversationI
 			.then((items) => {
 				if (cancelled) return;
 				setConversations(items);
-				const requested = initialConversationId ? items.find((item) => item.id === initialConversationId) : undefined;
-				if (requested ?? items[0]) setActiveConversationId((requested ?? items[0]).id);
+				if (!initialRouteConversationIdRef.current && !suppressInitialFallbackRef.current && items[0]) navigate(`/chat/${items[0].id}`, { replace: true });
 			})
 			.catch((error: unknown) => {
 				reportError('Не удалось загрузить историю диалогов', error);
@@ -113,7 +116,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge, initialConversationI
 		return () => {
 			cancelled = true;
 		};
-	}, [initialConversationId]);
+	}, [navigate, user.id]);
 
 	useEffect(() => {
 		if (!activeConversationId) return;
@@ -122,6 +125,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge, initialConversationI
 			return;
 		}
 		const sequence = ++loadSequenceRef.current;
+		setPageError('');
 		setIsLoadingConversation(true);
 		getConversation(activeConversationId)
 			.then((conversation) => {
@@ -133,8 +137,10 @@ export function ChatPage({ user, onLogout, onOpenKnowledge, initialConversationI
 			})
 			.catch((error: unknown) => {
 				reportError('Не удалось открыть диалог', error, { conversationId: activeConversationId });
-				if (sequence === loadSequenceRef.current)
-					setPageError(error instanceof Error ? error.message : 'Не удалось открыть диалог');
+				if (sequence === loadSequenceRef.current) {
+					setMessages([]);
+					setPageError(error instanceof ApiError && error.status === 404 ? 'Чат не найден' : error instanceof Error ? error.message : 'Не удалось открыть диалог');
+				}
 			})
 			.finally(() => {
 				if (sequence === loadSequenceRef.current) setIsLoadingConversation(false);
@@ -218,8 +224,8 @@ export function ChatPage({ user, onLogout, onOpenKnowledge, initialConversationI
 		loadSequenceRef.current += 1;
 		skipNextLoadRef.current = true;
 		setConversations((current) => [created, ...current]);
-		setActiveConversationId(created.id);
 		setMessages([]);
+		navigate(`/chat/${created.id}`);
 		return created.id;
 	}
 
@@ -328,7 +334,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge, initialConversationI
 						setMessages((current) =>
 							current.map((message) =>
 								message.id === currentAssistantId
-									? { ...message, content: getUserErrorMessage(event.code), errorCode: event.code, requestId: event.requestId, status: CHAT_MESSAGE_STATUSES.ERROR }
+									? { ...message, content: '', error: getUserFacingError(event.code, 0, event.requestId), status: CHAT_MESSAGE_STATUSES.ERROR }
 									: message,
 							),
 						);
@@ -340,30 +346,32 @@ export function ChatPage({ user, onLogout, onOpenKnowledge, initialConversationI
 			flushDelta();
 			const wasStopped = controller.signal.aborted;
 			if (!wasStopped) reportError('Ошибка генерации ответа', error, { conversationId });
-			const messageText = wasStopped
-				? 'Генерация остановлена'
-				: error instanceof Error
-					? error.message
-					: 'Неизвестная ошибка';
+			const messageText = wasStopped ? 'Генерация остановлена' : '';
 			if (!receivedMeta) {
+				const normalizedError = error instanceof ApiError
+					? getUserFacingError(error.code, error.status, error.requestId)
+					: getUserFacingError('UNKNOWN_ERROR');
 				localRetryPayloadsRef.current.set(tempUserId, { prompt: optimisticUser.content, files: [...currentFiles], searchMode });
 				setMessages((current) => current.map((message) => message.id === tempAssistantId
 					? {
 						...message,
-						content: messageText,
-						errorCode: error instanceof ApiError ? error.code : 'UNKNOWN_ERROR',
-						requestId: error instanceof ApiError ? error.requestId : undefined,
+						content: '',
+						error: normalizedError,
 						status: CHAT_MESSAGE_STATUSES.ERROR,
 					}
 					: message));
 				return;
 			}
+			const normalizedError = error instanceof ApiError
+				? getUserFacingError(error.code, error.status, error.requestId)
+				: getUserFacingError('UNKNOWN_ERROR');
 			setMessages((current) =>
 				current.map((message) =>
 					message.id === currentAssistantId || message.id === tempAssistantId
 						? {
 								...message,
-								content: message.content || messageText,
+								content: wasStopped ? message.content || messageText : '',
+								error: wasStopped ? undefined : message.error ?? normalizedError,
 								status: wasStopped ? CHAT_MESSAGE_STATUSES.CANCELLED : CHAT_MESSAGE_STATUSES.ERROR,
 							}
 						: message,
@@ -444,11 +452,12 @@ export function ChatPage({ user, onLogout, onOpenKnowledge, initialConversationI
 	}
 
 	function handleNewConversation() {
+		suppressInitialFallbackRef.current = true;
 		if (isGenerating) requestControllerRef.current?.abort();
 		revokeLocalAttachmentUrls();
-		setActiveConversationId(null);
 		setMessages([]);
 		setIsSidebarOpen(false);
+		navigate('/');
 	}
 
 	async function handleDeleteConversation(id: string) {
@@ -460,7 +469,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge, initialConversationI
 		const remaining = conversations.filter((item) => item.id !== id);
 		setConversations(remaining);
 		if (activeConversationId === id) {
-			setActiveConversationId(remaining[0]?.id ?? null);
+			navigate(remaining[0] ? `/chat/${remaining[0].id}` : '/', { replace: true });
 			if (!remaining[0]) {
 				revokeLocalAttachmentUrls();
 				setMessages([]);
@@ -512,7 +521,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge, initialConversationI
 				onSearchChange={setConversationSearch}
 				onSelect={(id) => {
 					requestControllerRef.current?.abort();
-					setActiveConversationId(id);
+					navigate(`/chat/${id}`);
 					setIsSidebarOpen(false);
 				}}
 				onNew={handleNewConversation}

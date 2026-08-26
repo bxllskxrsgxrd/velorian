@@ -93,6 +93,18 @@ def test_conversation_crud(authenticated_client):
 	assert authenticated_client.delete(f"/api/conversations/{conversation_id}").status_code == 204
 
 
+def test_public_config_exposes_canonical_attachment_limits(client):
+	from app.config import settings
+
+	response = client.get("/api/config")
+	assert response.status_code == 200
+	assert response.json()["attachmentLimits"] == {
+		"maxAttachments": settings.max_files,
+		"maxFileSize": settings.max_file_size,
+		"maxTotalSize": settings.max_total_file_size,
+	}
+
+
 def test_streaming_and_retry(authenticated_client, monkeypatch):
 	import app.main as main_module
 
@@ -292,6 +304,28 @@ def test_rejects_unsupported_file(authenticated_client):
 	assert response.json()["error"]["code"] == "UNSUPPORTED_FILE_TYPE"
 
 
+def test_rejects_attachment_count_with_structured_code_and_diagnostics(authenticated_client, monkeypatch):
+	import app.main as main_module
+	from app.config import settings
+
+	monkeypatch.setattr(main_module, "client", FakeGroq())
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Лимит файлов"}).json()["conversation"]["id"]
+	files = [("files", (f"file-{index}.txt", b"x", "text/plain")) for index in range(settings.max_files + 1)]
+	response = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Проверь файлы"},
+		files=files,
+	)
+	assert response.status_code == 413
+	error = response.json()["error"]
+	assert error["code"] == "ATTACHMENT_COUNT_LIMIT_EXCEEDED"
+	assert error["details"] == {
+		"actualAttachments": settings.max_files + 1,
+		"maximumAttachments": settings.max_files,
+	}
+	assert authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"] == []
+
+
 def test_rejects_broken_supported_file(authenticated_client):
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Файлы"}).json()["conversation"]["id"]
 	response = authenticated_client.post(
@@ -330,6 +364,8 @@ def test_stream_error_is_persisted_as_error_status(authenticated_client, monkeyp
 	messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
 	assert messages[-1]["status"] == "error"
 	assert messages[-1]["role"] == "assistant"
+	assert messages[-1]["error"]["code"] == "AI_EMPTY_RESPONSE"
+	assert messages[-1]["error"]["requestId"]
 
 
 def test_rating_upsert_delete_and_no_duplicates(authenticated_client, monkeypatch):
@@ -447,6 +483,67 @@ def test_knowledge_search_is_opt_in_and_owner_scoped(client, monkeypatch):
 	knowledge_prompt = completions.calls[1]["messages"][-1]["content"]
 	assert "Собственный секрет альфа" in knowledge_prompt
 	assert "Чужой секрет альфа" not in knowledge_prompt
+	conversation = client.get(f"/api/conversations/{conversation_id}").json()["conversation"]
+	knowledge_user_message = [message for message in conversation["messages"] if message["role"] == "user"][-1]
+	client.post(f"/api/conversations/{conversation_id}/stream", data={"retry_message_id": knowledge_user_message["id"]})
+	retry_prompt = completions.calls[2]["messages"][-1]["content"]
+	assert "Собственный секрет альфа" in retry_prompt
+	assert "Чужой секрет альфа" not in retry_prompt
+
+
+def test_knowledge_list_intent_browses_metadata_without_toggle(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Список знаний"}).json()["conversation"]["id"]
+
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Что находится в моей базе знаний?", "search_mode": "none"},
+	)
+	empty_context = completions.calls[0]["messages"][-1]["content"]
+	assert "Mode: list" in empty_context
+	assert "Status: empty" in empty_context
+	assert "пока нет сохранённых данных" in empty_context
+
+	authenticated_client.post("/api/knowledge", json={
+		"title": "Facebook Hooks",
+		"content": "Для health-офферов используем curiosity angle.",
+		"rating": 5,
+	})
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Какие материалы есть в моей базе знаний?", "search_mode": "none"},
+	)
+	list_context = completions.calls[1]["messages"][-1]["content"]
+	assert "Mode: list" in list_context
+	assert "Source: Facebook Hooks" in list_context
+	assert "Rating: 5/5" in list_context
+	assert "curiosity angle" in list_context
+	assert "user_id" not in list_context
+	assert "storage_key" not in list_context
+
+
+def test_knowledge_list_intent_is_owner_scoped(client, monkeypatch):
+	import app.main as main_module
+
+	owner = client.post("/api/auth/register", json={"email": "list-owner@example.com", "password": "strong-password"})
+	client.headers.update({"X-CSRF-Token": owner.json()["csrfToken"]})
+	client.post("/api/knowledge", json={"title": "Owner Material", "content": "owner-only knowledge"})
+	client.post("/api/auth/logout")
+	client.headers.update({"X-CSRF-Token": client.get("/api/auth/csrf").json()["csrfToken"]})
+	other = client.post("/api/auth/register", json={"email": "list-other@example.com", "password": "strong-password"})
+	client.headers.update({"X-CSRF-Token": other.json()["csrfToken"]})
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = client.post("/api/conversations", json={"title": "Изоляция списка"}).json()["conversation"]["id"]
+	client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Что находится в моей базе знаний?"})
+	context = completions.calls[0]["messages"][-1]["content"]
+	assert "Status: empty" in context
+	assert "Owner Material" not in context
+	assert "owner-only knowledge" not in context
 
 
 def test_lower_rating_deactivates_saved_knowledge(authenticated_client, monkeypatch):
