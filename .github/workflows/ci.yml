@@ -21,7 +21,9 @@ jobs:
         run: pip install -r backend/requirements.txt -r backend/requirements-dev.txt
       - name: Backend tests
         working-directory: backend
-        run: pytest -q
+        env:
+          PYTHONPATH: .
+        run: python -m pytest -q
       - name: Frontend dependencies
         working-directory: frontend
         run: npm ci
