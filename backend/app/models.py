@@ -52,6 +52,7 @@ class Message(Base):
 	status: Mapped[str] = mapped_column(String(24), default="done")
 	error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
 	request_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+	knowledge_sources: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
 	search_mode: Mapped[str] = mapped_column(String(16), default="none")
 	branch_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 	reply_to_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
@@ -125,6 +126,9 @@ class KnowledgeItem(Base):
 		CheckConstraint("rating IS NULL OR (rating >= 1 AND rating <= 5)", name="ck_knowledge_item_rating"),
 		Index("ix_knowledge_user_active", "user_id", "is_active"),
 		Index("ix_knowledge_user_source", "user_id", "source_type"),
+		Index("ix_knowledge_user_rating", "user_id", "rating"),
+		Index("ix_knowledge_user_created", "user_id", "created_at", "id"),
+		Index("ix_knowledge_user_updated", "user_id", "updated_at", "id"),
 	)
 
 	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)

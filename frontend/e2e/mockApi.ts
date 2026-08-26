@@ -81,7 +81,7 @@ export async function installMockApi(page: Page, options: Options = {}) {
 			const rawBody = request.postData() ?? '';
 			const asksToBrowseKnowledge = /Что находится в моей базе знаний|Какие материалы есть в моей базе знаний/i.test(rawBody);
 			const usesKnowledgeSearch = rawBody.includes('name="search_mode"') && rawBody.includes('knowledge');
-			const knowledgeText = knowledge.map((item) => `${String(item.title)}: ${String(item.content)}`).join('; ');
+			const knowledgeText = knowledge.filter((item) => item.isActive).map((item) => `${String(item.title)}: ${String(item.content)}`).join('; ');
 			const answer = (asksToBrowseKnowledge || usesKnowledgeSearch) && knowledgeText ? `В вашей базе знаний: ${knowledgeText}` : 'Ответ агента';
 			const userMessage = { id: `user-e2e-${Date.now()}`, role: 'user', content: 'Тестовый запрос', status: 'done', attachments: [], branchGroupId: 'user-e2e', isActive: true };
 			const assistant = { id: `assistant-e2e-${Date.now()}`, role: 'assistant', content: answer, status: 'done', attachments: [], replyToId: userMessage.id };
@@ -98,8 +98,8 @@ export async function installMockApi(page: Page, options: Options = {}) {
 
 		if (path === '/api/knowledge' && method === 'GET') return json(route, { items: knowledge, pageInfo: { nextCursor: null, hasMore: false } });
 		if (path === '/api/knowledge' && method === 'POST') {
-			const payload = request.postDataJSON() as { title: string; content: string; rating?: number };
-			const item = { id: `k${knowledge.length + 1}`, sourceType: 'manual', title: payload.title, content: payload.content, mimeType: 'text/plain', rating: payload.rating ?? null, isActive: true, metadata: {}, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), downloadUrl: null };
+			const payload = request.postDataJSON() as { title: string; content: string; rating?: number; is_active?: boolean };
+			const item = { id: `k${knowledge.length + 1}`, sourceType: 'manual', title: payload.title, content: payload.content, mimeType: 'text/plain', rating: payload.rating ?? null, isActive: payload.is_active ?? true, metadata: {}, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), downloadUrl: null };
 			knowledge = [item, ...knowledge]; return json(route, { item });
 		}
 		const knowledgeMatch = path.match(/^\/api\/knowledge\/([^/]+)$/);
@@ -108,7 +108,7 @@ export async function installMockApi(page: Page, options: Options = {}) {
 			knowledge = knowledge.map((item) => item.id === knowledgeMatch[1] ? { ...item, ...payload, isActive: payload.is_active ?? item.isActive } : item);
 			return json(route, { item: knowledge.find((item) => item.id === knowledgeMatch[1]) });
 		}
-		if (knowledgeMatch && method === 'DELETE') return route.fulfill({ status: 204 });
+		if (knowledgeMatch && method === 'DELETE') { knowledge = knowledge.filter((item) => item.id !== knowledgeMatch[1]); return route.fulfill({ status: 204 }); }
 		return json(route, { error: { code: 'E2E_MOCK_MISSING', message: `${method} ${path}`, request_id: 'mock' } }, 500);
 	});
 }

@@ -53,11 +53,30 @@ def _add_message_search_mode(connection: Connection) -> None:
 		connection.execute(text("ALTER TABLE messages ADD COLUMN search_mode VARCHAR(16) NOT NULL DEFAULT 'none'"))
 
 
+def _add_knowledge_sources_and_indexes(connection: Connection) -> None:
+	message_columns = {column["name"] for column in inspect(connection).get_columns("messages")}
+	if "knowledge_sources" not in message_columns:
+		connection.execute(text("ALTER TABLE messages ADD COLUMN knowledge_sources JSON"))
+	for statement in (
+		"CREATE INDEX IF NOT EXISTS ix_knowledge_user_rating ON knowledge_items (user_id, rating)",
+		"CREATE INDEX IF NOT EXISTS ix_knowledge_user_updated ON knowledge_items (user_id, updated_at, id)",
+	):
+		connection.execute(text(statement))
+
+
+def _add_knowledge_created_index(connection: Connection) -> None:
+	connection.execute(text(
+		"CREATE INDEX IF NOT EXISTS ix_knowledge_user_created ON knowledge_items (user_id, created_at, id)"
+	))
+
+
 MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260825_01_ratings_and_knowledge", _create_ratings_and_knowledge),
 	("20260825_02_storage_keys", _add_storage_keys),
 	("20260826_01_message_error_fields", _add_message_error_fields),
 	("20260826_02_message_search_mode", _add_message_search_mode),
+	("20260826_03_knowledge_sources_and_indexes", _add_knowledge_sources_and_indexes),
+	("20260826_04_knowledge_created_index", _add_knowledge_created_index),
 )
 
 

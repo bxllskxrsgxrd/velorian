@@ -3,14 +3,15 @@ import base64
 import binascii
 import hashlib
 import json
+import logging
 from datetime import datetime
 from pathlib import Path
-from typing import Literal
+from typing import Annotated, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, asc, desc, or_, select
+from sqlalchemy import and_, asc, desc, func, or_, select
 from sqlalchemy.orm import Session
 
 from .auth import get_current_user
@@ -18,26 +19,36 @@ from .config import settings
 from .database import get_db
 from .errors import AppError
 from .file_processing import extract_text, validate_file_name
-from .knowledge_retrieval import knowledge_retrieval_service
+from .knowledge_retrieval import KnowledgeRetrievalResult, knowledge_retrieval_service
 from .models import Attachment, Conversation, KnowledgeItem, Message, MessageRating, User, utc_now
 from .storage import build_storage_key, get_file_storage
 
 
 router = APIRouter(prefix=f"{settings.api_prefix}/knowledge", tags=["knowledge"])
+logger = logging.getLogger("velorian")
+RatingValue = Annotated[int, Field(strict=True, ge=1, le=5)]
 
 
 class KnowledgeCreatePayload(BaseModel):
 	title: str = Field(min_length=1, max_length=255)
 	content: str = Field(min_length=1, max_length=2_000_000)
 	is_active: bool = True
-	rating: int | None = Field(default=None, ge=1, le=5)
+	rating: RatingValue | None = None
 
 
 class KnowledgeUpdatePayload(BaseModel):
 	title: str | None = Field(default=None, min_length=1, max_length=255)
 	content: str | None = Field(default=None, min_length=1, max_length=2_000_000)
 	is_active: bool | None = None
-	rating: int | None = Field(default=None, ge=1, le=5)
+	rating: RatingValue | None = None
+
+
+def _knowledge_search_condition(db: Session, raw_term: str):
+	term = " ".join(raw_term.casefold().replace("ё", "е").split())
+	fields = (KnowledgeItem.title, KnowledgeItem.content, KnowledgeItem.original_filename)
+	if db.bind is not None and db.bind.dialect.name == "sqlite":
+		return or_(*(func.casefold(field).contains(term, autoescape=True) for field in fields))
+	return or_(*(field.icontains(raw_term, autoescape=True) for field in fields))
 
 
 def knowledge_payload(item: KnowledgeItem) -> dict:
@@ -81,8 +92,8 @@ def list_knowledge_items(
 ):
 	statement = select(KnowledgeItem).where(KnowledgeItem.user_id == user.id)
 	if search.strip():
-		query = f"%{search.strip()}%"
-		statement = statement.where(or_(KnowledgeItem.title.ilike(query), KnowledgeItem.content.ilike(query)))
+		for term in search.split():
+			statement = statement.where(_knowledge_search_condition(db, term))
 	if source_type:
 		statement = statement.where(KnowledgeItem.source_type == source_type)
 	if is_active is not None:
@@ -151,6 +162,7 @@ async def upload_knowledge_file(
 	file: UploadFile = File(...),
 	title: str = Form(default=""),
 	rating: int | None = Form(default=None, ge=1, le=5),
+	is_active: bool = Form(default=True),
 	user: User = Depends(get_current_user),
 	db: Session = Depends(get_db),
 ):
@@ -176,14 +188,24 @@ async def upload_knowledge_file(
 		mime_type=file.content_type or "application/octet-stream",
 		original_filename=name,
 		rating=rating,
+		is_active=is_active,
 		item_metadata={"sha256": checksum, "extractionStatus": extracted.status},
 	)
 	db.add(item)
 	db.flush()
 	storage_key = build_storage_key(user.id, "knowledge", item.id)
-	await get_file_storage().save(storage_key, content, item.mime_type)
-	item.storage_key = storage_key
-	db.commit()
+	storage = get_file_storage()
+	try:
+		await storage.save(storage_key, content, item.mime_type)
+		item.storage_key = storage_key
+		db.commit()
+	except Exception:
+		db.rollback()
+		try:
+			await storage.delete(storage_key)
+		except Exception:
+			logger.exception("Knowledge upload cleanup failed: storage_key=%s", storage_key)
+		raise
 	return {"item": knowledge_payload(item)}
 
 
@@ -266,12 +288,38 @@ async def delete_knowledge_item(item_id: str, user: User = Depends(get_current_u
 	item = owned_knowledge_item(db, item_id, user.id)
 	storage_path = Path(item.storage_path) if item.storage_path else None
 	storage_key = item.storage_key
-	db.delete(item)
-	db.commit()
-	if storage_key:
-		await get_file_storage().delete(storage_key)
-	elif storage_path is not None:
-		await asyncio.to_thread(storage_path.unlink, missing_ok=True)
+	storage = get_file_storage()
+	file_backup: bytes | None = None
+	file_removed = False
+	try:
+		if storage_key:
+			try:
+				file_backup = await storage.get(storage_key)
+			except (FileNotFoundError, OSError):
+				file_backup = None
+			await storage.delete(storage_key)
+			file_removed = True
+		elif storage_path is not None and storage_path.exists():
+			file_backup = await asyncio.to_thread(storage_path.read_bytes)
+			await asyncio.to_thread(storage_path.unlink, missing_ok=True)
+			file_removed = True
+	except Exception as error:
+		logger.exception("Knowledge file deletion failed; preserving database item: item_id=%s", item_id)
+		raise AppError(503, "KNOWLEDGE_FILE_DELETE_FAILED", "Не удалось удалить файл. Запись сохранена, повторите попытку.") from error
+	try:
+		db.delete(item)
+		db.commit()
+	except Exception:
+		db.rollback()
+		if file_removed and file_backup is not None:
+			try:
+				if storage_key:
+					await storage.save(storage_key, file_backup, item.mime_type)
+				elif storage_path is not None:
+					await asyncio.to_thread(storage_path.write_bytes, file_backup)
+			except Exception:
+				logger.critical("Knowledge file restore failed after database rollback: item_id=%s", item_id, exc_info=True)
+		raise
 	return Response(status_code=204)
 
 
@@ -306,9 +354,9 @@ async def download_knowledge_file(item_id: str, user: User = Depends(get_current
 	return Response(content, media_type=item.mime_type, headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
 
 
-def retrieve_knowledge(db: Session, user_id: str, query: str, limit: int = 4) -> list[KnowledgeItem]:
+def retrieve_knowledge(db: Session, user_id: str, query: str, limit: int = 4) -> KnowledgeRetrievalResult:
 	return knowledge_retrieval_service.search(db, user_id, query, limit)
 
 
-def list_knowledge(db: Session, user_id: str, limit: int = 20) -> list[KnowledgeItem]:
+def list_knowledge(db: Session, user_id: str, limit: int = 20) -> KnowledgeRetrievalResult:
 	return knowledge_retrieval_service.list(db, user_id, limit)

@@ -63,7 +63,7 @@ describe('MessageBubble actions', () => {
 	it('allows rating a completed assistant message', () => {
 		const onRate = vi.fn();
 		render(<MessageBubble message={{ id: 'assistant-2', role: 'assistant', content: 'Ответ', status: 'done' }} onOpenAttachment={vi.fn()} onRate={onRate} onRemoveRating={vi.fn()} />);
-		fireEvent.click(screen.getByRole('button', { name: 'Оценка 5 из 5' }));
+		fireEvent.click(screen.getByRole('button', { name: 'Поставить рейтинг 5 из 5' }));
 		expect(onRate).toHaveBeenCalledWith(5, undefined);
 	});
 });

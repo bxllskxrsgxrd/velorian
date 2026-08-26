@@ -16,7 +16,7 @@ vi.mock('../api/chatApi', () => api);
 
 const item = {
 	id: 'knowledge-1', sourceType: 'manual' as const, title: 'Оффер', content: 'Проверенный текст', mimeType: 'text/plain',
-	isActive: true, metadata: {}, createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z',
+	rating: 5, isActive: true, metadata: {}, createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z',
 };
 
 describe('KnowledgePage', () => {
@@ -34,9 +34,9 @@ describe('KnowledgePage', () => {
 		const dialog = screen.getByRole('dialog');
 		fireEvent.change(within(dialog).getByPlaceholderText('Название'), { target: { value: 'Оффер' } });
 		fireEvent.change(await within(dialog).findByPlaceholderText('Вставьте текст'), { target: { value: 'Проверенный текст' } });
-		fireEvent.click(within(dialog).getByRole('button', { name: 'Оценка 5 из 5' }));
+		fireEvent.click(within(dialog).getByRole('button', { name: 'Поставить рейтинг 5 из 5' }));
 		fireEvent.click(within(dialog).getByRole('button', { name: 'Добавить' }));
-		await waitFor(() => expect(api.createKnowledgeItem).toHaveBeenCalledWith('Оффер', 'Проверенный текст', 5));
+		await waitFor(() => expect(api.createKnowledgeItem).toHaveBeenCalledWith('Оффер', 'Проверенный текст', 5, true));
 		expect(await screen.findByText('Оффер')).toBeInTheDocument();
 	});
 });

@@ -35,6 +35,13 @@ export type ChatMessageError = {
 	retryable: boolean;
 };
 
+export type KnowledgeSource = {
+	id: string;
+	title: string;
+	sourceType: string;
+	rating: number | null;
+};
+
 export type ChatMessage = {
 	id: string;
 	role: ChatRole;
@@ -51,6 +58,7 @@ export type ChatMessage = {
 	errorCode?: string;
 	requestId?: string;
 	searchMode?: SearchMode;
+	knowledgeSources?: KnowledgeSource[];
 };
 
 export type PreviewFile = {
@@ -86,7 +94,7 @@ export type KnowledgeItem = {
 	content: string;
 	mimeType: string;
 	originalFilename?: string | null;
-	rating?: number | null;
+	rating: number | null;
 	isActive: boolean;
 	metadata: Record<string, unknown>;
 	createdAt: string;

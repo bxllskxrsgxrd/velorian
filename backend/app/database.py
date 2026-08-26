@@ -23,6 +23,12 @@ if is_sqlite:
 		cursor = dbapi_connection.cursor()
 		cursor.execute("PRAGMA foreign_keys=ON")
 		cursor.close()
+		dbapi_connection.create_function(
+			"casefold",
+			1,
+			lambda value: str(value).casefold().replace("ё", "е") if value is not None else "",
+			deterministic=True,
+		)
 
 SessionLocal = sessionmaker(bind=engine, autoflush=False, expire_on_commit=False)
 

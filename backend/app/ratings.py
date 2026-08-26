@@ -51,8 +51,6 @@ def upsert_rating(message_id: str, payload: RatingPayload, user: User = Depends(
 	rating.updated_at = utc_now()
 	for item in db.scalars(select(KnowledgeItem).where(KnowledgeItem.user_id == user.id, KnowledgeItem.source_message_id == message.id)):
 		item.rating = rating.score
-		if rating.score < settings.knowledge_rating_threshold:
-			item.is_active = False
 		item.updated_at = utc_now()
 	db.commit()
 	return {"rating": rating_payload(rating), "canSaveToKnowledge": rating.score >= settings.knowledge_rating_threshold}
@@ -66,7 +64,6 @@ def delete_rating(message_id: str, user: User = Depends(get_current_user), db: S
 		db.delete(rating)
 	for item in db.scalars(select(KnowledgeItem).where(KnowledgeItem.user_id == user.id, KnowledgeItem.source_message_id == message.id)):
 		item.rating = None
-		item.is_active = False
 		item.updated_at = utc_now()
 	db.commit()
 	return Response(status_code=204)

@@ -25,6 +25,7 @@ function normalizeMessage(message: ChatMessage): ChatMessage {
 	return {
 		...message,
 		attachments: message.attachments?.map(normalizeAttachment) ?? [],
+		knowledgeSources: message.knowledgeSources ?? [],
 		error: message.status === 'error'
 			? getUserFacingError(persistedErrorCode ?? 'HISTORICAL_MESSAGE_ERROR', 0, persistedError?.requestId ?? message.requestId)
 			: undefined,
@@ -32,7 +33,12 @@ function normalizeMessage(message: ChatMessage): ChatMessage {
 }
 
 function normalizeKnowledgeItem(item: KnowledgeItem): KnowledgeItem {
-	return { ...item, downloadUrl: item.downloadUrl?.startsWith('/') ? `${API_ORIGIN}${item.downloadUrl}` : item.downloadUrl };
+	return {
+		...item,
+		rating: item.rating ?? null,
+		metadata: item.metadata ?? {},
+		downloadUrl: item.downloadUrl?.startsWith('/') ? `${API_ORIGIN}${item.downloadUrl}` : item.downloadUrl,
+	};
 }
 
 function parseStreamEvent(line: string): StreamEvent {
@@ -192,15 +198,16 @@ export async function listKnowledge(params: { search?: string; sourceType?: stri
 	return { ...result, items: result.items.map(normalizeKnowledgeItem) };
 }
 
-export async function createKnowledgeItem(title: string, content: string, rating?: number): Promise<KnowledgeItem> {
-	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>('/knowledge', { method: 'POST', body: JSON.stringify({ title, content, rating }) })).item);
+export async function createKnowledgeItem(title: string, content: string, rating: number | null = null, isActive = true): Promise<KnowledgeItem> {
+	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>('/knowledge', { method: 'POST', body: JSON.stringify({ title, content, rating, is_active: isActive }) })).item);
 }
 
-export async function uploadKnowledgeFile(file: File, title = '', rating?: number): Promise<KnowledgeItem> {
+export async function uploadKnowledgeFile(file: File, title = '', rating: number | null = null, isActive = true): Promise<KnowledgeItem> {
 	const body = new FormData();
 	body.append('file', file);
 	body.append('title', title);
-	if (rating) body.append('rating', String(rating));
+	if (rating !== null) body.append('rating', String(rating));
+	body.append('is_active', String(isActive));
 	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>('/knowledge/files', { method: 'POST', body })).item);
 }
 

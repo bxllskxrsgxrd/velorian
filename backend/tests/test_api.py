@@ -417,6 +417,11 @@ def test_knowledge_manual_file_rated_message_and_ownership(client, monkeypatch):
 	manual_id = manual.json()["item"]["id"]
 	file_item = client.post("/api/knowledge/files", data={"title": "Файл"}, files={"file": ("notes.txt", "данные файла".encode(), "text/plain")})
 	assert file_item.status_code == 200
+	file_payload = file_item.json()["item"]
+	assert file_payload["content"] == "данные файла"
+	assert file_payload["metadata"]["extractionStatus"] == "ready"
+	assert client.get(f"/api/knowledge/{file_payload['id']}/file").content == "данные файла".encode()
+	assert [item["id"] for item in client.get("/api/knowledge?search=NOTES.TXT").json()["items"]] == [file_payload["id"]]
 
 	conversation_id = client.post("/api/conversations", json={"title": "Знания"}).json()["conversation"]["id"]
 	client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Полезный ответ"})
@@ -437,6 +442,8 @@ def test_knowledge_manual_file_rated_message_and_ownership(client, monkeypatch):
 	client.headers.update({"X-CSRF-Token": second.json()["csrfToken"]})
 	assert client.get(f"/api/knowledge/{manual_id}").status_code == 404
 	assert client.patch(f"/api/knowledge/{manual_id}", json={"title": "Взлом"}).status_code == 404
+	assert client.delete(f"/api/knowledge/{manual_id}").status_code == 404
+	assert client.get(f"/api/knowledge/{file_payload['id']}/file").status_code == 404
 
 
 def test_knowledge_rating_filters_sort_and_pagination(authenticated_client):
@@ -445,6 +452,8 @@ def test_knowledge_rating_filters_sort_and_pagination(authenticated_client):
 	third = authenticated_client.post("/api/knowledge", json={"title": "Без оценки", "content": "Нет рейтинга"})
 	assert first.status_code == second.status_code == third.status_code == 200
 	assert authenticated_client.post("/api/knowledge", json={"title": "Ошибка", "content": "Невалидно", "rating": 6}).status_code == 422
+	for invalid_rating in (0, -1, 3.7, "5"):
+		assert authenticated_client.post("/api/knowledge", json={"title": "Ошибка", "content": "Невалидно", "rating": invalid_rating}).status_code == 422
 
 	high = authenticated_client.get("/api/knowledge?min_rating=4&sort=rating_desc").json()
 	assert [item["title"] for item in high["items"]] == ["Пять"]
@@ -456,6 +465,63 @@ def test_knowledge_rating_filters_sort_and_pagination(authenticated_client):
 	assert page_two["items"][0]["id"] != page_one["items"][0]["id"]
 	updated = authenticated_client.patch(f"/api/knowledge/{second.json()['item']['id']}", json={"rating": 4})
 	assert updated.json()["item"]["rating"] == 4
+	assert authenticated_client.patch(f"/api/knowledge/{second.json()['item']['id']}", json={"rating": None}).json()["item"]["rating"] is None
+	for invalid_rating in (0, 6, -1, 3.7, "5"):
+		assert authenticated_client.patch(f"/api/knowledge/{second.json()['item']['id']}", json={"rating": invalid_rating}).status_code == 422
+
+
+def test_knowledge_search_handles_unicode_multiple_terms_and_literals(authenticated_client):
+	a = authenticated_client.post("/api/knowledge", json={"title": "Ёлочный ОФФЕР", "content": "Проверенный русский Текст"}).json()["item"]
+	authenticated_client.post("/api/knowledge", json={"title": "English Hooks", "content": "Curiosity angle"})
+	assert [item["id"] for item in authenticated_client.get("/api/knowledge?search=елочный%20текст").json()["items"]] == [a["id"]]
+	assert len(authenticated_client.get("/api/knowledge?search=english").json()["items"]) == 1
+	assert authenticated_client.get("/api/knowledge?search=%25").status_code == 200
+	assert authenticated_client.get("/api/knowledge?search=_").json()["items"] == []
+
+
+def test_knowledge_schema_has_non_destructive_constraints_and_indexes():
+	from sqlalchemy import inspect
+
+	from app.database import engine
+
+	inspector = inspect(engine)
+	columns = {column["name"]: column for column in inspector.get_columns("knowledge_items")}
+	assert columns["rating"]["nullable"] is True
+	assert columns["is_active"]["nullable"] is False
+	index_names = {index["name"] for index in inspector.get_indexes("knowledge_items")}
+	assert {
+		"ix_knowledge_user_active",
+		"ix_knowledge_user_source",
+		"ix_knowledge_user_rating",
+		"ix_knowledge_user_created",
+		"ix_knowledge_user_updated",
+	}.issubset(index_names)
+	foreign_keys = {fk["constrained_columns"][0]: fk for fk in inspector.get_foreign_keys("knowledge_items")}
+	assert foreign_keys["user_id"]["options"]["ondelete"] == "CASCADE"
+	assert foreign_keys["source_message_id"]["options"]["ondelete"] == "SET NULL"
+
+
+def test_knowledge_file_delete_failure_preserves_database_item(authenticated_client, monkeypatch):
+	import app.knowledge as knowledge_module
+
+	created = authenticated_client.post(
+		"/api/knowledge/files",
+		files={"file": ("keep.txt", b"keep this data", "text/plain")},
+	).json()["item"]
+	real_storage = knowledge_module.get_file_storage()
+
+	class FailingDeleteStorage:
+		async def get(self, key):
+			return await real_storage.get(key)
+
+		async def delete(self, key):
+			raise OSError("simulated storage failure")
+
+	monkeypatch.setattr(knowledge_module, "get_file_storage", lambda: FailingDeleteStorage())
+	response = authenticated_client.delete(f"/api/knowledge/{created['id']}")
+	assert response.status_code == 503
+	assert response.json()["error"]["code"] == "KNOWLEDGE_FILE_DELETE_FAILED"
+	assert authenticated_client.get(f"/api/knowledge/{created['id']}").status_code == 200
 
 
 def test_knowledge_search_is_opt_in_and_owner_scoped(client, monkeypatch):
@@ -505,7 +571,7 @@ def test_knowledge_list_intent_browses_metadata_without_toggle(authenticated_cli
 	empty_context = completions.calls[0]["messages"][-1]["content"]
 	assert "Mode: list" in empty_context
 	assert "Status: empty" in empty_context
-	assert "пока нет сохранённых данных" in empty_context
+	assert "пока нет активных данных" in empty_context
 
 	authenticated_client.post("/api/knowledge", json={
 		"title": "Facebook Hooks",
@@ -546,7 +612,76 @@ def test_knowledge_list_intent_is_owner_scoped(client, monkeypatch):
 	assert "owner-only knowledge" not in context
 
 
-def test_lower_rating_deactivates_saved_knowledge(authenticated_client, monkeypatch):
+def test_three_active_items_retrieval_browse_toggle_and_sources(authenticated_client, monkeypatch):
+	import app.main as main_module
+	from app.knowledge_retrieval import detect_knowledge_intent
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Полный retrieval"}).json()["conversation"]["id"]
+	created = [
+		authenticated_client.post("/api/knowledge", json={
+			"title": "Facebook Hooks", "content": "Для health-офферов используем curiosity angle.", "rating": 1,
+		}).json()["item"],
+		authenticated_client.post("/api/knowledge", json={
+			"title": "Italy Advertorial", "content": "Для Италии лучше работают advertorial с историей клиента.", "rating": 5,
+		}).json()["item"],
+		authenticated_client.post("/api/knowledge", json={
+			"title": "Push Creatives", "content": "В push используются короткие эмоциональные заголовки.",
+		}).json()["item"],
+	]
+
+	response = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Какие подходы есть для Facebook?", "search_mode": "knowledge"},
+	)
+	assert response.status_code == 200
+	search_context = completions.calls[-1]["messages"][-1]["content"]
+	assert "Status: found" in search_context
+	assert "Active items: 3" in search_context
+	assert "Source: Facebook Hooks" in search_context
+	assert "Rating: 1/5" in search_context
+	assert "Italy Advertorial" not in search_context
+	assert "user_id" not in search_context
+	assert "storage_key" not in search_context
+	conversation = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]
+	sources = conversation["messages"][-1]["knowledgeSources"]
+	assert sources == [{
+		"id": created[0]["id"], "title": "Facebook Hooks", "sourceType": "manual", "rating": 1,
+	}]
+
+	for prompt in ("что ты видишь в бд?", "напиши про все доступные тебе данные", "там три ячейки есть с данными"):
+		assert detect_knowledge_intent(prompt, explicit_search=True) == "list"
+		authenticated_client.post(
+			f"/api/conversations/{conversation_id}/stream",
+			data={"prompt": prompt, "search_mode": "knowledge"},
+		)
+		browse_context = completions.calls[-1]["messages"][-1]["content"]
+		assert "Mode: list" in browse_context
+		assert "Active items: 3" in browse_context
+		assert all(f"Source: {item['title']}" in browse_context for item in created)
+	assert detect_knowledge_intent("Что агент видит в базе?", explicit_search=False) == "list"
+	assert detect_knowledge_intent("Какие данные по Facebook?", explicit_search=True) == "search"
+
+	authenticated_client.patch(f"/api/knowledge/{created[0]['id']}", json={"is_active": False})
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Facebook curiosity", "search_mode": "knowledge"},
+	)
+	inactive_context = completions.calls[-1]["messages"][-1]["content"]
+	assert "Active items: 2" in inactive_context
+	assert "Status: no_relevant_results" in inactive_context
+	assert "Facebook Hooks" not in inactive_context
+
+	authenticated_client.patch(f"/api/knowledge/{created[0]['id']}", json={"is_active": True})
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Facebook curiosity", "search_mode": "knowledge"},
+	)
+	assert "Source: Facebook Hooks" in completions.calls[-1]["messages"][-1]["content"]
+
+
+def test_lower_rating_keeps_saved_knowledge_active(authenticated_client, monkeypatch):
 	import app.main as main_module
 	monkeypatch.setattr(main_module, "client", FakeGroq())
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Порог"}).json()["conversation"]["id"]
@@ -556,7 +691,7 @@ def test_lower_rating_deactivates_saved_knowledge(authenticated_client, monkeypa
 	authenticated_client.post(f"/api/knowledge/messages/{message_id}")
 	authenticated_client.put(f"/api/messages/{message_id}/rating", json={"score": 2})
 	items = authenticated_client.get("/api/knowledge").json()["items"]
-	assert items[0]["isActive"] is False
+	assert items[0]["isActive"] is True
 	assert items[0]["rating"] == 2
 
 

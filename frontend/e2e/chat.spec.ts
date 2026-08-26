@@ -8,8 +8,8 @@ test('creates a chat, sends a message and rates the answer', async ({ page }) =>
 	await page.getByRole('textbox', { name: 'Введите запрос' }).fill('Тестовый запрос');
 	await page.getByRole('button', { name: 'Отправить сообщение' }).click();
 	await expect(page.getByText('Ответ агента')).toBeVisible();
-	await page.getByRole('button', { name: 'Оценка 5 из 5' }).click();
-	await expect(page.getByRole('button', { name: 'Оценка 5 из 5' })).toHaveAttribute('aria-pressed', 'true');
+	await page.getByRole('button', { name: 'Поставить рейтинг 5 из 5' }).click();
+	await expect(page.getByRole('button', { name: 'Поставить рейтинг 5 из 5' })).toHaveAttribute('aria-pressed', 'true');
 });
 
 test('large paste becomes a txt attachment', async ({ page }) => {
