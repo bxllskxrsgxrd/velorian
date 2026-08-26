@@ -11,9 +11,28 @@ export async function installMockApi(page: Page, options: Options = {}) {
 			{ id: 'chat-a', title: 'Chat A', createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z' },
 		]
 		: [{ id: 'c1', title: 'Тестовый чат', createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z' }];
-	const defaultMessages = options.historicalError ? [{
-		id: 'historical-error', role: 'assistant', content: '', status: options.historicalError, attachments: [], replyToId: 'historical-user', error: null,
-	}] : [];
+	const defaultMessages = options.historicalError
+	? [
+			{
+				id: 'historical-user',
+				role: 'user',
+				content: 'Тестовый запрос',
+				status: 'done',
+				attachments: [],
+				branchGroupId: 'historical-user',
+				isActive: true,
+			},
+			{
+				id: 'historical-error',
+				role: 'assistant',
+				content: '',
+				status: options.historicalError,
+				attachments: [],
+				replyToId: 'historical-user',
+				error: null,
+			},
+		]
+	: [];
 	const messagesByConversation = new Map<string, unknown[]>(options.multipleChats ? [
 		['chat-a', [{ id: 'message-a', role: 'assistant', content: 'Сообщения из Chat A', status: 'done', attachments: [] }]],
 		['chat-b', [{ id: 'message-b', role: 'assistant', content: 'Сообщения из Chat B', status: 'done', attachments: [] }]],
