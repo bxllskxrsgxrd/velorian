@@ -1,8 +1,4 @@
 .file-preview {
-	--scroll-normal: var(--color-border);
-	--scroll-bg: var(--color-bg-canvas);
-	--scroll-field-hover: var(--color-accent);
-
 	position: fixed;
 	inset: 0;
 	z-index: 1000;
@@ -38,39 +34,7 @@
 
 		background: var(--color-bg-canvas);
 		overflow: auto;
-
-		&::-webkit-scrollbar {
-			width: 16px;
-		}
-
-		&::-webkit-scrollbar-button {
-			display: none;
-			width: 0;
-			height: 0;
-		}
-
-		&::-webkit-scrollbar-track,
-		&::-webkit-scrollbar-corner {
-			background: var(--scroll-bg);
-		}
-
-		&::-webkit-scrollbar-thumb {
-			background-color: var(--scroll-normal);
-			border-radius: 999px;
-
-			border: 4px solid transparent;
-			background-clip: padding-box;
-
-			&:hover {
-				background-color: var(--scroll-field-hover);
-			}
-		}
-
-		// Firefox
-		@supports (-moz-appearance: none) {
-			scrollbar-width: thin;
-			scrollbar-color: var(--scroll-normal) var(--scroll-bg);
-		}
+		@include app-scrollbar;
 	}
 
 	&__file-header {

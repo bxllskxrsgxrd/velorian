@@ -16,6 +16,11 @@
 	--color-error: #ff8290;
 	--color-overlay: rgb(4 10 7 / 88%);
 	--color-mask-opaque: #000;
+	--color-scrollbar-track: transparent;
+	--color-scrollbar-thumb: var(--color-border);
+	--color-scrollbar-thumb-hover: color-mix(in srgb, var(--color-text-secondary) 64%, var(--color-border));
+	--color-scrollbar-thumb-active: color-mix(in srgb, var(--color-text-secondary) 82%, var(--color-border));
+	--scrollbar-size: 10px;
 
 	/* Pine — акцент по умолчанию */
 	--color-accent: #74d79c;
@@ -100,6 +105,7 @@ body {
 	margin: 0;
 	background: var(--color-bg-canvas);
 	font-family: var(--main-font);
+	@include app-scrollbar;
 }
 
 .app-loading {

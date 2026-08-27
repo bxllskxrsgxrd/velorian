@@ -47,7 +47,7 @@
 	&__rating-link:hover { color: var(--color-text-primary); }
 	&__rating-save { margin-left: 4px; color: var(--color-accent); background: var(--color-accent-soft); }
 	&__rating-comment { display: flex; align-items: flex-end; gap: 6px; width: min(100%, 520px); }
-	&__rating-comment textarea { min-height: 64px; flex: 1; resize: vertical; padding: 8px; border: 1px solid var(--color-border); border-radius: 9px; color: var(--color-text-primary); background: var(--color-bg-elevated); }
+	&__rating-comment textarea { min-height: 64px; flex: 1; resize: vertical; padding: 8px; border: 1px solid var(--color-border); border-radius: 9px; color: var(--color-text-primary); background: var(--color-bg-elevated); @include app-scrollbar; }
 	&__rating-comment button { padding: 7px 9px; border: 0; border-radius: 8px; color: var(--color-on-accent); background: var(--color-accent); cursor: pointer; }
 
 	&__actions {
@@ -240,7 +240,7 @@
 		border-radius: var(--radius-large);
 		background: var(--color-bg-user-message);
 		box-shadow: var(--focus-ring);
-		textarea { width: 100%; min-height: 96px; resize: vertical; padding: 8px; border: 0; outline: none; color: var(--color-text-primary); background: transparent; line-height: 1.5; }
+		textarea { width: 100%; min-height: 96px; resize: vertical; padding: 8px; border: 0; outline: none; color: var(--color-text-primary); background: transparent; line-height: 1.5; @include app-scrollbar; }
 		> div { display: flex; justify-content: flex-end; gap: 6px; }
 		button { padding: 7px 11px; border: 1px solid var(--color-border); border-radius: 9px; color: var(--color-text-primary); background: var(--color-bg-elevated); cursor: pointer; }
 		button:last-child { color: var(--color-on-accent); border-color: transparent; background: var(--color-accent); }

@@ -5,3 +5,41 @@
     }
   }
 }
+
+@mixin app-scrollbar {
+	scrollbar-width: thin;
+	scrollbar-color: var(--color-scrollbar-thumb) var(--color-scrollbar-track);
+
+	&::-webkit-scrollbar {
+		width: var(--scrollbar-size);
+		height: var(--scrollbar-size);
+	}
+
+	&::-webkit-scrollbar-button {
+		display: none;
+		width: 0;
+		height: 0;
+	}
+
+	&::-webkit-scrollbar-track,
+	&::-webkit-scrollbar-corner {
+		background: var(--color-scrollbar-track);
+	}
+
+	&::-webkit-scrollbar-thumb {
+		min-width: 32px;
+		min-height: 32px;
+		border: 2px solid transparent;
+		border-radius: var(--radius-round);
+		background-color: var(--color-scrollbar-thumb);
+		background-clip: padding-box;
+
+		&:hover {
+			background-color: var(--color-scrollbar-thumb-hover);
+		}
+
+		&:active {
+			background-color: var(--color-scrollbar-thumb-active);
+		}
+	}
+}

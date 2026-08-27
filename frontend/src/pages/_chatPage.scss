@@ -28,10 +28,6 @@
 	--chat-side-padding: 16px;
 	--prompt-bottom: 16px;
 
-	--scroll-normal: var(--color-border);
-	--scroll-bg: var(--color-bg-canvas);
-	--scroll-field-hover: var(--color-accent);
-
 	--heading-font: 'Cera Stencil PRO Trial';
 
 	position: relative;
@@ -53,6 +49,7 @@
 	overflow-x: hidden;
 	overscroll-behavior-y: contain;
 	scrollbar-gutter: stable;
+	@include app-scrollbar;
 
 	&__body {
 		width: 100%;
@@ -217,35 +214,6 @@
 			background: linear-gradient(to bottom, transparent, var(--color-bg-canvas) 32%, var(--color-bg-canvas));
 		}
 	}
-	// Chrome, Edge, Safari
-
-	&::-webkit-scrollbar {
-		width: 16px;
-	}
-
-	&::-webkit-scrollbar-button {
-		display: none;
-		width: 0;
-		height: 0;
-	}
-
-	&::-webkit-scrollbar-track,
-	&::-webkit-scrollbar-corner {
-		background: var(--scroll-bg);
-	}
-
-	&::-webkit-scrollbar-thumb {
-		background-color: var(--scroll-normal);
-		border-radius: 999px;
-
-		border: 4px solid transparent;
-		background-clip: padding-box;
-
-		&:hover {
-			background-color: var(--scroll-field-hover);
-		}
-	}
-
 	@include mobile {
 		--chat-side-padding: 12px;
 
@@ -261,13 +229,5 @@
 		&__topbar {
 			display: flex;
 		}
-	}
-}
-
-// Firefox
-@supports (-moz-appearance: none) {
-	.chat-page {
-		scrollbar-width: thin;
-		scrollbar-color: var(--scroll-normal) var(--scroll-bg);
 	}
 }

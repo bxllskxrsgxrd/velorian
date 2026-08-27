@@ -1,12 +1,17 @@
 import type { Page, Route } from '@playwright/test';
 
-type Options = { authenticated?: boolean; streamError?: boolean; failConversationsOnce?: boolean; multipleChats?: boolean; historicalError?: 'error' | 'cancelled' };
+type Options = { authenticated?: boolean; streamError?: boolean; failConversationsOnce?: boolean; multipleChats?: boolean; manyChats?: boolean; manyKnowledge?: boolean; longMarkdown?: boolean; historicalError?: 'error' | 'cancelled' };
 
 export async function installMockApi(page: Page, options: Options = {}) {
 	let conversationCreateCount = 0;
 	let authenticated = options.authenticated ?? true;
 	let failedConversationRequestsRemaining = options.failConversationsOnce ? 2 : 0;
-	let conversations = options.multipleChats
+	let conversations = options.manyChats
+		? Array.from({ length: 36 }, (_, index) => ({
+			id: `chat-${index + 1}`, title: `Длинный список — чат ${index + 1}`,
+			createdAt: `2026-08-25T00:${String(index).padStart(2, '0')}:00Z`, updatedAt: `2026-08-25T00:${String(index).padStart(2, '0')}:00Z`,
+		}))
+		: options.multipleChats
 		? [
 			{ id: 'chat-b', title: 'Chat B', createdAt: '2026-08-25T01:00:00Z', updatedAt: '2026-08-25T01:00:00Z' },
 			{ id: 'chat-a', title: 'Chat A', createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z' },
@@ -38,7 +43,14 @@ export async function installMockApi(page: Page, options: Options = {}) {
 		['chat-a', [{ id: 'message-a', role: 'assistant', content: 'Сообщения из Chat A', status: 'done', attachments: [] }]],
 		['chat-b', [{ id: 'message-b', role: 'assistant', content: 'Сообщения из Chat B', status: 'done', attachments: [] }]],
 	] : [['c1', defaultMessages]]);
-	let knowledge: Array<Record<string, unknown>> = [];
+	if (options.manyChats) conversations.forEach((conversation) => messagesByConversation.set(conversation.id, []));
+	let knowledge: Array<Record<string, unknown>> = options.manyKnowledge
+		? Array.from({ length: 30 }, (_, index) => ({
+			id: `knowledge-${index + 1}`, sourceType: 'manual', title: `Материал ${index + 1}`,
+			content: `Содержимое материала ${index + 1}`, mimeType: 'text/plain', rating: null, approach: null,
+			isActive: true, metadata: {}, createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z', downloadUrl: null,
+		}))
+		: [];
 	let approaches = [
 		{ id: 'approach-interview', name: 'Интервью', slug: 'интервью', createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z' },
 		{ id: 'approach-show', name: 'Шоу', slug: 'шоу', createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z' },
@@ -88,7 +100,9 @@ export async function installMockApi(page: Page, options: Options = {}) {
 			const asksToBrowseKnowledge = /Что находится в моей базе знаний|Какие материалы есть в моей базе знаний/i.test(rawBody);
 			const usesKnowledgeSearch = rawBody.includes('name="search_mode"') && rawBody.includes('knowledge');
 			const knowledgeText = knowledge.filter((item) => item.isActive).map((item) => `${String(item.title)}: ${String(item.content)}`).join('; ');
-			const answer = (asksToBrowseKnowledge || usesKnowledgeSearch) && knowledgeText ? `В вашей базе знаний: ${knowledgeText}` : 'Ответ агента';
+			const answer = options.longMarkdown
+				? `\`\`\`text\n${'очень-длинная-строка-кода-'.repeat(35)}\n\`\`\``
+				: (asksToBrowseKnowledge || usesKnowledgeSearch) && knowledgeText ? `В вашей базе знаний: ${knowledgeText}` : 'Ответ агента';
 			const userMessage = { id: `user-e2e-${Date.now()}`, role: 'user', content: 'Тестовый запрос', status: 'done', attachments: [], branchGroupId: 'user-e2e', isActive: true };
 			const assistant = { id: `assistant-e2e-${Date.now()}`, role: 'assistant', content: answer, status: 'done', attachments: [], replyToId: userMessage.id };
 			messagesByConversation.set(conversationId, [...(messagesByConversation.get(conversationId) ?? []), userMessage, assistant]);

@@ -178,6 +178,8 @@
 
 		overflow-x: visible;
 		overflow-y: auto;
+		scrollbar-gutter: stable;
+		@include app-scrollbar;
 	}
 
 	&__item {
@@ -381,6 +383,9 @@
 		right: 0;
 		bottom: calc(100% + 8px);
 		left: 0;
+		max-height: calc(100dvh - 24px);
+		overflow-y: auto;
+		@include app-scrollbar;
 
 		padding: 6px;
 

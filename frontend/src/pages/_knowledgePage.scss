@@ -1,5 +1,5 @@
 .knowledge-shell { min-height: 100dvh; display: flex; background: var(--color-bg-canvas); }
-.knowledge-page { min-width: 0; height: 100dvh; flex: 1; padding: 28px clamp(18px, 4vw, 64px); color: var(--color-text-primary); background: var(--color-bg-canvas); overflow-y: auto; }
+.knowledge-page { min-width: 0; height: 100dvh; flex: 1; padding: 28px clamp(18px, 4vw, 64px); color: var(--color-text-primary); background: var(--color-bg-canvas); overflow-y: auto; scrollbar-gutter: stable; @include app-scrollbar; }
 .knowledge-page > header { max-width: 1100px; margin: 0 auto 24px; display: flex; align-items: flex-end; justify-content: space-between; gap: 20px; }
 .knowledge-page header h1 { margin: 12px 0 4px; font-size: 34px; }
 .knowledge-page header p { color: var(--color-text-secondary); }
@@ -23,7 +23,7 @@
 .knowledge-card__actions button, .knowledge-card__actions a { padding: 6px 8px; border: 0; border-radius: 8px; color: var(--color-text-secondary); background: var(--color-bg-elevated); text-decoration: none; cursor: pointer; }
 .knowledge-card__actions .knowledge-card__delete { margin-left: auto; color: var(--color-error); }
 .knowledge-form { display: flex; flex-direction: column; gap: 9px; }
-.knowledge-form textarea { min-height: 180px; resize: vertical; }
+.knowledge-form textarea { min-height: 180px; resize: vertical; @include app-scrollbar; }
 .knowledge-form > label:not(.checkbox) { display: flex; flex-direction: column; gap: 5px; color: var(--color-text-secondary); font-size: 12px; }
 .knowledge-form > .checkbox { flex-direction: row; }
 .knowledge-form > span { color: var(--color-text-secondary); font-size: 12px; text-align: center; }
@@ -33,7 +33,7 @@
 .knowledge-form__approach-create { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; }
 .knowledge-form__approach-create button { padding: 8px 10px; border: 1px solid var(--color-border); border-radius: 9px; color: var(--color-text-primary); background: var(--color-bg-elevated); cursor: pointer; }
 .knowledge-form__approach-create button:disabled { opacity: .45; cursor: default; }
-.knowledge-view { max-height: 55dvh; overflow: auto; padding: 12px; border-radius: 10px; color: var(--color-text-primary); background: var(--color-bg-elevated); }
+.knowledge-view { max-height: 55dvh; overflow: auto; padding: 12px; border-radius: 10px; color: var(--color-text-primary); background: var(--color-bg-elevated); @include app-scrollbar; }
 .knowledge-page__more { justify-self: center; padding: 9px 14px; border: 1px solid var(--color-border); border-radius: 9px; color: var(--color-text-primary); background: var(--color-bg-elevated); cursor: pointer; }
 .knowledge-page__mobile-menu { display: none; }
 .markdown-editor { display: flex; flex-direction: column; gap: 8px; }
