@@ -2,6 +2,7 @@ import { useEffect, useRef, useState } from 'react';
 import { ACCENT_THEMES, ACCENT_THEME_LABELS, type AccentTheme } from '../../theme/accentTheme';
 import type { AuthUser, ConversationSummary } from '../../types/chat';
 import {
+	NewChatIcon,
 	ChevronIcon,
 	EditIcon,
 	KnowledgeIcon,
@@ -13,10 +14,10 @@ import {
 	TrashIcon,
 	UserIcon,
 } from '../icons/AppIcons';
-import { NewChatIcon } from '../icons/NewChatIcon';
 import { VelorianIcon } from '../icons/VelorianIcon';
 import { ModalDialog } from '../ui/ModalDialog/ModalDialog';
 import './_chatSidebar.scss';
+import { SidebarButton } from '../ui/SidebarButton/SidebarButton';
 
 type ChatSidebarProps = {
 	user: AuthUser;
@@ -129,29 +130,27 @@ export function ChatSidebar(props: ChatSidebarProps) {
 						×
 					</button>
 				</div>
-				<button className="chat-sidebar__new" type="button" onClick={props.onNew} title="Новый чат">
-					<NewChatIcon />
-					<span>Новый чат</span>
-				</button>
-				<button
-					className={`chat-sidebar__knowledge${props.activeSection === 'knowledge' ? ' chat-sidebar__knowledge--active' : ''}`}
-					type="button"
+				<SidebarButton icon={<NewChatIcon />} onClick={props.onNew} title="Новый чат">
+					Новый чат
+				</SidebarButton>
+				<SidebarButton
+					icon={<KnowledgeIcon />}
+					active={props.activeSection === 'knowledge'}
 					onClick={props.onOpenKnowledge}
 					title="База знаний"
 					aria-current={props.activeSection === 'knowledge' ? 'page' : undefined}
 				>
-					<KnowledgeIcon />
-					<span>База знаний</span>
-				</button>
-				<button
-					className="chat-sidebar__search-trigger"
-					type="button"
-					onClick={openCollapsedSearch}
-					aria-label="Развернуть панель и найти чат"
-					title="Поиск диалогов"
-				>
-					<SearchIcon />
-				</button>
+					База знаний
+				</SidebarButton>
+				{props.isCollapsed && (
+					<SidebarButton
+						icon={<SearchIcon />}
+						onClick={openCollapsedSearch}
+						aria-label="Развернуть панель и найти чат"
+						title="Поиск диалогов"
+					/>
+				)}
+
 				<label className="chat-sidebar__search">
 					<span className="chat-sidebar__visually-hidden">Поиск диалогов</span>
 					<SearchIcon />

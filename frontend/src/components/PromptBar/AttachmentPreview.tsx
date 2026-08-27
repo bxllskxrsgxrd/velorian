@@ -1,6 +1,6 @@
 import { useEffect, useRef } from 'react';
-import { DeleteAttachmentIcon } from '../icons/DeleteAttachmentIcon';
-import { DocumentIcon } from '../icons/DocumentIcon';
+import { DeleteAttachmentIcon } from '../icons/AppIcons';
+import { DocumentIcon } from '../icons/AppIcons';
 import { IconButton } from '../ui/IconButton/IconButton';
 
 type AttachmentPreviewProps = {

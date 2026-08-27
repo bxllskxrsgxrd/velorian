@@ -23,13 +23,21 @@ import { CHAT_MESSAGE_STATUSES } from '../constants/chatMessageStatuses';
 import { CHAT_ROLES } from '../constants/chatRoles';
 import { useDragAndDrop } from '../hooks/useDragAndDrop';
 import { getStoredAccentTheme, setAccentTheme, type AccentTheme } from '../theme/accentTheme';
-import type { AuthUser, ChatAttachment, ChatMessage, ConversationSummary, PreviewFile, SearchMode } from '../types/chat';
+import type {
+	AuthUser,
+	ChatAttachment,
+	ChatMessage,
+	ConversationSummary,
+	PreviewFile,
+	SearchMode,
+} from '../types/chat';
 import { attachmentToPreviewFile, createChatAttachment, fileToPreviewFile } from '../utils/files';
 import { reportError } from '../utils/reportError';
 import './_chatPage.scss';
-import { ArrowDownIcon } from '../components/icons/ArrowDownIcon';
 import { useToast } from '../components/Toast/ToastContext';
 import { getUserFacingError } from '../errors/userErrorMessages';
+
+import { ArrowDownIcon } from '../components/icons/AppIcons';
 
 type ChatPageProps = {
 	user: AuthUser;
@@ -107,7 +115,8 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 			.then((items) => {
 				if (cancelled) return;
 				setConversations(items);
-				if (!initialRouteConversationIdRef.current && !suppressInitialFallbackRef.current && items[0]) navigate(`/chat/${items[0].id}`, { replace: true });
+				if (!initialRouteConversationIdRef.current && !suppressInitialFallbackRef.current && items[0])
+					navigate(`/chat/${items[0].id}`, { replace: true });
 			})
 			.catch((error: unknown) => {
 				reportError('Не удалось загрузить историю диалогов', error);
@@ -139,7 +148,13 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 				reportError('Не удалось открыть диалог', error, { conversationId: activeConversationId });
 				if (sequence === loadSequenceRef.current) {
 					setMessages([]);
-					setPageError(error instanceof ApiError && error.status === 404 ? 'Чат не найден' : error instanceof Error ? error.message : 'Не удалось открыть диалог');
+					setPageError(
+						error instanceof ApiError && error.status === 404
+							? 'Чат не найден'
+							: error instanceof Error
+								? error.message
+								: 'Не удалось открыть диалог',
+					);
 				}
 			})
 			.finally(() => {
@@ -273,7 +288,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 		const optimisticUser: ChatMessage = {
 			id: tempUserId,
 			role: CHAT_ROLES.USER,
-			content: editSourceMessage ? prompt : retrySourceMessage?.content ?? prompt,
+			content: editSourceMessage ? prompt : (retrySourceMessage?.content ?? prompt),
 			attachments: editSourceMessage?.attachments ?? retrySourceMessage?.attachments ?? tempAttachments,
 			status: CHAT_MESSAGE_STATUSES.DONE,
 			branchGroupId: editSourceMessage ? editSourceMessage.branchGroupId || editSourceMessage.id : tempUserId,
@@ -288,7 +303,13 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 			replyToId: tempUserId,
 		});
 		setMessages((current) => [
-			...current.map((message) => editSourceMessage && message.role === CHAT_ROLES.USER && (message.branchGroupId || message.id) === (editSourceMessage.branchGroupId || editSourceMessage.id) ? { ...message, isActive: false } : message),
+			...current.map((message) =>
+				editSourceMessage &&
+				message.role === CHAT_ROLES.USER &&
+				(message.branchGroupId || message.id) === (editSourceMessage.branchGroupId || editSourceMessage.id)
+					? { ...message, isActive: false }
+					: message,
+			),
 			...optimistic,
 		]);
 
@@ -303,7 +324,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 				retryMessageId,
 				editMessageId,
 				signal: controller.signal,
-					onEvent: (event) => {
+				onEvent: (event) => {
 					if (event.type === 'meta') {
 						receivedMeta = true;
 						localRetryPayloadsRef.current.delete(tempUserId);
@@ -316,7 +337,12 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 							current.map((message) => {
 								if (message.id === tempUserId) return event.userMessage;
 								if (message.id === tempAssistantId)
-									return { ...message, id: event.assistantMessageId, replyToId: event.userMessage.id, status: CHAT_MESSAGE_STATUSES.STREAMING };
+									return {
+										...message,
+										id: event.assistantMessageId,
+										replyToId: event.userMessage.id,
+										status: CHAT_MESSAGE_STATUSES.STREAMING,
+									};
 								return message;
 							}),
 						);
@@ -327,14 +353,23 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 					} else if (event.type === 'done') {
 						if (deltaFrame !== null) cancelAnimationFrame(deltaFrame);
 						flushDelta();
-						setMessages((current) => current.map((message) => message.id === currentAssistantId
-							? event.message ?? { ...message, status: CHAT_MESSAGE_STATUSES.DONE }
-							: message));
+						setMessages((current) =>
+							current.map((message) =>
+								message.id === currentAssistantId
+									? (event.message ?? { ...message, status: CHAT_MESSAGE_STATUSES.DONE })
+									: message,
+							),
+						);
 					} else {
 						setMessages((current) =>
 							current.map((message) =>
 								message.id === currentAssistantId
-									? { ...message, content: '', error: getUserFacingError(event.code, 0, event.requestId), status: CHAT_MESSAGE_STATUSES.ERROR }
+									? {
+											...message,
+											content: '',
+											error: getUserFacingError(event.code, 0, event.requestId),
+											status: CHAT_MESSAGE_STATUSES.ERROR,
+										}
 									: message,
 							),
 						);
@@ -348,30 +383,40 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 			if (!wasStopped) reportError('Ошибка генерации ответа', error, { conversationId });
 			const messageText = wasStopped ? 'Генерация остановлена' : '';
 			if (!receivedMeta) {
-				const normalizedError = error instanceof ApiError
-					? getUserFacingError(error.code, error.status, error.requestId)
-					: getUserFacingError('UNKNOWN_ERROR');
-				localRetryPayloadsRef.current.set(tempUserId, { prompt: optimisticUser.content, files: [...currentFiles], searchMode });
-				setMessages((current) => current.map((message) => message.id === tempAssistantId
-					? {
-						...message,
-						content: '',
-						error: normalizedError,
-						status: CHAT_MESSAGE_STATUSES.ERROR,
-					}
-					: message));
+				const normalizedError =
+					error instanceof ApiError
+						? getUserFacingError(error.code, error.status, error.requestId)
+						: getUserFacingError('UNKNOWN_ERROR');
+				localRetryPayloadsRef.current.set(tempUserId, {
+					prompt: optimisticUser.content,
+					files: [...currentFiles],
+					searchMode,
+				});
+				setMessages((current) =>
+					current.map((message) =>
+						message.id === tempAssistantId
+							? {
+									...message,
+									content: '',
+									error: normalizedError,
+									status: CHAT_MESSAGE_STATUSES.ERROR,
+								}
+							: message,
+					),
+				);
 				return;
 			}
-			const normalizedError = error instanceof ApiError
-				? getUserFacingError(error.code, error.status, error.requestId)
-				: getUserFacingError('UNKNOWN_ERROR');
+			const normalizedError =
+				error instanceof ApiError
+					? getUserFacingError(error.code, error.status, error.requestId)
+					: getUserFacingError('UNKNOWN_ERROR');
 			setMessages((current) =>
 				current.map((message) =>
 					message.id === currentAssistantId || message.id === tempAssistantId
 						? {
 								...message,
 								content: wasStopped ? message.content || messageText : '',
-								error: wasStopped ? undefined : message.error ?? normalizedError,
+								error: wasStopped ? undefined : (message.error ?? normalizedError),
 								status: wasStopped ? CHAT_MESSAGE_STATUSES.CANCELLED : CHAT_MESSAGE_STATUSES.ERROR,
 							}
 						: message,
@@ -409,23 +454,38 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	async function handleActivateBranch(messageId: string) {
 		const active = await activateMessageBranch(messageId);
 		const groupId = active.branchGroupId || active.id;
-		setMessages((current) => current.map((message) => message.role === CHAT_ROLES.USER && (message.branchGroupId || message.id) === groupId
-			? { ...message, isActive: message.id === messageId }
-			: message));
+		setMessages((current) =>
+			current.map((message) =>
+				message.role === CHAT_ROLES.USER && (message.branchGroupId || message.id) === groupId
+					? { ...message, isActive: message.id === messageId }
+					: message,
+			),
+		);
 	}
 
 	async function handleRateMessage(message: ChatMessage, score: number, comment?: string) {
 		const sequence = (ratingSequenceRef.current.get(message.id) ?? 0) + 1;
 		ratingSequenceRef.current.set(message.id, sequence);
 		const previous = message.rating;
-		const optimistic = { id: previous?.id ?? `rating-${message.id}`, score, comment: comment || null, createdAt: previous?.createdAt ?? new Date().toISOString(), updatedAt: new Date().toISOString() };
-		setMessages((current) => current.map((entry) => entry.id === message.id ? { ...entry, rating: optimistic } : entry));
+		const optimistic = {
+			id: previous?.id ?? `rating-${message.id}`,
+			score,
+			comment: comment || null,
+			createdAt: previous?.createdAt ?? new Date().toISOString(),
+			updatedAt: new Date().toISOString(),
+		};
+		setMessages((current) =>
+			current.map((entry) => (entry.id === message.id ? { ...entry, rating: optimistic } : entry)),
+		);
 		try {
 			const rating = await setMessageRating(message.id, score, comment);
-			if (ratingSequenceRef.current.get(message.id) === sequence) setMessages((current) => current.map((entry) => entry.id === message.id ? { ...entry, rating } : entry));
+			if (ratingSequenceRef.current.get(message.id) === sequence)
+				setMessages((current) => current.map((entry) => (entry.id === message.id ? { ...entry, rating } : entry)));
 		} catch (error) {
 			if (ratingSequenceRef.current.get(message.id) === sequence) {
-				setMessages((current) => current.map((entry) => entry.id === message.id ? { ...entry, rating: previous } : entry));
+				setMessages((current) =>
+					current.map((entry) => (entry.id === message.id ? { ...entry, rating: previous } : entry)),
+				);
 				showToast(error instanceof Error ? error.message : 'Не удалось сохранить оценку', 'error');
 			}
 		}
@@ -433,11 +493,13 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 
 	async function handleRemoveRating(message: ChatMessage) {
 		const previous = message.rating;
-		setMessages((current) => current.map((entry) => entry.id === message.id ? { ...entry, rating: null } : entry));
+		setMessages((current) => current.map((entry) => (entry.id === message.id ? { ...entry, rating: null } : entry)));
 		try {
 			await removeMessageRating(message.id);
 		} catch (error) {
-			setMessages((current) => current.map((entry) => entry.id === message.id ? { ...entry, rating: previous } : entry));
+			setMessages((current) =>
+				current.map((entry) => (entry.id === message.id ? { ...entry, rating: previous } : entry)),
+			);
 			showToast(error instanceof Error ? error.message : 'Не удалось удалить оценку', 'error');
 		}
 	}
@@ -540,15 +602,17 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 				onLogout={() => void onLogout()}
 				onOpenKnowledge={onOpenKnowledge}
 				onClose={() => setIsSidebarOpen(false)}
-				onToggleCollapsed={() => setIsSidebarCollapsed((current) => {
-					const next = !current;
-					try {
-						window.localStorage.setItem('velorian-sidebar-collapsed', String(next));
-					} catch (error) {
-						reportError('Не удалось сохранить состояние боковой панели', error);
-					}
-					return next;
-				})}
+				onToggleCollapsed={() =>
+					setIsSidebarCollapsed((current) => {
+						const next = !current;
+						try {
+							window.localStorage.setItem('velorian-sidebar-collapsed', String(next));
+						} catch (error) {
+							reportError('Не удалось сохранить состояние боковой панели', error);
+						}
+						return next;
+					})
+				}
 			/>
 			<DropZone isDragging={isDragging} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
 				<div
@@ -580,7 +644,11 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 								onRetry={handleRetry}
 								onEdit={handleEditMessage}
 								canEdit={!isGenerating}
-								onActivateBranch={(messageId) => void handleActivateBranch(messageId).catch((error: unknown) => reportActionError(error, 'Не удалось переключить версию'))}
+								onActivateBranch={(messageId) =>
+									void handleActivateBranch(messageId).catch((error: unknown) =>
+										reportActionError(error, 'Не удалось переключить версию'),
+									)
+								}
 								onRate={(message, score, comment) => void handleRateMessage(message, score, comment)}
 								onRemoveRating={(message) => void handleRemoveRating(message)}
 								onSaveToKnowledge={(message) => void handleSaveToKnowledge(message)}

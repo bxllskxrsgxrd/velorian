@@ -2,8 +2,8 @@ import { Children, isValidElement, useEffect, useRef, useState, type ReactNode }
 import { Highlight, Prism, type PrismTheme } from 'prism-react-renderer';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { CheckIcon } from '../icons/CheckIcon';
-import { CopyIcon } from '../icons/CopyIcon';
+import { CheckIcon } from '../icons/AppIcons';
+import { CopyIcon } from '../icons/AppIcons';
 import { IconButton } from '../ui/IconButton/IconButton';
 import './_messageContent.scss';
 

@@ -3,7 +3,7 @@ import type { PreviewFile } from '../../types/chat';
 import { getFileCodeLanguage } from '../../utils/codeLanguage';
 import { isTextPreview } from '../../utils/files';
 import { reportError } from '../../utils/reportError';
-import { DeleteAttachmentIcon } from '../icons/DeleteAttachmentIcon';
+import { DeleteAttachmentIcon } from '../icons/AppIcons';
 import { IconButton } from '../ui/IconButton/IconButton';
 import './_filePreviewModal.scss';
 

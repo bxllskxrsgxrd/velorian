@@ -1,4 +1,4 @@
-import { CheckIcon } from '../../icons/CheckIcon';
+import { CheckIcon } from '../../icons/AppIcons';
 import './_checkbox.scss';
 
 type CheckboxProps = {

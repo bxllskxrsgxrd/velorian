@@ -1,7 +1,7 @@
 import type { ChatAttachment } from '../../types/chat';
 import { formatFileSize } from '../../utils/formatFileSize';
 import { DownloadIcon } from '../icons/AppIcons';
-import { DocumentIcon } from '../icons/DocumentIcon';
+import { DocumentIcon } from '../icons/AppIcons';
 
 type MessageAttachmentProps = {
 	attachment: ChatAttachment;

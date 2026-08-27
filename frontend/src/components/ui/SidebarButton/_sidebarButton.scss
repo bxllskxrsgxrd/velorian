@@ -1,0 +1,36 @@
+.sidebar-button {
+	display: flex;
+	align-items: center;
+	gap: 9px;
+
+	width: 100%;
+	min-height: 42px;
+
+	padding: 9px 11px;
+
+	border: 1px solid transparent;
+	border-radius: var(--radius-medium);
+
+	color: var(--color-text-primary);
+	background: transparent;
+
+	text-align: left;
+
+	cursor: pointer;
+
+	&:hover,
+	&--active {
+		color: var(--color-accent);
+		background: var(--color-accent-soft-hover);
+	}
+
+	&__icon {
+		display: grid;
+		place-items: center;
+		flex: 0 0 auto;
+	}
+
+	&__label {
+		min-width: 0;
+	}
+}

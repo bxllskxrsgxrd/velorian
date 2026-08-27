@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { PlusIcon } from '../icons/PlusIcon';
+import { PlusIcon } from '../icons/AppIcons';
 import { IconButton } from '../ui/IconButton/IconButton';
 
 import './_promptActionsMenu.scss';

@@ -4,8 +4,8 @@ import { PROMPT_TOOLS, promptMarker, stripPromptMarker } from '../../constants/p
 import type { ChatMessageError, SearchMode } from '../../types/chat';
 import { reportError } from '../../utils/reportError';
 import { createPastedTextFile } from '../../utils/pastedTextFile';
-import { MicrophoneIcon } from '../icons/MicrophoneIcon';
-import { SendIcon } from '../icons/SendIcon';
+import { MicrophoneIcon } from '../icons/AppIcons';
+import { SendIcon } from '../icons/AppIcons';
 import { PromptActionsMenu } from '../PromptActionsMenu/PromptActionsMenu';
 import { AutoResizeTextarea } from '../ui/AutoResizeTextarea/AutoResizeTextarea';
 import { IconButton } from '../ui/IconButton/IconButton';
