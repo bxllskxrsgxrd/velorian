@@ -9,6 +9,18 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	await expect(page.getByRole('button', { name: 'База знаний' })).toHaveAttribute('aria-current', 'page');
 	await page.getByRole('button', { name: 'Добавить данные' }).click();
 	const dialog = page.getByRole('dialog');
+	const formStars = dialog.locator('.rating__star svg');
+	await expect(formStars).toHaveCount(5);
+	const starRendering = await formStars.first().evaluate((svg) => {
+		const box = svg.getBoundingClientRect();
+		const style = getComputedStyle(svg);
+		const buttonStyle = getComputedStyle(svg.closest('button')!);
+		return { width: box.width, height: box.height, display: style.display, opacity: style.opacity, stroke: style.stroke, buttonPadding: buttonStyle.padding, buttonBorderWidth: buttonStyle.borderWidth };
+	});
+	expect(starRendering).toMatchObject({ width: 18, height: 18, display: 'block', opacity: '1', buttonPadding: '0px', buttonBorderWidth: '0px' });
+	expect(starRendering.stroke).not.toBe('none');
+	await dialog.getByRole('button', { name: 'Поставить рейтинг 3 из 5' }).hover();
+	await expect(dialog.locator('.rating__star--active')).toHaveCount(3);
 	await dialog.getByLabel('Название').fill('Проверенный оффер');
 	await dialog.getByLabel('Содержимое').fill('Текст для внутренней базы знаний');
 	await dialog.getByRole('button', { name: 'Создать новый подход' }).click();
@@ -25,6 +37,9 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	await expect(page.getByRole('img', { name: /Рейтинг Проверенный оффер: 3 из 5/ })).toBeVisible();
 	await page.getByRole('button', { name: 'Редактировать' }).click();
 	const editDialog = page.getByRole('dialog');
+	await expect(editDialog.locator('.rating__star svg')).toHaveCount(5);
+	await expect(editDialog.locator('.rating__star--active')).toHaveCount(3);
+	await expect(editDialog.locator('.rating__star--inactive')).toHaveCount(2);
 	await editDialog.getByRole('button', { name: 'Поставить рейтинг 5 из 5' }).click();
 	await editDialog.getByRole('button', { name: 'Сохранить' }).click();
 	await expect(page.getByRole('img', { name: /Рейтинг Проверенный оффер: 5 из 5/ })).toBeVisible();

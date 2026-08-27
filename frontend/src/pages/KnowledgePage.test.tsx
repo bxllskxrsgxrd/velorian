@@ -68,13 +68,15 @@ describe('KnowledgePage', () => {
 	});
 
 	it('shows the stored rating in edit mode and saves the changed rating', async () => {
-		const stored = { ...item, rating: 3 };
+		const stored = { ...item, rating: 4 };
 		api.listKnowledge.mockResolvedValue({ items: [stored], pageInfo: { nextCursor: null, hasMore: false } });
 		api.updateKnowledgeItem.mockResolvedValue({ ...stored, rating: 5 });
 		renderKnowledge();
 		fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
 		const dialog = screen.getByRole('dialog');
-		expect(within(dialog).getByRole('button', { name: 'Поставить рейтинг 3 из 5' })).toHaveAttribute('aria-pressed', 'true');
+		expect(within(dialog).getByRole('button', { name: 'Поставить рейтинг 4 из 5' })).toHaveAttribute('aria-pressed', 'true');
+		expect(dialog.querySelectorAll('.rating__star--active')).toHaveLength(4);
+		expect(dialog.querySelectorAll('.rating__star--inactive')).toHaveLength(1);
 		fireEvent.click(within(dialog).getByRole('button', { name: 'Поставить рейтинг 5 из 5' }));
 		fireEvent.click(within(dialog).getByRole('button', { name: 'Сохранить' }));
 		await waitFor(() => expect(api.updateKnowledgeItem).toHaveBeenCalledWith('knowledge-1', expect.objectContaining({ rating: 5, approachId: null })));
