@@ -2,7 +2,7 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../components/Toast/ToastProvider';
 import { KnowledgePage } from './KnowledgePage';
-import { MemoryRouter } from 'react-router-dom';
+import { MemoryRouter, useLocation } from 'react-router-dom';
 
 const api = vi.hoisted(() => ({
 	listKnowledge: vi.fn(),
@@ -10,25 +10,37 @@ const api = vi.hoisted(() => ({
 	uploadKnowledgeFile: vi.fn(),
 	updateKnowledgeItem: vi.fn(),
 	deleteKnowledgeItem: vi.fn(),
+	listKnowledgeApproaches: vi.fn(), createKnowledgeApproach: vi.fn(),
 	listConversations: vi.fn(), createConversation: vi.fn(), deleteConversation: vi.fn(), renameConversation: vi.fn(),
 }));
 vi.mock('../api/chatApi', () => api);
 
 const item = {
 	id: 'knowledge-1', sourceType: 'manual' as const, title: 'Оффер', content: 'Проверенный текст', mimeType: 'text/plain',
-	rating: 5, isActive: true, metadata: {}, createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z',
+	rating: 5, approach: null, isActive: true, metadata: {}, createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z',
 };
+
+function LocationProbe() {
+	const location = useLocation();
+	return <output aria-label="Текущий URL">{location.pathname}{location.search}</output>;
+}
+
+function renderKnowledge(initialEntry = '/knowledge') {
+	return render(<MemoryRouter initialEntries={[initialEntry]}><ToastProvider><KnowledgePage user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn().mockResolvedValue(undefined)} /><LocationProbe /></ToastProvider></MemoryRouter>);
+}
 
 describe('KnowledgePage', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
 		api.listKnowledge.mockResolvedValue({ items: [], pageInfo: { nextCursor: null, hasMore: false } });
 		api.listConversations.mockResolvedValue([]);
+		api.listKnowledgeApproaches.mockResolvedValue([]);
 		api.createKnowledgeItem.mockResolvedValue(item);
+		api.updateKnowledgeItem.mockResolvedValue(item);
 	});
 
 	it('adds manual text without browser dialogs', async () => {
-		render(<MemoryRouter initialEntries={['/knowledge']}><ToastProvider><KnowledgePage user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn().mockResolvedValue(undefined)} /></ToastProvider></MemoryRouter>);
+		renderKnowledge();
 		await screen.findByText('Сохранённых данных пока нет');
 		fireEvent.click(screen.getByRole('button', { name: 'Добавить данные' }));
 		const dialog = screen.getByRole('dialog');
@@ -36,7 +48,36 @@ describe('KnowledgePage', () => {
 		fireEvent.change(await within(dialog).findByPlaceholderText('Вставьте текст'), { target: { value: 'Проверенный текст' } });
 		fireEvent.click(within(dialog).getByRole('button', { name: 'Поставить рейтинг 5 из 5' }));
 		fireEvent.click(within(dialog).getByRole('button', { name: 'Добавить' }));
-		await waitFor(() => expect(api.createKnowledgeItem).toHaveBeenCalledWith('Оффер', 'Проверенный текст', 5, true));
+		await waitFor(() => expect(api.createKnowledgeItem).toHaveBeenCalledWith('Оффер', 'Проверенный текст', 5, true, null));
 		expect(await screen.findByText('Оффер')).toBeInTheDocument();
+	});
+
+	it('resets every filter and removes all query parameters', async () => {
+		renderKnowledge('/knowledge?q=hook&source=manual&approach=a1&active=active&rating=4&sort=rating_desc');
+		await waitFor(() => expect(api.listKnowledge).toHaveBeenCalled());
+		const reset = screen.getByRole('button', { name: 'Сбросить' });
+		expect(reset).toBeEnabled();
+		fireEvent.click(reset);
+		expect(screen.getByLabelText('Текущий URL')).toHaveTextContent('/knowledge');
+		expect(screen.getByLabelText('Поиск по базе знаний')).toHaveValue('');
+		await waitFor(() => expect(api.listKnowledge).toHaveBeenLastCalledWith(expect.objectContaining({
+			search: undefined, sourceType: undefined, approachId: undefined, isActive: undefined,
+			minRating: undefined, unrated: false, sort: 'date_desc',
+		})));
+		expect(reset).toBeDisabled();
+	});
+
+	it('shows the stored rating in edit mode and saves the changed rating', async () => {
+		const stored = { ...item, rating: 3 };
+		api.listKnowledge.mockResolvedValue({ items: [stored], pageInfo: { nextCursor: null, hasMore: false } });
+		api.updateKnowledgeItem.mockResolvedValue({ ...stored, rating: 5 });
+		renderKnowledge();
+		fireEvent.click(await screen.findByRole('button', { name: 'Редактировать' }));
+		const dialog = screen.getByRole('dialog');
+		expect(within(dialog).getByRole('button', { name: 'Поставить рейтинг 3 из 5' })).toHaveAttribute('aria-pressed', 'true');
+		fireEvent.click(within(dialog).getByRole('button', { name: 'Поставить рейтинг 5 из 5' }));
+		fireEvent.click(within(dialog).getByRole('button', { name: 'Сохранить' }));
+		await waitFor(() => expect(api.updateKnowledgeItem).toHaveBeenCalledWith('knowledge-1', expect.objectContaining({ rating: 5, approachId: null })));
+		expect(await screen.findByRole('img', { name: /Рейтинг Оффер: 5 из 5/ })).toBeInTheDocument();
 	});
 });

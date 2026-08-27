@@ -40,6 +40,15 @@ export type KnowledgeSource = {
 	title: string;
 	sourceType: string;
 	rating: number | null;
+	approach?: Pick<KnowledgeApproach, 'id' | 'name' | 'slug'> | null;
+};
+
+export type KnowledgeApproach = {
+	id: string;
+	name: string;
+	slug: string;
+	createdAt: string;
+	updatedAt: string;
 };
 
 export type ChatMessage = {
@@ -95,6 +104,7 @@ export type KnowledgeItem = {
 	mimeType: string;
 	originalFilename?: string | null;
 	rating: number | null;
+	approach: KnowledgeApproach | null;
 	isActive: boolean;
 	metadata: Record<string, unknown>;
 	createdAt: string;

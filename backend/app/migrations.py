@@ -3,7 +3,7 @@ from collections.abc import Callable
 from sqlalchemy import Column, DateTime, MetaData, String, Table, inspect, insert, select, text
 from sqlalchemy.engine import Connection
 
-from .models import utc_now
+from .models import new_id, utc_now
 
 
 MIGRATION_METADATA = MetaData()
@@ -70,6 +70,33 @@ def _add_knowledge_created_index(connection: Connection) -> None:
 	))
 
 
+def _add_knowledge_approaches(connection: Connection) -> None:
+	from .database import Base
+
+	approach_table = Base.metadata.tables["knowledge_approaches"]
+	approach_table.create(bind=connection, checkfirst=True)
+	columns = {column["name"] for column in inspect(connection).get_columns("knowledge_items")}
+	if "approach_id" not in columns:
+		connection.execute(text(
+			"ALTER TABLE knowledge_items ADD COLUMN approach_id VARCHAR(36) "
+			"REFERENCES knowledge_approaches(id) ON DELETE SET NULL"
+		))
+	for statement in (
+		"CREATE INDEX IF NOT EXISTS ix_knowledge_items_approach_id ON knowledge_items (approach_id)",
+		"CREATE INDEX IF NOT EXISTS ix_knowledge_user_active_approach ON knowledge_items (user_id, is_active, approach_id)",
+	):
+		connection.execute(text(statement))
+
+	existing = set(connection.execute(select(approach_table.c.user_id, approach_table.c.slug)).all())
+	user_ids = list(connection.scalars(text("SELECT id FROM users")))
+	for user_id in user_ids:
+		for name, slug in (("Интервью", "интервью"), ("Шоу", "шоу")):
+			if (user_id, slug) not in existing:
+				connection.execute(insert(approach_table).values(
+					id=new_id(), user_id=user_id, name=name, slug=slug, created_at=utc_now(), updated_at=utc_now(),
+				))
+
+
 MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260825_01_ratings_and_knowledge", _create_ratings_and_knowledge),
 	("20260825_02_storage_keys", _add_storage_keys),
@@ -77,6 +104,7 @@ MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260826_02_message_search_mode", _add_message_search_mode),
 	("20260826_03_knowledge_sources_and_indexes", _add_knowledge_sources_and_indexes),
 	("20260826_04_knowledge_created_index", _add_knowledge_created_index),
+	("20260827_01_knowledge_approaches", _add_knowledge_approaches),
 )
 
 

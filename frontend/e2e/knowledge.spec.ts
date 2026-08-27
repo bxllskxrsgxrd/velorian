@@ -11,11 +11,15 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	const dialog = page.getByRole('dialog');
 	await dialog.getByLabel('Название').fill('Проверенный оффер');
 	await dialog.getByLabel('Содержимое').fill('Текст для внутренней базы знаний');
+	await dialog.getByRole('button', { name: 'Создать новый подход' }).click();
+	await dialog.getByLabel('Название нового подхода').fill('UGC-разбор');
+	await dialog.getByRole('button', { name: 'Создать', exact: true }).click();
 	await dialog.getByRole('button', { name: 'Поставить рейтинг 3 из 5' }).click();
 	await dialog.getByRole('button', { name: 'Добавить' }).click();
 	await expect(page.getByText('Проверенный оффер')).toBeVisible();
 	await expect(page.getByRole('img', { name: /Рейтинг Проверенный оффер: 3 из 5/ })).toBeVisible();
 	await expect(page.getByText('3/5')).toBeVisible();
+	await expect(page.getByText('Подход: UGC-разбор')).toBeVisible();
 	await expect(page.getByRole('checkbox', { name: 'Использовать' })).toBeChecked();
 	await page.reload();
 	await expect(page.getByRole('img', { name: /Рейтинг Проверенный оффер: 3 из 5/ })).toBeVisible();
@@ -33,6 +37,15 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	const filterRequest = page.waitForRequest((request) => request.url().includes('min_rating=4'));
 	await page.getByLabel('Рейтинг', { exact: true }).selectOption('4');
 	await filterRequest;
+	await page.getByLabel('Источник').selectOption('manual');
+	await page.getByLabel('Подход', { exact: true }).selectOption({ label: 'UGC-разбор' });
+	await page.getByLabel('Сортировка').selectOption('rating_desc');
+	await page.getByLabel('Использование').selectOption('inactive');
+	await page.getByLabel('Поиск по базе знаний').fill('оффер');
+	await expect(page).toHaveURL(/q=%D0%BE%D1%84%D1%84%D0%B5%D1%80/);
+	await page.getByRole('button', { name: 'Сбросить' }).click();
+	await expect(page).toHaveURL(/\/knowledge$/);
+	await expect(page.getByRole('button', { name: 'Сбросить' })).toBeDisabled();
 });
 
 test('agent can browse and search the current user knowledge through chat', async ({ page }) => {

@@ -4,6 +4,7 @@ import binascii
 import hashlib
 import json
 import logging
+import re
 from datetime import datetime
 from pathlib import Path
 from typing import Annotated, Literal
@@ -11,7 +12,8 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from pydantic import BaseModel, Field
-from sqlalchemy import and_, asc, desc, func, or_, select
+from sqlalchemy import and_, asc, desc, func, or_, select, update
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
 from .auth import get_current_user
@@ -19,8 +21,8 @@ from .config import settings
 from .database import get_db
 from .errors import AppError
 from .file_processing import extract_text, validate_file_name
-from .knowledge_retrieval import KnowledgeRetrievalResult, knowledge_retrieval_service
-from .models import Attachment, Conversation, KnowledgeItem, Message, MessageRating, User, utc_now
+from .knowledge_retrieval import KnowledgeRetrievalResult, KnowledgeSearchOptions, knowledge_retrieval_service
+from .models import Attachment, Conversation, KnowledgeApproach, KnowledgeItem, Message, MessageRating, User, utc_now
 from .storage import build_storage_key, get_file_storage
 
 
@@ -34,6 +36,7 @@ class KnowledgeCreatePayload(BaseModel):
 	content: str = Field(min_length=1, max_length=2_000_000)
 	is_active: bool = True
 	rating: RatingValue | None = None
+	approach_id: str | None = Field(default=None, max_length=36)
 
 
 class KnowledgeUpdatePayload(BaseModel):
@@ -41,6 +44,50 @@ class KnowledgeUpdatePayload(BaseModel):
 	content: str | None = Field(default=None, min_length=1, max_length=2_000_000)
 	is_active: bool | None = None
 	rating: RatingValue | None = None
+	approach_id: str | None = Field(default=None, max_length=36)
+
+
+class ApproachPayload(BaseModel):
+	name: str = Field(min_length=1, max_length=80)
+
+
+DEFAULT_APPROACHES = (("Интервью", "интервью"), ("Шоу", "шоу"))
+
+
+def normalize_approach_slug(value: str) -> str:
+	normalized = value.casefold().replace("ё", "е").strip()
+	return re.sub(r"[^\w]+", "-", normalized, flags=re.UNICODE).strip("-")[:96]
+
+
+def approach_payload(approach: KnowledgeApproach) -> dict:
+	return {
+		"id": approach.id,
+		"name": approach.name,
+		"slug": approach.slug,
+		"createdAt": approach.created_at.isoformat(),
+		"updatedAt": approach.updated_at.isoformat(),
+	}
+
+
+def ensure_default_approaches(db: Session, user_id: str) -> None:
+	existing = set(db.scalars(select(KnowledgeApproach.slug).where(KnowledgeApproach.user_id == user_id)))
+	for name, slug in DEFAULT_APPROACHES:
+		if slug not in existing:
+			db.add(KnowledgeApproach(user_id=user_id, name=name, slug=slug))
+
+
+def owned_approach(db: Session, approach_id: str, user_id: str) -> KnowledgeApproach:
+	approach = db.scalar(select(KnowledgeApproach).where(
+		KnowledgeApproach.id == approach_id,
+		KnowledgeApproach.user_id == user_id,
+	))
+	if approach is None:
+		raise AppError(404, "KNOWLEDGE_APPROACH_NOT_FOUND", "Подход не найден")
+	return approach
+
+
+def optional_owned_approach(db: Session, approach_id: str | None, user_id: str) -> KnowledgeApproach | None:
+	return owned_approach(db, approach_id, user_id) if approach_id else None
 
 
 def _knowledge_search_condition(db: Session, raw_term: str):
@@ -62,6 +109,7 @@ def knowledge_payload(item: KnowledgeItem) -> dict:
 		"mimeType": item.mime_type,
 		"originalFilename": item.original_filename,
 		"rating": item.rating,
+		"approach": approach_payload(item.approach) if item.approach else None,
 		"isActive": item.is_active,
 		"metadata": item.item_metadata or {},
 		"createdAt": item.created_at.isoformat(),
@@ -77,10 +125,65 @@ def owned_knowledge_item(db: Session, item_id: str, user_id: str) -> KnowledgeIt
 	return item
 
 
+@router.get("/approaches")
+def list_approaches(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	ensure_default_approaches(db, user.id)
+	db.commit()
+	items = list(db.scalars(select(KnowledgeApproach).where(
+		KnowledgeApproach.user_id == user.id,
+	).order_by(KnowledgeApproach.name.asc())))
+	return {"items": [approach_payload(item) for item in items]}
+
+
+@router.post("/approaches")
+def create_approach(payload: ApproachPayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	name = " ".join(payload.name.split())
+	slug = normalize_approach_slug(name)
+	if not slug:
+		raise AppError(422, "INVALID_APPROACH_NAME", "Введите название подхода")
+	item = KnowledgeApproach(user_id=user.id, name=name, slug=slug)
+	db.add(item)
+	try:
+		db.commit()
+	except IntegrityError as error:
+		db.rollback()
+		raise AppError(409, "KNOWLEDGE_APPROACH_EXISTS", "Подход с таким названием уже существует") from error
+	return {"item": approach_payload(item)}
+
+
+@router.patch("/approaches/{approach_id}")
+def rename_approach(approach_id: str, payload: ApproachPayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	item = owned_approach(db, approach_id, user.id)
+	item.name = " ".join(payload.name.split())
+	item.slug = normalize_approach_slug(item.name)
+	if not item.slug:
+		raise AppError(422, "INVALID_APPROACH_NAME", "Введите название подхода")
+	item.updated_at = utc_now()
+	try:
+		db.commit()
+	except IntegrityError as error:
+		db.rollback()
+		raise AppError(409, "KNOWLEDGE_APPROACH_EXISTS", "Подход с таким названием уже существует") from error
+	return {"item": approach_payload(item)}
+
+
+@router.delete("/approaches/{approach_id}", status_code=204)
+def delete_approach(approach_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	item = owned_approach(db, approach_id, user.id)
+	db.execute(update(KnowledgeItem).where(
+		KnowledgeItem.user_id == user.id,
+		KnowledgeItem.approach_id == item.id,
+	).values(approach_id=None, updated_at=utc_now()))
+	db.delete(item)
+	db.commit()
+	return Response(status_code=204)
+
+
 @router.get("")
 def list_knowledge_items(
 	search: str = Query(default="", max_length=200),
 	source_type: str | None = Query(default=None, max_length=32),
+	approach_id: str | None = Query(default=None, max_length=36),
 	is_active: bool | None = None,
 	min_rating: int | None = Query(default=None, ge=1, le=5),
 	unrated: bool = False,
@@ -96,6 +199,9 @@ def list_knowledge_items(
 			statement = statement.where(_knowledge_search_condition(db, term))
 	if source_type:
 		statement = statement.where(KnowledgeItem.source_type == source_type)
+	if approach_id:
+		owned_approach(db, approach_id, user.id)
+		statement = statement.where(KnowledgeItem.approach_id == approach_id)
 	if is_active is not None:
 		statement = statement.where(KnowledgeItem.is_active == is_active)
 	if unrated:
@@ -143,6 +249,7 @@ def list_knowledge_items(
 
 @router.post("")
 def create_manual_knowledge_item(payload: KnowledgeCreatePayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	approach = optional_owned_approach(db, payload.approach_id, user.id)
 	item = KnowledgeItem(
 		user_id=user.id,
 		source_type="manual",
@@ -151,6 +258,7 @@ def create_manual_knowledge_item(payload: KnowledgeCreatePayload, user: User = D
 		mime_type="text/plain",
 		is_active=payload.is_active,
 		rating=payload.rating,
+		approach=approach,
 	)
 	db.add(item)
 	db.commit()
@@ -163,9 +271,11 @@ async def upload_knowledge_file(
 	title: str = Form(default=""),
 	rating: int | None = Form(default=None, ge=1, le=5),
 	is_active: bool = Form(default=True),
+	approach_id: str | None = Form(default=None, max_length=36),
 	user: User = Depends(get_current_user),
 	db: Session = Depends(get_db),
 ):
+	approach = optional_owned_approach(db, approach_id, user.id)
 	name = validate_file_name(file.filename or "Без имени")
 	content = await file.read(settings.max_file_size + 1)
 	await file.close()
@@ -189,6 +299,7 @@ async def upload_knowledge_file(
 		original_filename=name,
 		rating=rating,
 		is_active=is_active,
+		approach=approach,
 		item_metadata={"sha256": checksum, "extractionStatus": extracted.status},
 	)
 	db.add(item)
@@ -278,6 +389,8 @@ def update_knowledge_item(item_id: str, payload: KnowledgeUpdatePayload, user: U
 		item.is_active = payload.is_active
 	if "rating" in payload.model_fields_set:
 		item.rating = payload.rating
+	if "approach_id" in payload.model_fields_set:
+		item.approach = optional_owned_approach(db, payload.approach_id, user.id)
 	item.updated_at = utc_now()
 	db.commit()
 	return {"item": knowledge_payload(item)}
@@ -354,9 +467,9 @@ async def download_knowledge_file(item_id: str, user: User = Depends(get_current
 	return Response(content, media_type=item.mime_type, headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"})
 
 
-def retrieve_knowledge(db: Session, user_id: str, query: str, limit: int = 4) -> KnowledgeRetrievalResult:
-	return knowledge_retrieval_service.search(db, user_id, query, limit)
+def retrieve_knowledge(db: Session, user_id: str, options: KnowledgeSearchOptions) -> KnowledgeRetrievalResult:
+	return knowledge_retrieval_service.search(db, user_id, options)
 
 
-def list_knowledge(db: Session, user_id: str, limit: int = 20) -> KnowledgeRetrievalResult:
-	return knowledge_retrieval_service.list(db, user_id, limit)
+def list_knowledge(db: Session, user_id: str, options: KnowledgeSearchOptions) -> KnowledgeRetrievalResult:
+	return knowledge_retrieval_service.list(db, user_id, options)

@@ -13,6 +13,7 @@ const api = vi.hoisted(() => ({
 	listConversations: vi.fn(),
 	renameConversation: vi.fn(),
 	streamChat: vi.fn(),
+	activateMessageBranch: vi.fn(), removeMessageRating: vi.fn(), saveMessageToKnowledge: vi.fn(), setMessageRating: vi.fn(),
 }));
 
 vi.mock('../api/chatApi', () => api);
@@ -24,9 +25,9 @@ const conversation = {
 	updatedAt: '2026-08-21T00:00:00Z',
 };
 
-function renderChatPage() {
+function renderChatPage(initialEntry = `/chat/${conversation.id}`) {
 	return render(
-		<MemoryRouter initialEntries={[`/chat/${conversation.id}`]}>
+		<MemoryRouter initialEntries={[initialEntry]}>
 			<ToastProvider><Routes><Route path="/chat/:conversationId" element={<ChatPage user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn()} onOpenKnowledge={vi.fn()} />} /></Routes></ToastProvider>
 		</MemoryRouter>,
 	);
@@ -91,5 +92,40 @@ describe('ChatPage retry', () => {
 		expect(alert).not.toBeNull();
 		expect(alert?.closest('.message')).toHaveClass('message--error');
 		expect(container.querySelector('.message__content--pending')).not.toBeInTheDocument();
+	});
+});
+
+describe('ChatPage lazy conversation creation', () => {
+	beforeEach(() => {
+		vi.clearAllMocks();
+		api.listConversations.mockResolvedValue([conversation]);
+		api.streamChat.mockResolvedValue(undefined);
+		api.createConversation.mockResolvedValue({ ...conversation, id: 'created-on-send', title: 'Новый чат' });
+	});
+
+	it('keeps /chat/new virtual and creates exactly one conversation on the first submit', async () => {
+		renderChatPage('/chat/new');
+		const prompt = await screen.findByRole('textbox', { name: /введите запрос/i });
+		expect(api.createConversation).not.toHaveBeenCalled();
+		expect(api.getConversation).not.toHaveBeenCalled();
+		fireEvent.change(prompt, { target: { value: 'Первый запрос' } });
+		const form = prompt.closest('form');
+		if (!form) throw new Error('Prompt form is missing');
+		fireEvent.submit(form);
+		fireEvent.submit(form);
+		await waitFor(() => expect(api.streamChat).toHaveBeenCalledTimes(1));
+		expect(api.createConversation).toHaveBeenCalledTimes(1);
+		expect(api.streamChat).toHaveBeenCalledWith(expect.objectContaining({ conversationId: 'created-on-send', prompt: 'Первый запрос' }));
+	});
+
+	it('restores the prompt when creating the first conversation fails', async () => {
+		api.createConversation.mockRejectedValueOnce(new ApiError('NETWORK_ERROR', 503, 'create-failed'));
+		renderChatPage('/chat/new');
+		const prompt = await screen.findByRole('textbox', { name: /введите запрос/i });
+		fireEvent.change(prompt, { target: { value: 'Не теряй этот текст' } });
+		fireEvent.click(screen.getByRole('button', { name: 'Отправить сообщение' }));
+		await waitFor(() => expect(prompt).toHaveValue('Не теряй этот текст'));
+		expect(api.streamChat).not.toHaveBeenCalled();
+		expect(api.createConversation).toHaveBeenCalledTimes(1);
 	});
 });

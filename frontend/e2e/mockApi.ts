@@ -3,6 +3,7 @@ import type { Page, Route } from '@playwright/test';
 type Options = { authenticated?: boolean; streamError?: boolean; failConversationsOnce?: boolean; multipleChats?: boolean; historicalError?: 'error' | 'cancelled' };
 
 export async function installMockApi(page: Page, options: Options = {}) {
+	let conversationCreateCount = 0;
 	let authenticated = options.authenticated ?? true;
 	let failedConversationRequestsRemaining = options.failConversationsOnce ? 2 : 0;
 	let conversations = options.multipleChats
@@ -38,6 +39,10 @@ export async function installMockApi(page: Page, options: Options = {}) {
 		['chat-b', [{ id: 'message-b', role: 'assistant', content: 'Сообщения из Chat B', status: 'done', attachments: [] }]],
 	] : [['c1', defaultMessages]]);
 	let knowledge: Array<Record<string, unknown>> = [];
+	let approaches = [
+		{ id: 'approach-interview', name: 'Интервью', slug: 'интервью', createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z' },
+		{ id: 'approach-show', name: 'Шоу', slug: 'шоу', createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z' },
+	];
 	const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
 	await page.route('**/api/**', async (route) => {
@@ -58,6 +63,7 @@ export async function installMockApi(page: Page, options: Options = {}) {
 			return json(route, { conversations });
 		}
 		if (path === '/api/conversations' && method === 'POST') {
+			conversationCreateCount += 1;
 			const created = { id: `c${conversations.length + 1}`, title: 'Новый чат', createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
 			conversations = [created, ...conversations]; messagesByConversation.set(created.id, []); return json(route, { conversation: created });
 		}
@@ -96,19 +102,33 @@ export async function installMockApi(page: Page, options: Options = {}) {
 		}
 		if (/^\/api\/messages\/[^/]+\/rating$/.test(path)) return json(route, { rating: { id: 'r1', score: 5, comment: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } });
 
-		if (path === '/api/knowledge' && method === 'GET') return json(route, { items: knowledge, pageInfo: { nextCursor: null, hasMore: false } });
+		if (path === '/api/knowledge/approaches' && method === 'GET') return json(route, { items: approaches });
+		if (path === '/api/knowledge/approaches' && method === 'POST') {
+			const payload = request.postDataJSON() as { name: string };
+			const item = { id: `approach-${approaches.length + 1}`, name: payload.name, slug: payload.name.toLocaleLowerCase('ru'), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+			approaches = [...approaches, item];
+			return json(route, { item });
+		}
+		if (path === '/api/knowledge' && method === 'GET') {
+			const approachId = url.searchParams.get('approach_id');
+			return json(route, { items: approachId ? knowledge.filter((item) => (item.approach as { id?: string } | null)?.id === approachId) : knowledge, pageInfo: { nextCursor: null, hasMore: false } });
+		}
 		if (path === '/api/knowledge' && method === 'POST') {
-			const payload = request.postDataJSON() as { title: string; content: string; rating?: number; is_active?: boolean };
-			const item = { id: `k${knowledge.length + 1}`, sourceType: 'manual', title: payload.title, content: payload.content, mimeType: 'text/plain', rating: payload.rating ?? null, isActive: payload.is_active ?? true, metadata: {}, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), downloadUrl: null };
+			const payload = request.postDataJSON() as { title: string; content: string; rating?: number; is_active?: boolean; approach_id?: string | null };
+			const item = { id: `k${knowledge.length + 1}`, sourceType: 'manual', title: payload.title, content: payload.content, mimeType: 'text/plain', rating: payload.rating ?? null, approach: approaches.find((entry) => entry.id === payload.approach_id) ?? null, isActive: payload.is_active ?? true, metadata: {}, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), downloadUrl: null };
 			knowledge = [item, ...knowledge]; return json(route, { item });
 		}
 		const knowledgeMatch = path.match(/^\/api\/knowledge\/([^/]+)$/);
 		if (knowledgeMatch && method === 'PATCH') {
 			const payload = request.postDataJSON() as Record<string, unknown>;
-			knowledge = knowledge.map((item) => item.id === knowledgeMatch[1] ? { ...item, ...payload, isActive: payload.is_active ?? item.isActive } : item);
+			knowledge = knowledge.map((item) => item.id === knowledgeMatch[1] ? { ...item, title: payload.title ?? item.title, content: payload.content ?? item.content, rating: payload.rating === undefined ? item.rating : payload.rating, approach: payload.approach_id === undefined ? item.approach : approaches.find((entry) => entry.id === payload.approach_id) ?? null, isActive: payload.is_active ?? item.isActive, updatedAt: new Date().toISOString() } : item);
 			return json(route, { item: knowledge.find((item) => item.id === knowledgeMatch[1]) });
 		}
 		if (knowledgeMatch && method === 'DELETE') { knowledge = knowledge.filter((item) => item.id !== knowledgeMatch[1]); return route.fulfill({ status: 204 }); }
 		return json(route, { error: { code: 'E2E_MOCK_MISSING', message: `${method} ${path}`, request_id: 'mock' } }, 500);
 	});
+	return {
+		getConversationCreateCount: () => conversationCreateCount,
+		getConversationCount: () => conversations.length,
+	};
 }

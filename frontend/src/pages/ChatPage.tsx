@@ -67,8 +67,9 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	const { showToast } = useToast();
 	const navigate = useNavigate();
 	const { conversationId: routeConversationId } = useParams<{ conversationId: string }>();
+	const isNewConversationRoute = routeConversationId === 'new';
 	const [conversations, setConversations] = useState<ConversationSummary[]>([]);
-	const activeConversationId = routeConversationId ?? null;
+	const activeConversationId = isNewConversationRoute ? null : (routeConversationId ?? null);
 	const [messages, setMessages] = useState<ChatMessage[]>([]);
 	const [previewFile, setPreviewFile] = useState<PreviewFile | null>(null);
 	const [isGenerating, setIsGenerating] = useState(false);
@@ -88,8 +89,12 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	const skipNextLoadRef = useRef(false);
 	const ratingSequenceRef = useRef(new Map<string, number>());
 	const localRetryPayloadsRef = useRef(new Map<string, { prompt: string; files: File[]; searchMode: SearchMode }>());
-	const initialRouteConversationIdRef = useRef(routeConversationId);
+	const initialRouteConversationIdRef = useRef(isNewConversationRoute ? 'new' : routeConversationId);
 	const suppressInitialFallbackRef = useRef(false);
+	const conversationCreationRef = useRef<Promise<ConversationSummary> | null>(null);
+	const sendOperationRef = useRef<Promise<void> | null>(null);
+	const [isCreatingConversation, setIsCreatingConversation] = useState(false);
+	const [promptResetSequence, setPromptResetSequence] = useState(0);
 
 	const {
 		isDragging,
@@ -235,13 +240,23 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 
 	async function ensureConversation() {
 		if (activeConversationId) return activeConversationId;
-		const created = await createConversation();
-		loadSequenceRef.current += 1;
-		skipNextLoadRef.current = true;
-		setConversations((current) => [created, ...current]);
-		setMessages([]);
-		navigate(`/chat/${created.id}`);
-		return created.id;
+		if (!conversationCreationRef.current) {
+			setIsCreatingConversation(true);
+			conversationCreationRef.current = createConversation().then((created) => {
+				loadSequenceRef.current += 1;
+				skipNextLoadRef.current = true;
+				setConversations((current) => [created, ...current.filter((item) => item.id !== created.id)]);
+				setMessages([]);
+				navigate(`/chat/${created.id}`, { replace: true });
+				return created;
+			});
+		}
+		try {
+			return (await conversationCreationRef.current).id;
+		} finally {
+			conversationCreationRef.current = null;
+			setIsCreatingConversation(false);
+		}
 	}
 
 	async function runStream(
@@ -433,8 +448,22 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	}
 
 	async function handleSendMessage(prompt: string, currentFiles: File[], searchMode: SearchMode) {
-		const conversationId = await ensureConversation();
-		await runStream(conversationId, prompt, currentFiles, undefined, searchMode);
+		if (sendOperationRef.current) return sendOperationRef.current;
+		const operation = (async () => {
+			try {
+				const conversationId = await ensureConversation();
+				await runStream(conversationId, prompt, currentFiles, undefined, searchMode);
+			} catch (error) {
+				showToast(error instanceof Error ? error.message : 'Не удалось создать чат', 'error');
+				throw error;
+			}
+		})();
+		sendOperationRef.current = operation;
+		try {
+			await operation;
+		} finally {
+			if (sendOperationRef.current === operation) sendOperationRef.current = null;
+		}
 	}
 
 	function handleRetry(userMessageId: string) {
@@ -517,9 +546,11 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 		suppressInitialFallbackRef.current = true;
 		if (isGenerating) requestControllerRef.current?.abort();
 		revokeLocalAttachmentUrls();
+		clearFiles();
 		setMessages([]);
+		setPromptResetSequence((current) => current + 1);
 		setIsSidebarOpen(false);
-		navigate('/');
+		navigate('/chat/new');
 	}
 
 	async function handleDeleteConversation(id: string) {
@@ -671,9 +702,10 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 							</button>
 						)}
 						<PromptBar
+							key={`prompt-${promptResetSequence}`}
 							files={files}
 							fileError={fileError}
-							isGenerating={isGenerating}
+							isGenerating={isGenerating || isCreatingConversation}
 							onSendMessage={handleSendMessage}
 							onStop={() => requestControllerRef.current?.abort()}
 							onRemoveFile={removeFile}

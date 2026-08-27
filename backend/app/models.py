@@ -26,6 +26,7 @@ class User(Base):
 	conversations: Mapped[list["Conversation"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 	ratings: Mapped[list["MessageRating"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 	knowledge_items: Mapped[list["KnowledgeItem"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+	knowledge_approaches: Mapped[list["KnowledgeApproach"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class Conversation(Base):
@@ -118,6 +119,24 @@ class MessageRating(Base):
 	message: Mapped[Message] = relationship(back_populates="ratings")
 
 
+class KnowledgeApproach(Base):
+	__tablename__ = "knowledge_approaches"
+	__table_args__ = (
+		UniqueConstraint("user_id", "slug", name="uq_knowledge_approach_user_slug"),
+		Index("ix_knowledge_approach_user_name", "user_id", "name"),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+	user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+	name: Mapped[str] = mapped_column(String(80))
+	slug: Mapped[str] = mapped_column(String(96))
+	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+	user: Mapped[User] = relationship(back_populates="knowledge_approaches")
+	knowledge_items: Mapped[list["KnowledgeItem"]] = relationship(back_populates="approach")
+
+
 class KnowledgeItem(Base):
 	__tablename__ = "knowledge_items"
 	__table_args__ = (
@@ -129,10 +148,12 @@ class KnowledgeItem(Base):
 		Index("ix_knowledge_user_rating", "user_id", "rating"),
 		Index("ix_knowledge_user_created", "user_id", "created_at", "id"),
 		Index("ix_knowledge_user_updated", "user_id", "updated_at", "id"),
+		Index("ix_knowledge_user_active_approach", "user_id", "is_active", "approach_id"),
 	)
 
 	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
 	user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+	approach_id: Mapped[str | None] = mapped_column(ForeignKey("knowledge_approaches.id", ondelete="SET NULL"), nullable=True, index=True)
 	source_type: Mapped[str] = mapped_column(String(32))
 	source_message_id: Mapped[str | None] = mapped_column(ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
 	source_file_id: Mapped[str | None] = mapped_column(ForeignKey("attachments.id", ondelete="SET NULL"), nullable=True)
@@ -149,5 +170,6 @@ class KnowledgeItem(Base):
 	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
 	user: Mapped[User] = relationship(back_populates="knowledge_items")
+	approach: Mapped[KnowledgeApproach | None] = relationship(back_populates="knowledge_items", lazy="joined")
 	source_message: Mapped[Message | None] = relationship(back_populates="knowledge_items")
 	source_file: Mapped[Attachment | None] = relationship(back_populates="knowledge_items")

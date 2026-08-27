@@ -1,6 +1,39 @@
 import { expect, test } from '@playwright/test';
 import { installMockApi } from './mockApi';
 
+test('new chat stays virtual until one guarded first send', async ({ page }) => {
+	const api = await installMockApi(page);
+	await page.goto('/');
+	await page.getByRole('textbox', { name: 'Введите запрос' }).fill('Черновик старого чата');
+	await page.getByRole('button', { name: 'Новый чат' }).click();
+	await expect(page).toHaveURL(/\/chat\/new$/);
+	await expect(page.getByRole('textbox', { name: 'Введите запрос' })).toHaveValue('');
+	expect(api.getConversationCreateCount()).toBe(0);
+	expect(api.getConversationCount()).toBe(1);
+
+	await page.reload();
+	await expect(page).toHaveURL(/\/chat\/new$/);
+	expect(api.getConversationCreateCount()).toBe(0);
+	const textarea = page.getByRole('textbox', { name: 'Введите запрос' });
+	await textarea.evaluate((element) => {
+		const transfer = new DataTransfer();
+		transfer.setData('text/plain', `Большая вставка\n${'данные '.repeat(13_000)}`);
+		element.dispatchEvent(new ClipboardEvent('paste', { bubbles: true, cancelable: true, clipboardData: transfer }));
+	});
+	await expect(page.locator('.prompt-bar__attachments-item')).toHaveCount(1);
+	expect(api.getConversationCreateCount()).toBe(0);
+
+	await textarea.fill('Первый запрос');
+	await textarea.evaluate((element) => {
+		element.form?.requestSubmit();
+		element.form?.requestSubmit();
+	});
+	await expect(page).toHaveURL(/\/chat\/c2$/);
+	await expect(page.getByText('Ответ агента')).toBeVisible();
+	expect(api.getConversationCreateCount()).toBe(1);
+	expect(api.getConversationCount()).toBe(2);
+});
+
 test('creates a chat, sends a message and rates the answer', async ({ page }) => {
 	await installMockApi(page);
 	await page.goto('/');

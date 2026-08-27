@@ -487,6 +487,7 @@ def test_knowledge_schema_has_non_destructive_constraints_and_indexes():
 	inspector = inspect(engine)
 	columns = {column["name"]: column for column in inspector.get_columns("knowledge_items")}
 	assert columns["rating"]["nullable"] is True
+	assert columns["approach_id"]["nullable"] is True
 	assert columns["is_active"]["nullable"] is False
 	index_names = {index["name"] for index in inspector.get_indexes("knowledge_items")}
 	assert {
@@ -495,10 +496,15 @@ def test_knowledge_schema_has_non_destructive_constraints_and_indexes():
 		"ix_knowledge_user_rating",
 		"ix_knowledge_user_created",
 		"ix_knowledge_user_updated",
+		"ix_knowledge_items_approach_id",
+		"ix_knowledge_user_active_approach",
 	}.issubset(index_names)
 	foreign_keys = {fk["constrained_columns"][0]: fk for fk in inspector.get_foreign_keys("knowledge_items")}
 	assert foreign_keys["user_id"]["options"]["ondelete"] == "CASCADE"
 	assert foreign_keys["source_message_id"]["options"]["ondelete"] == "SET NULL"
+	assert foreign_keys["approach_id"]["options"]["ondelete"] == "SET NULL"
+	approach_indexes = {index["name"] for index in inspector.get_indexes("knowledge_approaches")}
+	assert {"ix_knowledge_approaches_user_id", "ix_knowledge_approach_user_name"}.issubset(approach_indexes)
 
 
 def test_knowledge_file_delete_failure_preserves_database_item(authenticated_client, monkeypatch):
@@ -647,7 +653,7 @@ def test_three_active_items_retrieval_browse_toggle_and_sources(authenticated_cl
 	conversation = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]
 	sources = conversation["messages"][-1]["knowledgeSources"]
 	assert sources == [{
-		"id": created[0]["id"], "title": "Facebook Hooks", "sourceType": "manual", "rating": 1,
+		"id": created[0]["id"], "title": "Facebook Hooks", "sourceType": "manual", "rating": 1, "approach": None,
 	}]
 
 	for prompt in ("что ты видишь в бд?", "напиши про все доступные тебе данные", "там три ячейки есть с данными"):
@@ -693,6 +699,107 @@ def test_lower_rating_keeps_saved_knowledge_active(authenticated_client, monkeyp
 	items = authenticated_client.get("/api/knowledge").json()["items"]
 	assert items[0]["isActive"] is True
 	assert items[0]["rating"] == 2
+
+
+def test_knowledge_approach_crud_filter_delete_and_user_isolation(authenticated_client):
+	defaults = authenticated_client.get("/api/knowledge/approaches")
+	assert defaults.status_code == 200
+	assert {item["name"] for item in defaults.json()["items"]} == {"Интервью", "Шоу"}
+	foreign_approach_id = defaults.json()["items"][0]["id"]
+
+	created_approach = authenticated_client.post("/api/knowledge/approaches", json={"name": "UGC-разбор"})
+	assert created_approach.status_code == 200
+	approach = created_approach.json()["item"]
+	assert authenticated_client.post("/api/knowledge/approaches", json={"name": "ugc-разбор"}).status_code == 409
+
+	matching = authenticated_client.post("/api/knowledge", json={
+		"title": "Активный UGC", "content": "Конкретный материал", "rating": 5,
+		"is_active": True, "approach_id": approach["id"],
+	}).json()["item"]
+	authenticated_client.post("/api/knowledge", json={
+		"title": "Выключенный UGC", "content": "Не должен попасть", "rating": 5,
+		"is_active": False, "approach_id": approach["id"],
+	})
+	authenticated_client.post("/api/knowledge", json={
+		"title": "Низкий рейтинг", "content": "Не должен попасть", "rating": 2,
+		"is_active": True, "approach_id": approach["id"],
+	})
+	filtered = authenticated_client.get(
+		"/api/knowledge", params={"approach_id": approach["id"], "is_active": True, "min_rating": 4},
+	)
+	assert filtered.status_code == 200
+	assert [item["id"] for item in filtered.json()["items"]] == [matching["id"]]
+	assert filtered.json()["items"][0]["approach"]["name"] == "UGC-разбор"
+
+	renamed = authenticated_client.patch(f"/api/knowledge/approaches/{approach['id']}", json={"name": "UGC Story"})
+	assert renamed.status_code == 200
+	assert renamed.json()["item"]["name"] == "UGC Story"
+	assert authenticated_client.delete(f"/api/knowledge/approaches/{approach['id']}").status_code == 204
+	preserved = authenticated_client.get(f"/api/knowledge/{matching['id']}")
+	assert preserved.status_code == 200
+	assert preserved.json()["item"]["approach"] is None
+
+	second = authenticated_client.post("/api/auth/register", json={
+		"email": "approach-isolation@example.com", "password": "strong-password",
+	})
+	assert second.status_code == 200
+	authenticated_client.headers.update({"X-CSRF-Token": second.json()["csrfToken"]})
+	assert authenticated_client.get("/api/knowledge", params={"approach_id": foreign_approach_id}).status_code == 404
+	assert authenticated_client.post("/api/knowledge", json={
+		"title": "Чужой подход", "content": "Запрещено", "approach_id": foreign_approach_id,
+	}).status_code == 404
+
+
+def test_dynamic_approach_resolver_scopes_context_and_distinguishes_empty(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	approaches = {item["name"]: item for item in authenticated_client.get("/api/knowledge/approaches").json()["items"]}
+	authenticated_client.post("/api/knowledge", json={
+		"title": "Начало интервью", "content": "Начать текст нужно с личного вопроса.",
+		"approach_id": approaches["Интервью"]["id"],
+	})
+	authenticated_client.post("/api/knowledge", json={
+		"title": "Начало шоу", "content": "Начать текст нужно с яркого конфликта.",
+		"approach_id": approaches["Шоу"]["id"],
+	})
+	empty = authenticated_client.post("/api/knowledge/approaches", json={"name": "Документалистика"}).json()["item"]
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Подходы"}).json()["conversation"]["id"]
+
+	auto = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Как лучше начать текст для подхода Интервью?", "search_mode": "none"},
+	)
+	assert auto.status_code == 200
+	context = completions.calls[-1]["messages"][-1]["content"]
+	assert "Filter: Approach = Интервью" in context
+	assert "Source: Начало интервью" in context
+	assert "Начало шоу" not in context
+
+	browse = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Что у меня есть по Шоу?", "search_mode": "none"},
+	)
+	assert browse.status_code == 200
+	context = completions.calls[-1]["messages"][-1]["content"]
+	assert "Mode: list" in context
+	assert "Filter: Approach = Шоу" in context
+	assert "Source: Начало шоу" in context
+	assert "Начало интервью" not in context
+
+	unknown = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Что есть для подхода Несуществующий?", "search_mode": "none"},
+	)
+	assert unknown.status_code == 200
+	assert "Status: approach_not_found" in completions.calls[-1]["messages"][-1]["content"]
+	empty_response = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": f"Что есть по {empty['name']}?", "search_mode": "none"},
+	)
+	assert empty_response.status_code == 200
+	assert "Status: approach_empty" in completions.calls[-1]["messages"][-1]["content"]
 
 
 def test_csrf_rejects_missing_invalid_and_rotated_tokens(client):

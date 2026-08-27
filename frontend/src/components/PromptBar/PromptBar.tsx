@@ -57,6 +57,7 @@ export function PromptBar({
 	const [searchMode, setSearchMode] = useState<SearchMode>('none');
 	const [isListening, setIsListening] = useState(false);
 	const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
+	const submissionRef = useRef(false);
 	const speechWindow = window as typeof window & {
 		SpeechRecognition?: SpeechRecognitionConstructor;
 		webkitSpeechRecognition?: SpeechRecognitionConstructor;
@@ -117,7 +118,8 @@ export function PromptBar({
 
 	async function handleSubmit(event: React.SyntheticEvent<HTMLFormElement>) {
 		event.preventDefault();
-		if (isSendDisabled) return;
+		if (isSendDisabled || submissionRef.current) return;
+		submissionRef.current = true;
 		const prompt = stripPromptMarker(value, searchMode).trim();
 		const submittedFiles = [...files];
 		const submittedSearchMode = searchMode;
@@ -131,6 +133,8 @@ export function PromptBar({
 			setSearchMode(submittedSearchMode);
 			setValue(`${promptMarker(submittedSearchMode)}${prompt}`);
 			onFilesSelect(submittedFiles);
+		} finally {
+			submissionRef.current = false;
 		}
 	}
 
