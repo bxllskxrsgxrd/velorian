@@ -66,4 +66,21 @@ describe('MessageBubble actions', () => {
 		fireEvent.click(screen.getByRole('button', { name: 'Поставить рейтинг 5 из 5' }));
 		expect(onRate).toHaveBeenCalledWith(5, undefined);
 	});
+
+	it('offers generated files for Knowledge and reflects duplicate state', () => {
+		const onAdd = vi.fn();
+		const { rerender } = render(<MessageBubble
+			message={{ id: 'assistant-file', role: 'assistant', content: 'Готово', status: 'done', attachments: [{ id: 'file-1', name: 'script.js', size: 10, type: 'text/javascript', url: '/file', isImage: false, generated: true }] }}
+			onOpenAttachment={vi.fn()}
+			onAddFileToKnowledge={onAdd}
+	/>);
+		fireEvent.click(screen.getByRole('button', { name: 'Добавить в базу знаний' }));
+		expect(onAdd).toHaveBeenCalledWith(expect.objectContaining({ id: 'file-1' }));
+		rerender(<MessageBubble
+			message={{ id: 'assistant-file', role: 'assistant', content: 'Готово', status: 'done', attachments: [{ id: 'file-1', name: 'script.js', size: 10, type: 'text/javascript', url: '/file', isImage: false, generated: true, knowledgeItemId: 'knowledge-1' }] }}
+			onOpenAttachment={vi.fn()}
+			onAddFileToKnowledge={onAdd}
+	/>);
+		expect(screen.getByRole('button', { name: 'В базе знаний' })).toBeDisabled();
+	});
 });

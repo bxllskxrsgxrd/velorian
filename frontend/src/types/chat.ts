@@ -14,6 +14,7 @@ export type ChatAttachment = {
 	isImage: boolean;
 	extractionStatus?: 'ready' | 'empty' | 'ocr_unavailable' | 'unsupported' | 'generated';
 	generated?: boolean;
+	knowledgeItemId?: string | null;
 };
 
 export type ChatMessageStatus = (typeof CHAT_MESSAGE_STATUSES)[keyof typeof CHAT_MESSAGE_STATUSES];
@@ -49,6 +50,31 @@ export type KnowledgeApproach = {
 	slug: string;
 	createdAt: string;
 	updatedAt: string;
+};
+
+export type KnowledgeFilterOption = {
+	id: string;
+	value: string;
+	normalizedValue: string;
+};
+
+export type KnowledgeFilterDefinition = {
+	id: string;
+	name: string;
+	slug: string;
+	type: 'single_select';
+	isSystem: boolean;
+	options: KnowledgeFilterOption[];
+	createdAt: string;
+	updatedAt: string;
+};
+
+export type KnowledgeItemFilter = {
+	filterId: string;
+	filterName: string;
+	filterSlug: string;
+	optionId: string;
+	value: string;
 };
 
 export type ChatMessage = {
@@ -96,7 +122,7 @@ export type AuthUser = {
 
 export type KnowledgeItem = {
 	id: string;
-	sourceType: 'assistant_message' | 'uploaded_file' | 'manual' | 'rated_content';
+	sourceType: 'assistant_message' | 'assistant_generated_file' | 'uploaded_file' | 'manual' | 'rated_content';
 	sourceMessageId?: string | null;
 	sourceFileId?: string | null;
 	title: string;
@@ -105,6 +131,7 @@ export type KnowledgeItem = {
 	originalFilename?: string | null;
 	rating: number | null;
 	approach: KnowledgeApproach | null;
+	filters: KnowledgeItemFilter[];
 	isActive: boolean;
 	metadata: Record<string, unknown>;
 	createdAt: string;

@@ -10,7 +10,7 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .models import KnowledgeApproach, KnowledgeItem
+from .models import KnowledgeItem, KnowledgeItemFilterValue
 
 
 logger = logging.getLogger("velorian")
@@ -27,71 +27,20 @@ def normalize_text(value: str) -> str:
 
 
 def search_terms(value: str) -> list[str]:
-	return [term for term in TOKEN_PATTERN.findall(normalize_text(value)) if len(term) > 2 and term not in STOP_WORDS and not term.startswith("подход")]
-
-
-def detect_knowledge_intent(query: str, *, explicit_search: bool) -> KnowledgeIntent:
-	normalized = normalize_text(query)
-	repository_reference = re.search(
-		r"(?:\bбд\b|\bбаз(?:а|е|у|ы|ой)\b(?:\s+знан\w*)?|knowledge\s+base|сохран\w*\s+(?:данн\w*|материал\w*|запис\w*|документ\w*)|ячейк\w*)",
-		normalized,
-	)
-	browse_language = re.search(
-		r"(?:\bвсе\b|\bчто\b|\bкакие\b|\bсколько\b|вид\w*|доступ\w*|покаж\w*|перечисл\w*|содерж\w*|наход\w*|\bесть\b|ячейк\w*)",
-		normalized,
-	)
-	generic_inventory = re.search(r"(?:данн\w*|материал\w*|запис\w*|документ\w*|ячейк\w*)", normalized)
-	inventory_request = re.search(
-		r"(?:\bвсе\b|доступ\w*|сохран\w*|вид\w*|покаж\w*|перечисл\w*|содерж\w*|наход\w*|\bсколько\b|ячейк\w*)",
-		normalized,
-	)
-	if repository_reference and browse_language:
-		return "list"
-	if explicit_search and browse_language and generic_inventory and inventory_request:
-		return "list"
-	return "search"
+	return [term for term in TOKEN_PATTERN.findall(normalize_text(value)) if len(term) > 2 and term not in STOP_WORDS ]
 
 
 @dataclass(frozen=True)
 class KnowledgeSearchOptions:
 	query: str
 	limit: int = 4
+	filter_option_ids: tuple[str, ...] = ()
+	resolved_filters: tuple[tuple[str, str], ...] = ()
+	unresolved_filters: tuple[tuple[str, str], ...] = ()
 	approach_id: str | None = None
 	approach_name: str | None = None
 	requested_approach: str | None = None
 	approach_exists: bool | None = None
-
-
-@dataclass(frozen=True)
-class KnowledgeQueryResolution:
-	intent: KnowledgeIntent
-	options: KnowledgeSearchOptions
-
-
-def resolve_knowledge_query(db: Session, user_id: str, query: str, *, explicit_search: bool, limit: int = 4) -> KnowledgeQueryResolution:
-	normalized_query = normalize_text(query)
-	approaches = list(db.scalars(select(KnowledgeApproach).where(KnowledgeApproach.user_id == user_id)))
-	matched = [item for item in approaches if re.search(rf"(?<!\w){re.escape(normalize_text(item.name))}(?!\w)", normalized_query)]
-	approach = max(matched, key=lambda item: len(normalize_text(item.name))) if matched else None
-	# Only the singular forms denote a named approach. The plural in questions such
-	# as "Какие подходы есть для Facebook?" describes content, not a filter.
-	explicit_match = re.search(r"(?:по\s+|для\s+)?подход(?:а|е|у|ом)?\s+([^?.,!]+)", normalized_query)
-	requested = approach.name if approach else " ".join(explicit_match.group(1).split()) if explicit_match else None
-	approach_exists = True if approach else False if requested else None
-	intent = detect_knowledge_intent(query, explicit_search=explicit_search)
-	if approach and re.search(
-		r"(?:\bчто\b|\bкакие\b|\bесть\b|покаж\w*|перечисл\w*|\bсписок\b|дай\s+(?:мне\s+)?(?:данн\w*|информац\w*|материал\w*))",
-		normalized_query,
-	):
-		intent = "list"
-	return KnowledgeQueryResolution(intent, KnowledgeSearchOptions(
-		query=query,
-		limit=20 if intent == "list" else limit,
-		approach_id=approach.id if approach else None,
-		approach_name=approach.name if approach else None,
-		requested_approach=requested,
-		approach_exists=approach_exists,
-	))
 
 
 @dataclass(frozen=True)
@@ -116,6 +65,8 @@ class KnowledgeRetrievalResult:
 	requested_approach: str | None = None
 	approach_exists: bool | None = None
 	fallback_used: bool = False
+	resolved_filters: tuple[tuple[str, str], ...] = ()
+	unresolved_filters: tuple[tuple[str, str], ...] = ()
 
 
 def _empty_result(mode: KnowledgeIntent, options: KnowledgeSearchOptions, owned_count: int, active_count: int, candidate_count: int, reason: str) -> KnowledgeRetrievalResult:
@@ -124,6 +75,7 @@ def _empty_result(mode: KnowledgeIntent, options: KnowledgeSearchOptions, owned_
 		candidate_count=candidate_count, matched_count=0, reason=reason,
 		approach_id=options.approach_id, approach_name=options.approach_name,
 		requested_approach=options.requested_approach, approach_exists=options.approach_exists,
+		resolved_filters=options.resolved_filters, unresolved_filters=options.unresolved_filters,
 	)
 
 
@@ -138,15 +90,23 @@ class TextKnowledgeRetriever(KnowledgeRetriever):
 	def search(self, db: Session, user_id: str, options: KnowledgeSearchOptions) -> KnowledgeRetrievalResult:
 		owned_count = db.scalar(select(func.count()).select_from(KnowledgeItem).where(KnowledgeItem.user_id == user_id)) or 0
 		active_count = db.scalar(select(func.count()).select_from(KnowledgeItem).where(KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True))) or 0
+		if options.unresolved_filters:
+			return _empty_result("search", options, owned_count, active_count, 0, "unresolved_filters")
 		if options.approach_exists is False:
 			return _empty_result("search", options, owned_count, active_count, 0, "approach_not_found")
 		conditions = [KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True)]
 		if options.approach_id:
 			conditions.append(KnowledgeItem.approach_id == options.approach_id)
+		for option_id in options.filter_option_ids:
+			conditions.append(KnowledgeItem.filter_values.any(
+				KnowledgeItemFilterValue.filter_option_id == option_id,
+			))
 		items = list(db.scalars(select(KnowledgeItem).where(*conditions).order_by(KnowledgeItem.updated_at.desc()).limit(300)))
 		if not items:
-			return _empty_result("search", options, owned_count, active_count, 0, "no_active_items_for_approach" if options.approach_id else "no_active_items")
+			return _empty_result("search", options, owned_count, active_count, 0, "no_active_items_for_filters" if options.filter_option_ids else "no_active_items_for_approach" if options.approach_id else "no_active_items")
 		terms = search_terms(options.query)
+		filter_terms = {term for _, value in options.resolved_filters for term in search_terms(value)}
+		terms = [term for term in terms if term not in filter_terms]
 		if options.approach_name:
 			approach_terms = set(search_terms(options.approach_name))
 			terms = [term for term in terms if term not in approach_terms]
@@ -159,6 +119,7 @@ class TextKnowledgeRetriever(KnowledgeRetriever):
 				reason="approach_scope_only" if options.approach_id else "no_meaningful_search_terms",
 				approach_id=options.approach_id, approach_name=options.approach_name,
 				requested_approach=options.requested_approach, approach_exists=options.approach_exists,
+				resolved_filters=options.resolved_filters, unresolved_filters=options.unresolved_filters,
 			)
 
 		scored: list[KnowledgeMatch] = []
@@ -188,13 +149,17 @@ class TextKnowledgeRetriever(KnowledgeRetriever):
 				scored.append(KnowledgeMatch(item, round(score, 4), tuple(matched_terms)))
 		scored.sort(key=lambda match: match.score, reverse=True)
 		selected = scored[:options.limit]
+		if not selected and options.filter_option_ids:
+			selected_items = items[:options.limit]
+			selected = [KnowledgeMatch(item, 0.1 + (item.rating or 0) * 0.01, ()) for item in selected_items]
 		return KnowledgeRetrievalResult(
 			mode="search", items=[match.item for match in selected], matches=selected,
 			owned_items_count=owned_count, active_items_count=active_count, candidate_count=len(items),
-			matched_count=len(scored), reason="matched" if selected else "no_textual_overlap",
+			matched_count=len(scored), reason="matched" if scored else "metadata_scope_fallback" if selected else "no_textual_overlap",
 			approach_id=options.approach_id, approach_name=options.approach_name,
 			requested_approach=options.requested_approach, approach_exists=options.approach_exists,
 			fallback_used=any(match.score < 1 for match in selected),
+			resolved_filters=options.resolved_filters, unresolved_filters=options.unresolved_filters,
 		)
 
 
@@ -208,20 +173,27 @@ class KnowledgeRetrievalService:
 	def list(self, db: Session, user_id: str, options: KnowledgeSearchOptions) -> KnowledgeRetrievalResult:
 		owned_count = db.scalar(select(func.count()).select_from(KnowledgeItem).where(KnowledgeItem.user_id == user_id)) or 0
 		active_count = db.scalar(select(func.count()).select_from(KnowledgeItem).where(KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True))) or 0
+		if options.unresolved_filters:
+			return _empty_result("list", options, owned_count, active_count, 0, "unresolved_filters")
 		if options.approach_exists is False:
 			return _empty_result("list", options, owned_count, active_count, 0, "approach_not_found")
 		conditions = [KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True)]
 		if options.approach_id:
 			conditions.append(KnowledgeItem.approach_id == options.approach_id)
+		for option_id in options.filter_option_ids:
+			conditions.append(KnowledgeItem.filter_values.any(
+				KnowledgeItemFilterValue.filter_option_id == option_id,
+			))
 		items = list(db.scalars(select(KnowledgeItem).where(*conditions).order_by(KnowledgeItem.updated_at.desc()).limit(options.limit)))
 		if not items:
-			return _empty_result("list", options, owned_count, active_count, 0, "no_active_items_for_approach" if options.approach_id else "no_active_items")
+			return _empty_result("list", options, owned_count, active_count, 0, "no_active_items_for_filters" if options.filter_option_ids else "no_active_items_for_approach" if options.approach_id else "no_active_items")
 		matches = [KnowledgeMatch(item, 1.0, ()) for item in items]
 		return KnowledgeRetrievalResult(
 			mode="list", items=items, matches=matches, owned_items_count=owned_count,
 			active_items_count=active_count, candidate_count=len(items), matched_count=len(items), reason="listed",
 			approach_id=options.approach_id, approach_name=options.approach_name,
 			requested_approach=options.requested_approach, approach_exists=options.approach_exists,
+			resolved_filters=options.resolved_filters, unresolved_filters=options.unresolved_filters,
 		)
 
 	def get(self, db: Session, user_id: str, item_id: str) -> KnowledgeItem | None:
@@ -234,13 +206,15 @@ def log_knowledge_retrieval(result: KnowledgeRetrievalResult, *, user_id: str, q
 		"userId": user_id, "searchMode": search_mode, "intent": result.mode,
 		"retriever": settings.knowledge_search_driver, "approachRequested": result.requested_approach,
 		"approachId": result.approach_id, "approachExists": result.approach_exists,
+		"resolvedFilters": [{"name": name, "value": value} for name, value in result.resolved_filters],
+		"unresolvedFilters": [{"name": name, "value": value} for name, value in result.unresolved_filters],
 		"ownedItemsAvailable": result.owned_items_count, "activeItemsAvailable": result.active_items_count,
-		"candidatesAfterApproachFilter": result.candidate_count, "matched": result.matched_count,
+		"candidatesAfterMetadataFilters": result.candidate_count, "matched": result.matched_count,
 		"returned": len(result.items), "reason": result.reason, "fallbackUsed": result.fallback_used,
 		"contextAttached": context_attached,
 	}
 	if settings.app_env == "development":
-		payload["query"] = query
+		payload["queryHash"] = hashlib.sha256(query.encode("utf-8")).hexdigest()[:12]
 		payload["results"] = [
 			{"title": match.item.title, "score": match.score, "rating": match.item.rating, "sourceType": match.item.source_type}
 			for match in result.matches

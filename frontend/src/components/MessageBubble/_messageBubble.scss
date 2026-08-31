@@ -123,6 +123,20 @@
 		&:hover { background: var(--color-accent-soft-hover); }
 	}
 
+	&__attachment-knowledge {
+		flex: 0 0 auto;
+		padding: 0 12px;
+		border: 0;
+		border-left: 1px solid var(--color-border);
+		color: var(--color-accent);
+		background: transparent;
+		font: inherit;
+		font-size: 12px;
+		cursor: pointer;
+		&:hover:not(:disabled) { background: var(--color-accent-soft-hover); }
+		&:disabled { color: var(--color-text-secondary); cursor: default; }
+	}
+
 	&__attachment {
 		&-image {
 			display: block;

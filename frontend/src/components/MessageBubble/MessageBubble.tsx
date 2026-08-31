@@ -22,9 +22,10 @@ type MessageBubbleProps = {
 	onRate?: (score: number, comment?: string) => void;
 	onRemoveRating?: () => void;
 	onSaveToKnowledge?: () => void;
+	onAddFileToKnowledge?: (attachment: ChatAttachment) => void;
 };
 
-export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, branch, onRate, onRemoveRating, onSaveToKnowledge }: MessageBubbleProps) {
+export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, branch, onRate, onRemoveRating, onSaveToKnowledge, onAddFileToKnowledge }: MessageBubbleProps) {
 	const [isEditing, setIsEditing] = useState(false);
 	const [draft, setDraft] = useState(message.content);
 	const isUser = message.role === CHAT_ROLES.USER;
@@ -93,7 +94,7 @@ export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, bran
 			{hasFiles && (
 				<div className="message__files">
 					{fileAttachments?.map((attachment) => (
-						<MessageAttachment key={attachment.id} attachment={attachment} onOpen={() => onOpenAttachment(attachment)} />
+						<MessageAttachment key={attachment.id} attachment={attachment} onOpen={() => onOpenAttachment(attachment)} onAddToKnowledge={attachment.generated && !attachment.knowledgeItemId ? () => onAddFileToKnowledge?.(attachment) : undefined} />
 					))}
 				</div>
 			)}

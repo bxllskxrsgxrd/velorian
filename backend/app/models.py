@@ -27,6 +27,7 @@ class User(Base):
 	ratings: Mapped[list["MessageRating"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 	knowledge_items: Mapped[list["KnowledgeItem"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 	knowledge_approaches: Mapped[list["KnowledgeApproach"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+	knowledge_filter_definitions: Mapped[list["KnowledgeFilterDefinition"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class Conversation(Base):
@@ -156,6 +157,7 @@ class KnowledgeItem(Base):
 	approach_id: Mapped[str | None] = mapped_column(ForeignKey("knowledge_approaches.id", ondelete="SET NULL"), nullable=True, index=True)
 	source_type: Mapped[str] = mapped_column(String(32))
 	source_message_id: Mapped[str | None] = mapped_column(ForeignKey("messages.id", ondelete="SET NULL"), nullable=True)
+	source_message_ref_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 	source_file_id: Mapped[str | None] = mapped_column(ForeignKey("attachments.id", ondelete="SET NULL"), nullable=True)
 	title: Mapped[str] = mapped_column(String(255))
 	content: Mapped[str] = mapped_column(Text, default="")
@@ -173,3 +175,61 @@ class KnowledgeItem(Base):
 	approach: Mapped[KnowledgeApproach | None] = relationship(back_populates="knowledge_items", lazy="joined")
 	source_message: Mapped[Message | None] = relationship(back_populates="knowledge_items")
 	source_file: Mapped[Attachment | None] = relationship(back_populates="knowledge_items")
+	filter_values: Mapped[list["KnowledgeItemFilterValue"]] = relationship(back_populates="knowledge_item", cascade="all, delete-orphan", lazy="selectin")
+
+
+class KnowledgeFilterDefinition(Base):
+	__tablename__ = "knowledge_filter_definitions"
+	__table_args__ = (
+		UniqueConstraint("user_id", "slug", name="uq_knowledge_filter_definition_user_slug"),
+		Index("ix_knowledge_filter_definition_user_name", "user_id", "name"),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+	user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+	name: Mapped[str] = mapped_column(String(80))
+	slug: Mapped[str] = mapped_column(String(96))
+	type: Mapped[str] = mapped_column(String(24), default="single_select")
+	is_system: Mapped[bool] = mapped_column(Boolean, default=False)
+	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+	user: Mapped[User] = relationship(back_populates="knowledge_filter_definitions")
+	options: Mapped[list["KnowledgeFilterOption"]] = relationship(back_populates="definition", cascade="all, delete-orphan", lazy="selectin")
+	item_values: Mapped[list["KnowledgeItemFilterValue"]] = relationship(back_populates="definition", cascade="all, delete-orphan")
+
+
+class KnowledgeFilterOption(Base):
+	__tablename__ = "knowledge_filter_options"
+	__table_args__ = (
+		UniqueConstraint("filter_definition_id", "normalized_value", name="uq_knowledge_filter_option_definition_value"),
+		Index("ix_knowledge_filter_option_definition_value", "filter_definition_id", "normalized_value"),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+	filter_definition_id: Mapped[str] = mapped_column(ForeignKey("knowledge_filter_definitions.id", ondelete="CASCADE"), index=True)
+	value: Mapped[str] = mapped_column(String(120))
+	normalized_value: Mapped[str] = mapped_column(String(140))
+	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+	definition: Mapped[KnowledgeFilterDefinition] = relationship(back_populates="options")
+	item_values: Mapped[list["KnowledgeItemFilterValue"]] = relationship(back_populates="option", cascade="all, delete-orphan")
+
+
+class KnowledgeItemFilterValue(Base):
+	__tablename__ = "knowledge_item_filter_values"
+	__table_args__ = (
+		UniqueConstraint("knowledge_item_id", "filter_definition_id", name="uq_knowledge_item_filter_definition"),
+		Index("ix_knowledge_item_filter_lookup", "filter_definition_id", "filter_option_id", "knowledge_item_id"),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+	knowledge_item_id: Mapped[str] = mapped_column(ForeignKey("knowledge_items.id", ondelete="CASCADE"), index=True)
+	filter_definition_id: Mapped[str] = mapped_column(ForeignKey("knowledge_filter_definitions.id", ondelete="CASCADE"), index=True)
+	filter_option_id: Mapped[str] = mapped_column(ForeignKey("knowledge_filter_options.id", ondelete="CASCADE"), index=True)
+	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+	knowledge_item: Mapped[KnowledgeItem] = relationship(back_populates="filter_values")
+	definition: Mapped[KnowledgeFilterDefinition] = relationship(back_populates="item_values", lazy="joined")
+	option: Mapped[KnowledgeFilterOption] = relationship(back_populates="item_values", lazy="joined")

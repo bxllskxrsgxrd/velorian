@@ -6,9 +6,11 @@ import {
 	deleteConversation,
 	getConversation,
 	listConversations,
+	listKnowledgeFilters,
 	renameConversation,
 	removeMessageRating,
 	saveMessageToKnowledge,
+	saveGeneratedFileToKnowledge,
 	setMessageRating,
 	streamChat,
 } from '../api/chatApi';
@@ -19,6 +21,9 @@ import { MessageList } from '../components/MessageList/MessageList';
 import { PromptBar } from '../components/PromptBar/PromptBar';
 import { RequestMap } from '../components/RequestMap/RequestMap';
 import { DropZone } from '../components/ui/DropZone/DropZone';
+import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
+import { Rating } from '../components/ui/Rating/Rating';
+import { Checkbox } from '../components/ui/Checkbox/Checkbox';
 import { CHAT_MESSAGE_STATUSES } from '../constants/chatMessageStatuses';
 import { CHAT_ROLES } from '../constants/chatRoles';
 import { useDragAndDrop } from '../hooks/useDragAndDrop';
@@ -28,6 +33,7 @@ import type {
 	ChatAttachment,
 	ChatMessage,
 	ConversationSummary,
+	KnowledgeFilterDefinition,
 	PreviewFile,
 	SearchMode,
 } from '../types/chat';
@@ -95,6 +101,13 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	const sendOperationRef = useRef<Promise<void> | null>(null);
 	const [isCreatingConversation, setIsCreatingConversation] = useState(false);
 	const [promptResetSequence, setPromptResetSequence] = useState(0);
+	const [knowledgeFileDialog, setKnowledgeFileDialog] = useState<ChatAttachment | null>(null);
+	const [knowledgeFileTitle, setKnowledgeFileTitle] = useState('');
+	const [knowledgeFileRating, setKnowledgeFileRating] = useState<number | null>(null);
+	const [knowledgeFileActive, setKnowledgeFileActive] = useState(true);
+	const [knowledgeFilters, setKnowledgeFilters] = useState<KnowledgeFilterDefinition[]>([]);
+	const [knowledgeFilterOptions, setKnowledgeFilterOptions] = useState<Record<string, string>>({});
+	const [savingKnowledgeFile, setSavingKnowledgeFile] = useState(false);
 
 	const {
 		isDragging,
@@ -542,6 +555,51 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 		}
 	}
 
+	function openGeneratedFileKnowledge(attachment: ChatAttachment) {
+		setKnowledgeFileDialog(attachment);
+		setKnowledgeFileTitle(attachment.name.replace(/\.[^.]+$/, ''));
+		setKnowledgeFileRating(null);
+		setKnowledgeFileActive(true);
+		setKnowledgeFilterOptions({});
+		listKnowledgeFilters().then(setKnowledgeFilters).catch((error: unknown) => {
+			reportError('Не удалось загрузить фильтры базы знаний', error);
+			showToast(error instanceof Error ? error.message : 'Не удалось загрузить фильтры', 'error');
+		});
+	}
+
+	async function saveGeneratedFileKnowledge() {
+		if (!knowledgeFileDialog || savingKnowledgeFile || !knowledgeFileTitle.trim()) return;
+		setSavingKnowledgeFile(true);
+		try {
+			const item = await saveGeneratedFileToKnowledge(knowledgeFileDialog.id, {
+				title: knowledgeFileTitle.trim(),
+				rating: knowledgeFileRating,
+				isActive: knowledgeFileActive,
+				filterOptionIds: Object.values(knowledgeFilterOptions).filter(Boolean),
+			});
+			setMessages((current) => current.map((message) => ({
+				...message,
+				attachments: message.attachments?.map((attachment) => attachment.id === knowledgeFileDialog.id ? { ...attachment, knowledgeItemId: item.id } : attachment),
+			})));
+			setKnowledgeFileDialog(null);
+			showToast('Добавлено в базу знаний', 'success');
+		} catch (error) {
+			if (error instanceof ApiError && error.code === 'KNOWLEDGE_FILE_ALREADY_ADDED') {
+				const knowledgeItemId = typeof error.details?.knowledgeItemId === 'string' ? error.details.knowledgeItemId : 'existing';
+				setMessages((current) => current.map((message) => ({
+					...message,
+					attachments: message.attachments?.map((attachment) => attachment.id === knowledgeFileDialog.id ? { ...attachment, knowledgeItemId } : attachment),
+				})));
+				setKnowledgeFileDialog(null);
+				showToast('Файл уже в базе знаний', 'info');
+			} else {
+				showToast(error instanceof Error ? error.message : 'Не удалось добавить файл', 'error');
+			}
+		} finally {
+			setSavingKnowledgeFile(false);
+		}
+	}
+
 	function handleNewConversation() {
 		suppressInitialFallbackRef.current = true;
 		if (isGenerating) requestControllerRef.current?.abort();
@@ -683,6 +741,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 								onRate={(message, score, comment) => void handleRateMessage(message, score, comment)}
 								onRemoveRating={(message) => void handleRemoveRating(message)}
 								onSaveToKnowledge={(message) => void handleSaveToKnowledge(message)}
+								onAddFileToKnowledge={openGeneratedFileKnowledge}
 							/>
 						) : (
 							<div className="chat-page__start">
@@ -726,6 +785,29 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 				/>
 			)}
 			{previewFile && <FilePreviewModal file={previewFile} onClose={closePreview} />}
+			{knowledgeFileDialog && (
+				<ModalDialog
+					title="Добавить файл в базу знаний"
+					confirmLabel={savingKnowledgeFile ? 'Сохранение…' : 'Добавить'}
+					onClose={() => setKnowledgeFileDialog(null)}
+					onConfirm={() => void saveGeneratedFileKnowledge()}
+				>
+					<div className="knowledge-form">
+						<label>Название<input aria-label="Название элемента" value={knowledgeFileTitle} onChange={(event) => setKnowledgeFileTitle(event.target.value)} /></label>
+						<p>Файл: {knowledgeFileDialog.name}</p>
+						{knowledgeFilters.map((definition) => (
+							<label key={definition.id}>{definition.name}
+								<select aria-label={`${definition.name} файла`} value={knowledgeFilterOptions[definition.id] ?? ''} onChange={(event) => setKnowledgeFilterOptions((current) => ({ ...current, [definition.id]: event.target.value }))}>
+									<option value="">Не выбрано</option>
+									{definition.options.map((option) => <option key={option.id} value={option.id}>{option.value}</option>)}
+								</select>
+							</label>
+						))}
+						<label>Рейтинг (необязательно)<Rating value={knowledgeFileRating} onChange={setKnowledgeFileRating} ariaLabel="Рейтинг файла" /></label>
+						<Checkbox checked={knowledgeFileActive} onChange={setKnowledgeFileActive} label="Использовать" />
+					</div>
+				</ModalDialog>
+			)}
 		</div>
 	);
 }

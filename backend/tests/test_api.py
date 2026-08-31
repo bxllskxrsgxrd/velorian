@@ -49,6 +49,16 @@ class ContextRejectingCompletions(RecordingCompletions):
 		return await FakeCompletions.create(self, **kwargs)
 
 
+def install_structured_intents(monkeypatch, main_module, resolver):
+	from app.agent_intent import AgentIntent
+
+	async def resolve(_db, _user_id, prompt, **_kwargs):
+		payload = resolver(prompt)
+		return AgentIntent(**payload)
+
+	monkeypatch.setattr(main_module, "resolve_agent_intent", resolve)
+
+
 def test_auth_session_and_structured_error(client):
 	unauthorized = client.get("/api/conversations")
 	assert unauthorized.status_code == 401
@@ -568,6 +578,9 @@ def test_knowledge_list_intent_browses_metadata_without_toggle(authenticated_cli
 
 	completions = RecordingCompletions()
 	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	install_structured_intents(monkeypatch, main_module, lambda prompt: {
+		"action": "knowledge_search", "knowledge_intent": "list", "knowledge_query": prompt,
+	})
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Список знаний"}).json()["conversation"]["id"]
 
 	authenticated_client.post(
@@ -590,7 +603,7 @@ def test_knowledge_list_intent_browses_metadata_without_toggle(authenticated_cli
 	)
 	list_context = completions.calls[1]["messages"][-1]["content"]
 	assert "Mode: list" in list_context
-	assert "Source: Facebook Hooks" in list_context
+	assert "Title: Facebook Hooks" in list_context
 	assert "Rating: 5/5" in list_context
 	assert "curiosity angle" in list_context
 	assert "user_id" not in list_context
@@ -610,6 +623,9 @@ def test_knowledge_list_intent_is_owner_scoped(client, monkeypatch):
 
 	completions = RecordingCompletions()
 	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	install_structured_intents(monkeypatch, main_module, lambda prompt: {
+		"action": "knowledge_search", "knowledge_intent": "list", "knowledge_query": prompt,
+	})
 	conversation_id = client.post("/api/conversations", json={"title": "Изоляция списка"}).json()["conversation"]["id"]
 	client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Что находится в моей базе знаний?"})
 	context = completions.calls[0]["messages"][-1]["content"]
@@ -620,10 +636,13 @@ def test_knowledge_list_intent_is_owner_scoped(client, monkeypatch):
 
 def test_three_active_items_retrieval_browse_toggle_and_sources(authenticated_client, monkeypatch):
 	import app.main as main_module
-	from app.knowledge_retrieval import detect_knowledge_intent
 
 	completions = RecordingCompletions()
 	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	browse_prompts = {"что ты видишь в бд?", "напиши про все доступные тебе данные", "там три ячейки есть с данными"}
+	install_structured_intents(monkeypatch, main_module, lambda prompt: {
+		"action": "knowledge_search", "knowledge_intent": "list" if prompt in browse_prompts else "search", "knowledge_query": prompt,
+	})
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Полный retrieval"}).json()["conversation"]["id"]
 	created = [
 		authenticated_client.post("/api/knowledge", json={
@@ -645,7 +664,7 @@ def test_three_active_items_retrieval_browse_toggle_and_sources(authenticated_cl
 	search_context = completions.calls[-1]["messages"][-1]["content"]
 	assert "Status: found" in search_context
 	assert "Active items: 3" in search_context
-	assert "Source: Facebook Hooks" in search_context
+	assert "Title: Facebook Hooks" in search_context
 	assert "Rating: 1/5" in search_context
 	assert "Italy Advertorial" not in search_context
 	assert "user_id" not in search_context
@@ -653,11 +672,10 @@ def test_three_active_items_retrieval_browse_toggle_and_sources(authenticated_cl
 	conversation = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]
 	sources = conversation["messages"][-1]["knowledgeSources"]
 	assert sources == [{
-		"id": created[0]["id"], "title": "Facebook Hooks", "sourceType": "manual", "rating": 1, "approach": None,
+		"id": created[0]["id"], "title": "Facebook Hooks", "sourceType": "manual", "rating": 1, "approach": None, "filters": [],
 	}]
 
 	for prompt in ("что ты видишь в бд?", "напиши про все доступные тебе данные", "там три ячейки есть с данными"):
-		assert detect_knowledge_intent(prompt, explicit_search=True) == "list"
 		authenticated_client.post(
 			f"/api/conversations/{conversation_id}/stream",
 			data={"prompt": prompt, "search_mode": "knowledge"},
@@ -665,9 +683,7 @@ def test_three_active_items_retrieval_browse_toggle_and_sources(authenticated_cl
 		browse_context = completions.calls[-1]["messages"][-1]["content"]
 		assert "Mode: list" in browse_context
 		assert "Active items: 3" in browse_context
-		assert all(f"Source: {item['title']}" in browse_context for item in created)
-	assert detect_knowledge_intent("Что агент видит в базе?", explicit_search=False) == "list"
-	assert detect_knowledge_intent("Какие данные по Facebook?", explicit_search=True) == "search"
+		assert all(f"Title: {item['title']}" in browse_context for item in created)
 
 	authenticated_client.patch(f"/api/knowledge/{created[0]['id']}", json={"is_active": False})
 	authenticated_client.post(
@@ -684,7 +700,7 @@ def test_three_active_items_retrieval_browse_toggle_and_sources(authenticated_cl
 		f"/api/conversations/{conversation_id}/stream",
 		data={"prompt": "Facebook curiosity", "search_mode": "knowledge"},
 	)
-	assert "Source: Facebook Hooks" in completions.calls[-1]["messages"][-1]["content"]
+	assert "Title: Facebook Hooks" in completions.calls[-1]["messages"][-1]["content"]
 
 
 def test_lower_rating_keeps_saved_knowledge_active(authenticated_client, monkeypatch):
@@ -765,6 +781,15 @@ def test_dynamic_approach_resolver_scopes_context_and_distinguishes_empty(authen
 		"approach_id": approaches["Шоу"]["id"],
 	})
 	empty = authenticated_client.post("/api/knowledge/approaches", json={"name": "Документалистика"}).json()["item"]
+	approach_filter = next(item for item in authenticated_client.get("/api/knowledge/filters").json()["items"] if item["name"] == "Подход")
+	option_ids = {option["value"]: option["id"] for option in approach_filter["options"]}
+	install_structured_intents(monkeypatch, main_module, lambda prompt: {
+		"action": "knowledge_search",
+		"knowledge_intent": "list" if prompt.startswith("Что") else "search",
+		"knowledge_query": prompt,
+		"filter_option_ids": [option_ids["Интервью"]] if "Интервью" in prompt else [option_ids["Шоу"]] if "Шоу" in prompt else [option_ids["Документалистика"]] if "Документалистика" in prompt else [],
+		"unresolved_filters": [{"filterName": "Подход", "value": "Несуществующий"}] if "Несуществующий" in prompt else [],
+	})
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Подходы"}).json()["conversation"]["id"]
 
 	auto = authenticated_client.post(
@@ -773,8 +798,8 @@ def test_dynamic_approach_resolver_scopes_context_and_distinguishes_empty(authen
 	)
 	assert auto.status_code == 200
 	context = completions.calls[-1]["messages"][-1]["content"]
-	assert "Filter: Approach = Интервью" in context
-	assert "Source: Начало интервью" in context
+	assert "Filter: Подход = Интервью" in context
+	assert "Title: Начало интервью" in context
 	assert "Начало шоу" not in context
 
 	browse = authenticated_client.post(
@@ -784,8 +809,8 @@ def test_dynamic_approach_resolver_scopes_context_and_distinguishes_empty(authen
 	assert browse.status_code == 200
 	context = completions.calls[-1]["messages"][-1]["content"]
 	assert "Mode: list" in context
-	assert "Filter: Approach = Шоу" in context
-	assert "Source: Начало шоу" in context
+	assert "Filter: Подход = Шоу" in context
+	assert "Title: Начало шоу" in context
 	assert "Начало интервью" not in context
 
 	unknown = authenticated_client.post(
@@ -793,13 +818,138 @@ def test_dynamic_approach_resolver_scopes_context_and_distinguishes_empty(authen
 		data={"prompt": "Что есть для подхода Несуществующий?", "search_mode": "none"},
 	)
 	assert unknown.status_code == 200
-	assert "Status: approach_not_found" in completions.calls[-1]["messages"][-1]["content"]
+	assert "Status: unresolved_filters" in completions.calls[-1]["messages"][-1]["content"]
 	empty_response = authenticated_client.post(
 		f"/api/conversations/{conversation_id}/stream",
 		data={"prompt": f"Что есть по {empty['name']}?", "search_mode": "none"},
 	)
 	assert empty_response.status_code == 200
-	assert "Status: approach_empty" in completions.calls[-1]["messages"][-1]["content"]
+	assert "Status: filters_empty" in completions.calls[-1]["messages"][-1]["content"]
+
+
+def test_manual_knowledge_is_markdown_without_title_duplication(authenticated_client):
+	content = "**1. Тихий вечер**\n\nОсновной текст."
+	created = authenticated_client.post("/api/knowledge", json={
+		"title": "Тихий вечер", "content": content,
+	})
+	assert created.status_code == 200
+	item = created.json()["item"]
+	assert item["title"] == "Тихий вечер"
+	assert item["content"] == content
+	assert item["mimeType"] == "text/markdown"
+	assert item["originalFilename"].endswith(".md")
+	assert not item["content"].startswith("# Тихий вечер")
+	reloaded = authenticated_client.get(f"/api/knowledge/{item['id']}").json()["item"]
+	assert reloaded["content"] == content
+	updated_content = "\n# Вступление\n\nТекст с пользовательским заголовком.\n"
+	updated = authenticated_client.patch(f"/api/knowledge/{item['id']}", json={
+		"title": "Новый тихий вечер", "content": updated_content,
+	}).json()["item"]
+	assert updated["content"] == updated_content
+	assert updated["originalFilename"] != item["originalFilename"]
+	assert updated["originalFilename"].endswith(f"-{item['id'][:8]}.md")
+
+
+def test_generated_file_can_be_linked_to_knowledge_with_metadata(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(
+		"```file:script.js\nconsole.log('Velorian');\n```\n\nФайл готов.",
+	)))
+	geo = authenticated_client.post("/api/knowledge/filters", json={"name": "ГЕО"}).json()["item"]
+	brazil = authenticated_client.post(f"/api/knowledge/filters/{geo['id']}/options", json={"value": "Бразилия"}).json()["item"]
+	approach = next(item for item in authenticated_client.get("/api/knowledge/filters").json()["items"] if item["name"] == "Подход")
+	interview = next(option for option in approach["options"] if option["value"] == "Интервью")
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Файл в знания"}).json()["conversation"]["id"]
+	stream = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream", data={"prompt": "Создай файл script.js"},
+	)
+	done = next(json.loads(line) for line in stream.text.splitlines() if '"type": "done"' in line)
+	attachment = done["message"]["attachments"][0]
+
+	created = authenticated_client.post(f"/api/knowledge/generated-files/{attachment['id']}", json={
+		"title": "Скрипт Velorian", "rating": 5, "is_active": True,
+		"filter_option_ids": [interview["id"], brazil["id"]],
+	})
+	assert created.status_code == 200
+	item = created.json()["item"]
+	assert item["sourceType"] == "assistant_generated_file"
+	assert item["sourceFileId"] == attachment["id"]
+	assert item["sourceMessageId"] == done["message"]["id"]
+	assert item["content"] == "console.log('Velorian');"
+	assert {(value["filterName"], value["value"]) for value in item["filters"]} == {
+		("Подход", "Интервью"), ("ГЕО", "Бразилия"),
+	}
+	assert authenticated_client.get(item["downloadUrl"]).content == b"console.log('Velorian');"
+	duplicate = authenticated_client.post(f"/api/knowledge/generated-files/{attachment['id']}", json={
+		"title": "Повтор", "filter_option_ids": [],
+	})
+	assert duplicate.status_code == 409
+	assert duplicate.json()["error"]["code"] == "KNOWLEDGE_FILE_ALREADY_ADDED"
+	second = authenticated_client.post("/api/auth/register", json={
+		"email": "generated-file-isolation@example.com", "password": "strong-password",
+	})
+	authenticated_client.headers.update({"X-CSRF-Token": second.json()["csrfToken"]})
+	assert authenticated_client.post(f"/api/knowledge/generated-files/{attachment['id']}", json={
+		"title": "Чужой файл", "filter_option_ids": [],
+	}).status_code == 404
+
+
+def test_dynamic_metadata_filters_use_and_semantics_and_enforce_ownership(authenticated_client, monkeypatch):
+	geo = authenticated_client.post("/api/knowledge/filters", json={"name": "ГЕО"}).json()["item"]
+	brazil = authenticated_client.post(f"/api/knowledge/filters/{geo['id']}/options", json={"value": "Бразилия"}).json()["item"]
+	italy = authenticated_client.post(f"/api/knowledge/filters/{geo['id']}/options", json={"value": "Италия"}).json()["item"]
+	approach = next(item for item in authenticated_client.get("/api/knowledge/filters").json()["items"] if item["name"] == "Подход")
+	interview = next(option for option in approach["options"] if option["value"] == "Интервью")
+	show = next(option for option in approach["options"] if option["value"] == "Шоу")
+	item_a = authenticated_client.post("/api/knowledge", json={
+		"title": "A", "content": "Бразильское интервью", "filter_option_ids": [brazil["id"], interview["id"]],
+	}).json()["item"]
+	authenticated_client.post("/api/knowledge", json={
+		"title": "B", "content": "Итальянское шоу", "filter_option_ids": [italy["id"], show["id"]],
+	})
+	filtered = authenticated_client.get("/api/knowledge", params=[
+		("filter_option_id", brazil["id"]), ("filter_option_id", interview["id"]),
+	])
+	assert [item["id"] for item in filtered.json()["items"]] == [item_a["id"]]
+	import app.main as main_module
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	install_structured_intents(monkeypatch, main_module, lambda prompt: {
+		"action": "knowledge_search", "knowledge_intent": "search", "knowledge_query": "материалы",
+		"filter_option_ids": [brazil["id"], interview["id"]],
+	})
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "AND metadata"}).json()["conversation"]["id"]
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={
+		"prompt": "дай материалы для Бразилии по интервью",
+	})
+	context = completions.calls[-1]["messages"][-1]["content"]
+	assert "Title: A" in context
+	assert "Title: B" not in context
+
+	offer = authenticated_client.post("/api/knowledge/filters", json={"name": "Оффер"}).json()["item"]
+	alpha = authenticated_client.post(f"/api/knowledge/filters/{offer['id']}/options", json={"value": "Alpha"}).json()["item"]
+	renamed_offer = authenticated_client.patch(f"/api/knowledge/filters/{offer['id']}", json={"name": "Продукт"})
+	assert renamed_offer.status_code == 200
+	assert renamed_offer.json()["item"]["name"] == "Продукт"
+	renamed_alpha = authenticated_client.patch(f"/api/knowledge/filters/{offer['id']}/options/{alpha['id']}", json={"value": "Beta"})
+	assert renamed_alpha.status_code == 200
+	assert renamed_alpha.json()["item"]["value"] == "Beta"
+	assert authenticated_client.delete(f"/api/knowledge/filters/{offer['id']}/options/{alpha['id']}").status_code == 204
+	assert authenticated_client.delete(f"/api/knowledge/filters/{offer['id']}").status_code == 204
+
+	second = authenticated_client.post("/api/auth/register", json={
+		"email": "filter-isolation@example.com", "password": "strong-password",
+	})
+	authenticated_client.headers.update({"X-CSRF-Token": second.json()["csrfToken"]})
+	foreign = authenticated_client.post("/api/knowledge", json={
+		"title": "Чужой option", "content": "Запрещено", "filter_option_ids": [brazil["id"]],
+	})
+	assert foreign.status_code == 422
+	assert foreign.json()["error"]["code"] == "INVALID_KNOWLEDGE_FILTER_OPTION"
+	assert authenticated_client.patch(f"/api/knowledge/filters/{geo['id']}", json={"name": "Чужой"}).status_code == 404
+	assert authenticated_client.post(f"/api/knowledge/filters/{geo['id']}/options", json={"value": "Франция"}).status_code == 404
+	assert authenticated_client.delete(f"/api/knowledge/filters/{geo['id']}/options/{brazil['id']}").status_code == 404
 
 
 def test_csrf_rejects_missing_invalid_and_rotated_tokens(client):

@@ -23,11 +23,10 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	await expect(dialog.locator('.rating__star--active')).toHaveCount(3);
 	await dialog.getByLabel('Название').fill('Проверенный оффер');
 	await dialog.getByLabel('Содержимое').fill('Текст для внутренней базы знаний');
-	await dialog.getByRole('button', { name: 'Создать новый подход' }).click();
-	await dialog.getByLabel('Название нового подхода').fill('UGC-разбор');
-	await dialog.getByRole('button', { name: 'Создать', exact: true }).click();
+	await dialog.getByLabel('Новое значение Подход').fill('UGC-разбор');
+	await dialog.locator('.knowledge-form__metadata-row').filter({ hasText: 'Подход' }).getByRole('button', { name: 'Добавить' }).click();
 	await dialog.getByRole('button', { name: 'Поставить рейтинг 3 из 5' }).click();
-	await dialog.getByRole('button', { name: 'Добавить' }).click();
+	await dialog.locator('.modal-dialog__confirm').click();
 	await expect(page.getByText('Проверенный оффер')).toBeVisible();
 	await expect(page.getByRole('img', { name: /Рейтинг Проверенный оффер: 3 из 5/ })).toBeVisible();
 	await expect(page.getByText('3/5')).toBeVisible();
@@ -63,6 +62,28 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	await expect(page.getByRole('button', { name: 'Сбросить' })).toBeDisabled();
 });
 
+test('creates a custom filter, preserves Markdown and renders preview without duplicating title', async ({ page }) => {
+	await installMockApi(page);
+	await page.goto('/knowledge');
+	await page.getByRole('button', { name: '+ Добавить фильтр' }).click();
+	await page.getByLabel('Название нового фильтра').fill('ГЕО');
+	await page.locator('.knowledge-page__filter-creator').getByRole('button', { name: 'Создать' }).click();
+	await page.getByRole('button', { name: 'Добавить данные' }).click();
+	const dialog = page.getByRole('dialog');
+	await dialog.getByLabel('Название').fill('Тихий вечер');
+	await dialog.getByLabel('Содержимое').fill('**1. Тихий вечер**\n\nОсновной текст.');
+	await dialog.getByLabel('Новое значение ГЕО').fill('Бразилия');
+	await dialog.locator('.knowledge-form__metadata-row').filter({ hasText: 'ГЕО' }).getByRole('button', { name: 'Добавить' }).click();
+	await dialog.getByRole('button', { name: 'Предпросмотр' }).click();
+	await expect(dialog.locator('strong').filter({ hasText: '1. Тихий вечер' })).toBeVisible();
+	await dialog.locator('.modal-dialog__confirm').click();
+	await expect(page.getByText('ГЕО: Бразилия')).toBeVisible();
+	await page.getByRole('button', { name: 'Редактировать' }).click();
+	const edit = page.getByRole('dialog');
+	await expect(edit.getByLabel('Название')).toHaveValue('Тихий вечер');
+	await expect(edit.getByLabel('Содержимое')).toHaveValue('**1. Тихий вечер**\n\nОсновной текст.');
+});
+
 test('agent can browse and search the current user knowledge through chat', async ({ page }) => {
 	await installMockApi(page);
 	await page.goto('/knowledge');
@@ -70,7 +91,7 @@ test('agent can browse and search the current user knowledge through chat', asyn
 	const dialog = page.getByRole('dialog');
 	await dialog.getByLabel('Название').fill('Facebook Hooks');
 	await dialog.getByLabel('Содержимое').fill('Для health-офферов используем curiosity angle.');
-	await dialog.getByRole('button', { name: 'Добавить' }).click();
+	await dialog.locator('.modal-dialog__confirm').click();
 
 	await page.getByRole('button', { name: 'Новый чат' }).click();
 	await page.getByRole('textbox', { name: 'Введите запрос' }).fill('Что находится в моей базе знаний?');

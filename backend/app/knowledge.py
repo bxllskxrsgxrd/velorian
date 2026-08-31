@@ -22,7 +22,10 @@ from .database import get_db
 from .errors import AppError
 from .file_processing import extract_text, validate_file_name
 from .knowledge_retrieval import KnowledgeRetrievalResult, KnowledgeSearchOptions, knowledge_retrieval_service
-from .models import Attachment, Conversation, KnowledgeApproach, KnowledgeItem, Message, MessageRating, User, utc_now
+from .models import (
+	Attachment, Conversation, KnowledgeApproach, KnowledgeFilterDefinition, KnowledgeFilterOption,
+	KnowledgeItem, KnowledgeItemFilterValue, Message, MessageRating, User, new_id, utc_now,
+)
 from .storage import build_storage_key, get_file_storage
 
 
@@ -37,6 +40,7 @@ class KnowledgeCreatePayload(BaseModel):
 	is_active: bool = True
 	rating: RatingValue | None = None
 	approach_id: str | None = Field(default=None, max_length=36)
+	filter_option_ids: list[str] = Field(default_factory=list, max_length=50)
 
 
 class KnowledgeUpdatePayload(BaseModel):
@@ -45,18 +49,60 @@ class KnowledgeUpdatePayload(BaseModel):
 	is_active: bool | None = None
 	rating: RatingValue | None = None
 	approach_id: str | None = Field(default=None, max_length=36)
+	filter_option_ids: list[str] | None = Field(default=None, max_length=50)
 
 
 class ApproachPayload(BaseModel):
 	name: str = Field(min_length=1, max_length=80)
 
 
+class FilterDefinitionPayload(BaseModel):
+	name: str = Field(min_length=1, max_length=80)
+
+
+class FilterOptionPayload(BaseModel):
+	value: str = Field(min_length=1, max_length=120)
+
+
+class GeneratedFileKnowledgePayload(BaseModel):
+	title: str = Field(min_length=1, max_length=255)
+	is_active: bool = True
+	rating: RatingValue | None = None
+	filter_option_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
 DEFAULT_APPROACHES = (("Интервью", "интервью"), ("Шоу", "шоу"))
+APPROACH_FILTER_SLUG = "podhod"
 
 
 def normalize_approach_slug(value: str) -> str:
 	normalized = value.casefold().replace("ё", "е").strip()
 	return re.sub(r"[^\w]+", "-", normalized, flags=re.UNICODE).strip("-")[:96]
+
+
+def _markdown_filename(title: str, item_id: str) -> str:
+	base = normalize_approach_slug(title)[:72] or "knowledge"
+	return f"{base}-{item_id[:8]}.md"
+
+
+def filter_option_payload(option: KnowledgeFilterOption) -> dict:
+	return {"id": option.id, "value": option.value, "normalizedValue": option.normalized_value}
+
+
+def filter_definition_payload(definition: KnowledgeFilterDefinition) -> dict:
+	return {
+		"id": definition.id, "name": definition.name, "slug": definition.slug, "type": definition.type,
+		"isSystem": definition.is_system,
+		"options": [filter_option_payload(option) for option in sorted(definition.options, key=lambda item: item.value.casefold())],
+		"createdAt": definition.created_at.isoformat(), "updatedAt": definition.updated_at.isoformat(),
+	}
+
+
+def item_filter_payload(value: KnowledgeItemFilterValue) -> dict:
+	return {
+		"filterId": value.filter_definition_id, "filterName": value.definition.name,
+		"filterSlug": value.definition.slug, "optionId": value.filter_option_id, "value": value.option.value,
+	}
 
 
 def approach_payload(approach: KnowledgeApproach) -> dict:
@@ -74,6 +120,21 @@ def ensure_default_approaches(db: Session, user_id: str) -> None:
 	for name, slug in DEFAULT_APPROACHES:
 		if slug not in existing:
 			db.add(KnowledgeApproach(user_id=user_id, name=name, slug=slug))
+	definition = db.scalar(select(KnowledgeFilterDefinition).where(
+		KnowledgeFilterDefinition.user_id == user_id, KnowledgeFilterDefinition.slug == APPROACH_FILTER_SLUG,
+	))
+	if definition is None:
+		definition = KnowledgeFilterDefinition(
+			user_id=user_id, name="Подход", slug=APPROACH_FILTER_SLUG, type="single_select", is_system=True,
+		)
+		db.add(definition)
+		db.flush()
+	existing_options = {option.normalized_value for option in definition.options}
+	for name, normalized in DEFAULT_APPROACHES:
+		if normalized not in existing_options:
+			db.add(KnowledgeFilterOption(
+				filter_definition_id=definition.id, value=name, normalized_value=normalized,
+			))
 
 
 def owned_approach(db: Session, approach_id: str, user_id: str) -> KnowledgeApproach:
@@ -99,23 +160,82 @@ def _knowledge_search_condition(db: Session, raw_term: str):
 
 
 def knowledge_payload(item: KnowledgeItem) -> dict:
+	filters = [item_filter_payload(value) for value in item.filter_values]
+	approach_filter = next((value for value in filters if value["filterSlug"] == APPROACH_FILTER_SLUG), None)
 	return {
 		"id": item.id,
 		"sourceType": item.source_type,
-		"sourceMessageId": item.source_message_id,
+		"sourceMessageId": item.source_message_ref_id or item.source_message_id,
 		"sourceFileId": item.source_file_id,
 		"title": item.title,
 		"content": item.content,
 		"mimeType": item.mime_type,
 		"originalFilename": item.original_filename,
 		"rating": item.rating,
-		"approach": approach_payload(item.approach) if item.approach else None,
+		"approach": approach_payload(item.approach) if item.approach else (
+			{"id": approach_filter["optionId"], "name": approach_filter["value"], "slug": normalize_approach_slug(approach_filter["value"])}
+			if approach_filter else None
+		),
+		"filters": filters,
 		"isActive": item.is_active,
 		"metadata": item.item_metadata or {},
 		"createdAt": item.created_at.isoformat(),
 		"updatedAt": item.updated_at.isoformat(),
-		"downloadUrl": f"{settings.api_prefix}/knowledge/{item.id}/file" if item.storage_key or item.storage_path or item.source_file_id else None,
+		"downloadUrl": f"{settings.api_prefix}/knowledge/{item.id}/file",
 	}
+
+
+def owned_filter_definition(db: Session, definition_id: str, user_id: str) -> KnowledgeFilterDefinition:
+	definition = db.scalar(select(KnowledgeFilterDefinition).where(
+		KnowledgeFilterDefinition.id == definition_id, KnowledgeFilterDefinition.user_id == user_id,
+	))
+	if definition is None:
+		raise AppError(404, "KNOWLEDGE_FILTER_NOT_FOUND", "Фильтр не найден")
+	return definition
+
+
+def _owned_filter_options(db: Session, option_ids: list[str], user_id: str) -> list[KnowledgeFilterOption]:
+	unique_ids = list(dict.fromkeys(option_ids))
+	if not unique_ids:
+		return []
+	options = list(db.scalars(select(KnowledgeFilterOption).join(KnowledgeFilterDefinition).where(
+		KnowledgeFilterOption.id.in_(unique_ids), KnowledgeFilterDefinition.user_id == user_id,
+	)))
+	if len(options) != len(unique_ids):
+		raise AppError(422, "INVALID_KNOWLEDGE_FILTER_OPTION", "Выбранное значение фильтра недоступно")
+	if len({option.filter_definition_id for option in options}) != len(options):
+		raise AppError(422, "DUPLICATE_KNOWLEDGE_FILTER", "Для одного фильтра можно выбрать одно значение")
+	return options
+
+
+def _set_item_filters(db: Session, item: KnowledgeItem, option_ids: list[str], user_id: str) -> None:
+	options = _owned_filter_options(db, option_ids, user_id)
+	item.filter_values.clear()
+	for option in options:
+		item.filter_values.append(KnowledgeItemFilterValue(
+			filter_definition_id=option.filter_definition_id, filter_option_id=option.id,
+		))
+
+
+def _with_legacy_approach_option(db: Session, user_id: str, option_ids: list[str], approach: KnowledgeApproach | None) -> list[str]:
+	if approach is None:
+		return option_ids
+	option = db.scalar(select(KnowledgeFilterOption).join(KnowledgeFilterDefinition).where(
+		KnowledgeFilterDefinition.user_id == user_id,
+		KnowledgeFilterDefinition.slug == APPROACH_FILTER_SLUG,
+		KnowledgeFilterOption.normalized_value == approach.slug,
+	))
+	return [*option_ids, option.id] if option and option.id not in option_ids else option_ids
+
+
+def _parse_filter_option_ids(raw_value: str) -> list[str]:
+	try:
+		value = json.loads(raw_value or "[]")
+	except json.JSONDecodeError as error:
+		raise AppError(422, "INVALID_KNOWLEDGE_FILTERS", "Некорректный список фильтров") from error
+	if not isinstance(value, list) or any(not isinstance(item, str) or len(item) > 36 for item in value):
+		raise AppError(422, "INVALID_KNOWLEDGE_FILTERS", "Некорректный список фильтров")
+	return value
 
 
 def owned_knowledge_item(db: Session, item_id: str, user_id: str) -> KnowledgeItem:
@@ -137,12 +257,19 @@ def list_approaches(user: User = Depends(get_current_user), db: Session = Depend
 
 @router.post("/approaches")
 def create_approach(payload: ApproachPayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	ensure_default_approaches(db, user.id)
+	db.flush()
 	name = " ".join(payload.name.split())
 	slug = normalize_approach_slug(name)
 	if not slug:
 		raise AppError(422, "INVALID_APPROACH_NAME", "Введите название подхода")
 	item = KnowledgeApproach(user_id=user.id, name=name, slug=slug)
 	db.add(item)
+	definition = db.scalar(select(KnowledgeFilterDefinition).where(
+		KnowledgeFilterDefinition.user_id == user.id, KnowledgeFilterDefinition.slug == APPROACH_FILTER_SLUG,
+	))
+	if definition is not None and not any(option.normalized_value == slug for option in definition.options):
+		db.add(KnowledgeFilterOption(filter_definition_id=definition.id, value=name, normalized_value=slug))
 	try:
 		db.commit()
 	except IntegrityError as error:
@@ -154,10 +281,19 @@ def create_approach(payload: ApproachPayload, user: User = Depends(get_current_u
 @router.patch("/approaches/{approach_id}")
 def rename_approach(approach_id: str, payload: ApproachPayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	item = owned_approach(db, approach_id, user.id)
+	legacy_slug = item.slug
 	item.name = " ".join(payload.name.split())
 	item.slug = normalize_approach_slug(item.name)
 	if not item.slug:
 		raise AppError(422, "INVALID_APPROACH_NAME", "Введите название подхода")
+	option = db.scalar(select(KnowledgeFilterOption).join(KnowledgeFilterDefinition).where(
+		KnowledgeFilterDefinition.user_id == user.id, KnowledgeFilterDefinition.slug == APPROACH_FILTER_SLUG,
+		KnowledgeFilterOption.normalized_value == legacy_slug,
+	))
+	if option is not None:
+		option.value = item.name
+		option.normalized_value = item.slug
+		option.updated_at = utc_now()
 	item.updated_at = utc_now()
 	try:
 		db.commit()
@@ -170,11 +306,117 @@ def rename_approach(approach_id: str, payload: ApproachPayload, user: User = Dep
 @router.delete("/approaches/{approach_id}", status_code=204)
 def delete_approach(approach_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	item = owned_approach(db, approach_id, user.id)
+	option = db.scalar(select(KnowledgeFilterOption).join(KnowledgeFilterDefinition).where(
+		KnowledgeFilterDefinition.user_id == user.id, KnowledgeFilterDefinition.slug == APPROACH_FILTER_SLUG,
+		KnowledgeFilterOption.normalized_value == item.slug,
+	))
 	db.execute(update(KnowledgeItem).where(
 		KnowledgeItem.user_id == user.id,
 		KnowledgeItem.approach_id == item.id,
 	).values(approach_id=None, updated_at=utc_now()))
+	if option is not None:
+		db.delete(option)
 	db.delete(item)
+	db.commit()
+	return Response(status_code=204)
+
+
+@router.get("/filters")
+def list_filter_definitions(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	ensure_default_approaches(db, user.id)
+	db.commit()
+	definitions = list(db.scalars(select(KnowledgeFilterDefinition).where(
+		KnowledgeFilterDefinition.user_id == user.id,
+	).order_by(KnowledgeFilterDefinition.is_system.desc(), KnowledgeFilterDefinition.name.asc())))
+	return {"items": [filter_definition_payload(definition) for definition in definitions]}
+
+
+@router.post("/filters")
+def create_filter_definition(payload: FilterDefinitionPayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	name = " ".join(payload.name.split())
+	slug = normalize_approach_slug(name)
+	if not slug:
+		raise AppError(422, "INVALID_KNOWLEDGE_FILTER_NAME", "Введите название фильтра")
+	definition = KnowledgeFilterDefinition(user_id=user.id, name=name, slug=slug, type="single_select")
+	db.add(definition)
+	try:
+		db.commit()
+	except IntegrityError as error:
+		db.rollback()
+		raise AppError(409, "KNOWLEDGE_FILTER_EXISTS", "Фильтр с таким названием уже существует") from error
+	return {"item": filter_definition_payload(definition)}
+
+
+@router.patch("/filters/{definition_id}")
+def rename_filter_definition(definition_id: str, payload: FilterDefinitionPayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	definition = owned_filter_definition(db, definition_id, user.id)
+	definition.name = " ".join(payload.name.split())
+	if not definition.is_system:
+		definition.slug = normalize_approach_slug(definition.name)
+	definition.updated_at = utc_now()
+	try:
+		db.commit()
+	except IntegrityError as error:
+		db.rollback()
+		raise AppError(409, "KNOWLEDGE_FILTER_EXISTS", "Фильтр с таким названием уже существует") from error
+	return {"item": filter_definition_payload(definition)}
+
+
+@router.delete("/filters/{definition_id}", status_code=204)
+def delete_filter_definition(definition_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	definition = owned_filter_definition(db, definition_id, user.id)
+	if definition.is_system:
+		raise AppError(422, "SYSTEM_FILTER_REQUIRED", "Системный фильтр удалить нельзя")
+	db.delete(definition)
+	db.commit()
+	return Response(status_code=204)
+
+
+@router.post("/filters/{definition_id}/options")
+def create_filter_option(definition_id: str, payload: FilterOptionPayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	definition = owned_filter_definition(db, definition_id, user.id)
+	value = " ".join(payload.value.split())
+	normalized = normalize_approach_slug(value)
+	if not normalized:
+		raise AppError(422, "INVALID_KNOWLEDGE_FILTER_OPTION", "Введите значение фильтра")
+	option = KnowledgeFilterOption(filter_definition_id=definition.id, value=value, normalized_value=normalized)
+	db.add(option)
+	try:
+		db.commit()
+	except IntegrityError as error:
+		db.rollback()
+		raise AppError(409, "KNOWLEDGE_FILTER_OPTION_EXISTS", "Такое значение уже существует") from error
+	return {"item": filter_option_payload(option)}
+
+
+@router.patch("/filters/{definition_id}/options/{option_id}")
+def rename_filter_option(definition_id: str, option_id: str, payload: FilterOptionPayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	definition = owned_filter_definition(db, definition_id, user.id)
+	option = db.scalar(select(KnowledgeFilterOption).where(
+		KnowledgeFilterOption.id == option_id, KnowledgeFilterOption.filter_definition_id == definition.id,
+	))
+	if option is None:
+		raise AppError(404, "KNOWLEDGE_FILTER_OPTION_NOT_FOUND", "Значение фильтра не найдено")
+	option.value = " ".join(payload.value.split())
+	option.normalized_value = normalize_approach_slug(option.value)
+	option.updated_at = utc_now()
+	try:
+		db.commit()
+	except IntegrityError as error:
+		db.rollback()
+		raise AppError(409, "KNOWLEDGE_FILTER_OPTION_EXISTS", "Такое значение уже существует") from error
+	return {"item": filter_option_payload(option)}
+
+
+@router.delete("/filters/{definition_id}/options/{option_id}", status_code=204)
+def delete_filter_option(definition_id: str, option_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	definition = owned_filter_definition(db, definition_id, user.id)
+	option = db.scalar(select(KnowledgeFilterOption).where(
+		KnowledgeFilterOption.id == option_id, KnowledgeFilterOption.filter_definition_id == definition.id,
+	))
+	if option is None:
+		raise AppError(404, "KNOWLEDGE_FILTER_OPTION_NOT_FOUND", "Значение фильтра не найдено")
+	db.delete(option)
 	db.commit()
 	return Response(status_code=204)
 
@@ -184,6 +426,7 @@ def list_knowledge_items(
 	search: str = Query(default="", max_length=200),
 	source_type: str | None = Query(default=None, max_length=32),
 	approach_id: str | None = Query(default=None, max_length=36),
+	filter_option_id: list[str] = Query(default=[]),
 	is_active: bool | None = None,
 	min_rating: int | None = Query(default=None, ge=1, le=5),
 	unrated: bool = False,
@@ -202,6 +445,12 @@ def list_knowledge_items(
 	if approach_id:
 		owned_approach(db, approach_id, user.id)
 		statement = statement.where(KnowledgeItem.approach_id == approach_id)
+	if filter_option_id:
+		_owned_filter_options(db, filter_option_id, user.id)
+		for option_id in dict.fromkeys(filter_option_id):
+			statement = statement.where(KnowledgeItem.filter_values.any(
+				KnowledgeItemFilterValue.filter_option_id == option_id,
+			))
 	if is_active is not None:
 		statement = statement.where(KnowledgeItem.is_active == is_active)
 	if unrated:
@@ -251,16 +500,19 @@ def list_knowledge_items(
 def create_manual_knowledge_item(payload: KnowledgeCreatePayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	approach = optional_owned_approach(db, payload.approach_id, user.id)
 	item = KnowledgeItem(
+		id=new_id(),
 		user_id=user.id,
 		source_type="manual",
 		title=payload.title.strip(),
 		content=payload.content,
-		mime_type="text/plain",
+		mime_type="text/markdown",
 		is_active=payload.is_active,
 		rating=payload.rating,
 		approach=approach,
 	)
+	item.original_filename = _markdown_filename(item.title, item.id)
 	db.add(item)
+	_set_item_filters(db, item, _with_legacy_approach_option(db, user.id, payload.filter_option_ids, approach), user.id)
 	db.commit()
 	return {"item": knowledge_payload(item)}
 
@@ -272,6 +524,7 @@ async def upload_knowledge_file(
 	rating: int | None = Form(default=None, ge=1, le=5),
 	is_active: bool = Form(default=True),
 	approach_id: str | None = Form(default=None, max_length=36),
+	filter_option_ids: str = Form(default="[]"),
 	user: User = Depends(get_current_user),
 	db: Session = Depends(get_db),
 ):
@@ -303,6 +556,7 @@ async def upload_knowledge_file(
 		item_metadata={"sha256": checksum, "extractionStatus": extracted.status},
 	)
 	db.add(item)
+	_set_item_filters(db, item, _with_legacy_approach_option(db, user.id, _parse_filter_option_ids(filter_option_ids), approach), user.id)
 	db.flush()
 	storage_key = build_storage_key(user.id, "knowledge", item.id)
 	storage = get_file_storage()
@@ -336,13 +590,16 @@ def save_rated_message(message_id: str, user: User = Depends(get_current_user), 
 	message_item = db.scalar(select(KnowledgeItem).where(KnowledgeItem.user_id == user.id, KnowledgeItem.source_message_id == message.id))
 	if message_item is None:
 		message_item = KnowledgeItem(
+			id=new_id(),
 			user_id=user.id,
 			source_type="rated_content",
 			source_message_id=message.id,
 			title=(message.content.strip().splitlines()[0][:255] or "Сохранённый ответ"),
 			content=message.content,
+			mime_type="text/markdown",
 			rating=rating.score,
 		)
+		message_item.original_filename = _markdown_filename(message_item.title, message_item.id)
 		db.add(message_item)
 	else:
 		message_item.content = message.content
@@ -356,7 +613,7 @@ def save_rated_message(message_id: str, user: User = Depends(get_current_user), 
 			file_item = KnowledgeItem(
 				user_id=user.id,
 				source_type="uploaded_file",
-				source_message_id=message.id,
+				source_message_ref_id=message.id,
 				source_file_id=attachment.id,
 				title=attachment.name,
 				content=attachment.extracted_text,
@@ -373,6 +630,56 @@ def save_rated_message(message_id: str, user: User = Depends(get_current_user), 
 	return {"items": [knowledge_payload(item) for item in items]}
 
 
+@router.post("/generated-files/{attachment_id}")
+def save_generated_file(
+	attachment_id: str,
+	payload: GeneratedFileKnowledgePayload,
+	user: User = Depends(get_current_user),
+	db: Session = Depends(get_db),
+):
+	attachment = db.scalar(
+		select(Attachment)
+		.join(Conversation, Conversation.id == Attachment.conversation_id)
+		.join(Message, Message.id == Attachment.message_id)
+		.where(
+			Attachment.id == attachment_id,
+			Conversation.user_id == user.id,
+			Message.role == "assistant",
+			Attachment.extraction_status == "generated",
+		)
+	)
+	if attachment is None:
+		raise AppError(404, "GENERATED_FILE_NOT_FOUND", "Созданный агентом файл не найден")
+	existing = db.scalar(select(KnowledgeItem).where(
+		KnowledgeItem.user_id == user.id, KnowledgeItem.source_file_id == attachment.id,
+	))
+	if existing is not None:
+		raise AppError(409, "KNOWLEDGE_FILE_ALREADY_ADDED", "Файл уже находится в базе знаний", {
+			"knowledgeItemId": existing.id,
+		})
+	item = KnowledgeItem(
+		user_id=user.id,
+		source_type="assistant_generated_file",
+		source_message_ref_id=attachment.message_id,
+		source_file_id=attachment.id,
+		title=payload.title.strip(),
+		content=attachment.extracted_text,
+		mime_type=attachment.content_type,
+		original_filename=attachment.name,
+		rating=payload.rating,
+		is_active=payload.is_active,
+		item_metadata={"chatId": attachment.conversation_id, "source": "assistant_generated_file"},
+	)
+	db.add(item)
+	_set_item_filters(db, item, payload.filter_option_ids, user.id)
+	try:
+		db.commit()
+	except IntegrityError as error:
+		db.rollback()
+		raise AppError(409, "KNOWLEDGE_FILE_ALREADY_ADDED", "Файл уже находится в базе знаний") from error
+	return {"item": knowledge_payload(item)}
+
+
 @router.get("/{item_id}")
 def get_knowledge_item(item_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	return {"item": knowledge_payload(owned_knowledge_item(db, item_id, user.id))}
@@ -383,6 +690,8 @@ def update_knowledge_item(item_id: str, payload: KnowledgeUpdatePayload, user: U
 	item = owned_knowledge_item(db, item_id, user.id)
 	if payload.title is not None:
 		item.title = payload.title.strip()
+		if item.source_type in {"manual", "rated_content", "assistant_message"}:
+			item.original_filename = _markdown_filename(item.title, item.id)
 	if payload.content is not None:
 		item.content = payload.content
 	if payload.is_active is not None:
@@ -391,6 +700,14 @@ def update_knowledge_item(item_id: str, payload: KnowledgeUpdatePayload, user: U
 		item.rating = payload.rating
 	if "approach_id" in payload.model_fields_set:
 		item.approach = optional_owned_approach(db, payload.approach_id, user.id)
+		if payload.filter_option_ids is None:
+			custom_option_ids = [
+				value.filter_option_id for value in item.filter_values
+				if value.definition.slug != APPROACH_FILTER_SLUG
+			]
+			_set_item_filters(db, item, _with_legacy_approach_option(db, user.id, custom_option_ids, item.approach), user.id)
+	if payload.filter_option_ids is not None:
+		_set_item_filters(db, item, payload.filter_option_ids, user.id)
 	item.updated_at = utc_now()
 	db.commit()
 	return {"item": knowledge_payload(item)}
@@ -457,7 +774,11 @@ async def download_knowledge_file(item_id: str, user: User = Depends(get_current
 		legacy_path = Path(attachment.storage_path) if attachment.storage_path else None
 		name = attachment.name
 	else:
-		raise AppError(404, "KNOWLEDGE_FILE_NOT_FOUND", "У элемента нет файла")
+		name = item.original_filename or _markdown_filename(item.title, item.id)
+		return Response(
+			item.content.encode("utf-8"), media_type=item.mime_type,
+			headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"},
+		)
 	try:
 		content = await get_file_storage().get(storage_key) if storage_key else await asyncio.to_thread(legacy_path.read_bytes) if legacy_path else None
 	except (FileNotFoundError, OSError):

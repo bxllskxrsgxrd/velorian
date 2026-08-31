@@ -8,6 +8,7 @@ import { IconButton } from '../ui/IconButton/IconButton';
 import './_filePreviewModal.scss';
 
 const HighlightedCode = lazy(() => import('../MessageBubble/AssistantMessageContent').then((module) => ({ default: module.HighlightedCode })));
+const MarkdownPreview = lazy(() => import('../MessageBubble/AssistantMessageContent'));
 
 type FilePreviewModalProps = {
 	file: PreviewFile;
@@ -60,14 +61,17 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 
 		if (isText) {
 			const textContent = textPreview?.url === file.url ? textPreview.content : 'Загрузка…';
+			const isMarkdown = file.type === 'text/markdown' || file.name.toLowerCase().endsWith('.md');
 
 			return (
-				<Suspense fallback={<pre className="file-preview__text">{textContent}</pre>}><HighlightedCode
+				<Suspense fallback={<pre className="file-preview__text">{textContent}</pre>}>{isMarkdown ? (
+					<div className="file-preview__text"><MarkdownPreview content={textContent} isStreaming={false} /></div>
+				) : <HighlightedCode
 					code={textContent}
 					language={getFileCodeLanguage(file.name)}
 					className="file-preview__text"
 					ariaLabel={`Содержимое файла ${file.name}`}
-				/></Suspense>
+				/>}</Suspense>
 			);
 		}
 

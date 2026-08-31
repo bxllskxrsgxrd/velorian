@@ -47,7 +47,7 @@ export async function installMockApi(page: Page, options: Options = {}) {
 	let knowledge: Array<Record<string, unknown>> = options.manyKnowledge
 		? Array.from({ length: 30 }, (_, index) => ({
 			id: `knowledge-${index + 1}`, sourceType: 'manual', title: `Материал ${index + 1}`,
-			content: `Содержимое материала ${index + 1}`, mimeType: 'text/plain', rating: null, approach: null,
+			content: `Содержимое материала ${index + 1}`, mimeType: 'text/markdown', rating: null, approach: null, filters: [],
 			isActive: true, metadata: {}, createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z', downloadUrl: null,
 		}))
 		: [];
@@ -55,6 +55,17 @@ export async function installMockApi(page: Page, options: Options = {}) {
 		{ id: 'approach-interview', name: 'Интервью', slug: 'интервью', createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z' },
 		{ id: 'approach-show', name: 'Шоу', slug: 'шоу', createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z' },
 	];
+	let filterDefinitions = [{
+		id: 'filter-approach', name: 'Подход', slug: 'podhod', type: 'single_select', isSystem: true,
+		options: [
+			{ id: 'approach-interview', value: 'Интервью', normalizedValue: 'интервью' },
+			{ id: 'approach-show', value: 'Шоу', normalizedValue: 'шоу' },
+		],
+		createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z',
+	}];
+	const resolveFilters = (optionIds: string[] = []) => filterDefinitions.flatMap((definition) => definition.options
+		.filter((option) => optionIds.includes(option.id))
+		.map((option) => ({ filterId: definition.id, filterName: definition.name, filterSlug: definition.slug, optionId: option.id, value: option.value })));
 	const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
 	await page.route('**/api/**', async (route) => {
@@ -104,7 +115,9 @@ export async function installMockApi(page: Page, options: Options = {}) {
 				? `\`\`\`text\n${'очень-длинная-строка-кода-'.repeat(35)}\n\`\`\``
 				: (asksToBrowseKnowledge || usesKnowledgeSearch) && knowledgeText ? `В вашей базе знаний: ${knowledgeText}` : 'Ответ агента';
 			const userMessage = { id: `user-e2e-${Date.now()}`, role: 'user', content: 'Тестовый запрос', status: 'done', attachments: [], branchGroupId: 'user-e2e', isActive: true };
-			const assistant = { id: `assistant-e2e-${Date.now()}`, role: 'assistant', content: answer, status: 'done', attachments: [], replyToId: userMessage.id };
+			const generated = /(?:закинь|создай файл с этим скриптом|сохрани результат в файл)/iu.test(rawBody);
+			const generatedId = `generated-${Date.now()}`;
+			const assistant = { id: `assistant-e2e-${Date.now()}`, role: 'assistant', content: generated ? 'Файл подготовлен.' : answer, status: 'done', attachments: generated ? [{ id: generatedId, name: 'script.js', size: 24, type: 'text/javascript', url: `/api/attachments/${generatedId}`, downloadUrl: `/api/attachments/${generatedId}?download=true`, isImage: false, extractionStatus: 'generated', generated: true, knowledgeItemId: null }] : [], replyToId: userMessage.id };
 			messagesByConversation.set(conversationId, [...(messagesByConversation.get(conversationId) ?? []), userMessage, assistant]);
 			const conversation = conversations.find((entry) => entry.id === conversationId);
 			const stream = [
@@ -123,19 +136,40 @@ export async function installMockApi(page: Page, options: Options = {}) {
 			approaches = [...approaches, item];
 			return json(route, { item });
 		}
+		if (path === '/api/knowledge/filters' && method === 'GET') return json(route, { items: filterDefinitions });
+		if (path === '/api/knowledge/filters' && method === 'POST') {
+			const payload = request.postDataJSON() as { name: string };
+			const item = { id: `filter-${filterDefinitions.length + 1}`, name: payload.name, slug: payload.name.toLocaleLowerCase('ru'), type: 'single_select', isSystem: false, options: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+			filterDefinitions = [...filterDefinitions, item];
+			return json(route, { item });
+		}
+		const filterOptionMatch = path.match(/^\/api\/knowledge\/filters\/([^/]+)\/options$/);
+		if (filterOptionMatch && method === 'POST') {
+			const payload = request.postDataJSON() as { value: string };
+			const option = { id: `option-${Date.now()}`, value: payload.value, normalizedValue: payload.value.toLocaleLowerCase('ru') };
+			filterDefinitions = filterDefinitions.map((definition) => definition.id === filterOptionMatch[1] ? { ...definition, options: [...definition.options, option] } : definition);
+			return json(route, { item: option });
+		}
 		if (path === '/api/knowledge' && method === 'GET') {
-			const approachId = url.searchParams.get('approach_id');
-			return json(route, { items: approachId ? knowledge.filter((item) => (item.approach as { id?: string } | null)?.id === approachId) : knowledge, pageInfo: { nextCursor: null, hasMore: false } });
+			const optionIds = url.searchParams.getAll('filter_option_id');
+			return json(route, { items: optionIds.length ? knowledge.filter((item) => optionIds.every((id) => ((item.filters as Array<{ optionId: string }> | undefined) ?? []).some((value) => value.optionId === id))) : knowledge, pageInfo: { nextCursor: null, hasMore: false } });
 		}
 		if (path === '/api/knowledge' && method === 'POST') {
-			const payload = request.postDataJSON() as { title: string; content: string; rating?: number; is_active?: boolean; approach_id?: string | null };
-			const item = { id: `k${knowledge.length + 1}`, sourceType: 'manual', title: payload.title, content: payload.content, mimeType: 'text/plain', rating: payload.rating ?? null, approach: approaches.find((entry) => entry.id === payload.approach_id) ?? null, isActive: payload.is_active ?? true, metadata: {}, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), downloadUrl: null };
+			const payload = request.postDataJSON() as { title: string; content: string; rating?: number; is_active?: boolean; filter_option_ids?: string[] };
+			const item = { id: `k${knowledge.length + 1}`, sourceType: 'manual', title: payload.title, content: payload.content, mimeType: 'text/markdown', originalFilename: `knowledge-${knowledge.length + 1}.md`, rating: payload.rating ?? null, approach: null, filters: resolveFilters(payload.filter_option_ids), isActive: payload.is_active ?? true, metadata: {}, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), downloadUrl: null };
 			knowledge = [item, ...knowledge]; return json(route, { item });
+		}
+		const generatedKnowledgeMatch = path.match(/^\/api\/knowledge\/generated-files\/([^/]+)$/);
+		if (generatedKnowledgeMatch && method === 'POST') {
+			const payload = request.postDataJSON() as { title: string; rating?: number | null; is_active?: boolean; filter_option_ids?: string[] };
+			const item = { id: `k${knowledge.length + 1}`, sourceType: 'assistant_generated_file', sourceFileId: generatedKnowledgeMatch[1], title: payload.title, content: 'console.log("Velorian");', mimeType: 'text/javascript', originalFilename: 'script.js', rating: payload.rating ?? null, approach: null, filters: resolveFilters(payload.filter_option_ids), isActive: payload.is_active ?? true, metadata: {}, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), downloadUrl: `/api/attachments/${generatedKnowledgeMatch[1]}` };
+			knowledge = [item, ...knowledge];
+			return json(route, { item });
 		}
 		const knowledgeMatch = path.match(/^\/api\/knowledge\/([^/]+)$/);
 		if (knowledgeMatch && method === 'PATCH') {
 			const payload = request.postDataJSON() as Record<string, unknown>;
-			knowledge = knowledge.map((item) => item.id === knowledgeMatch[1] ? { ...item, title: payload.title ?? item.title, content: payload.content ?? item.content, rating: payload.rating === undefined ? item.rating : payload.rating, approach: payload.approach_id === undefined ? item.approach : approaches.find((entry) => entry.id === payload.approach_id) ?? null, isActive: payload.is_active ?? item.isActive, updatedAt: new Date().toISOString() } : item);
+			knowledge = knowledge.map((item) => item.id === knowledgeMatch[1] ? { ...item, title: payload.title ?? item.title, content: payload.content ?? item.content, rating: payload.rating === undefined ? item.rating : payload.rating, filters: payload.filter_option_ids === undefined ? item.filters : resolveFilters(payload.filter_option_ids as string[]), isActive: payload.is_active ?? item.isActive, updatedAt: new Date().toISOString() } : item);
 			return json(route, { item: knowledge.find((item) => item.id === knowledgeMatch[1]) });
 		}
 		if (knowledgeMatch && method === 'DELETE') { knowledge = knowledge.filter((item) => item.id !== knowledgeMatch[1]); return route.fulfill({ status: 204 }); }

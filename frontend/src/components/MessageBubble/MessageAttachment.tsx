@@ -6,9 +6,10 @@ import { DocumentIcon } from '../icons/AppIcons';
 type MessageAttachmentProps = {
 	attachment: ChatAttachment;
 	onOpen?: () => void;
+	onAddToKnowledge?: () => void;
 };
 
-export function MessageAttachment({ attachment, onOpen }: MessageAttachmentProps) {
+export function MessageAttachment({ attachment, onOpen, onAddToKnowledge }: MessageAttachmentProps) {
 	if (attachment.isImage && attachment.url) {
 		return <img className="message__attachment-image" src={attachment.url} alt={attachment.name} />;
 	}
@@ -23,6 +24,11 @@ export function MessageAttachment({ attachment, onOpen }: MessageAttachmentProps
 				</span>
 			</button>
 			<a className="message__download" href={attachment.downloadUrl ?? attachment.url} download={attachment.name} aria-label={`Скачать ${attachment.name}`} title="Скачать"><DownloadIcon /></a>
+			{attachment.generated && (
+				<button className="message__attachment-knowledge" type="button" disabled={Boolean(attachment.knowledgeItemId)} onClick={onAddToKnowledge}>
+					{attachment.knowledgeItemId ? 'В базе знаний' : 'Добавить в базу знаний'}
+				</button>
+			)}
 		</div>
 	);
 }

@@ -45,6 +45,26 @@ test('creates a chat, sends a message and rates the answer', async ({ page }) =>
 	await expect(page.getByRole('button', { name: 'Поставить рейтинг 5 из 5' })).toHaveAttribute('aria-pressed', 'true');
 });
 
+test('semantic-equivalent prompts create files and generated file saves directly to Knowledge', async ({ page }) => {
+	await installMockApi(page);
+	await page.goto('/');
+	const prompt = page.getByRole('textbox', { name: 'Введите запрос' });
+	await prompt.fill('напиши скрипт на js и закинь его в файл');
+	await page.getByRole('button', { name: 'Отправить сообщение' }).click();
+	await expect(page.getByRole('button', { name: 'Добавить в базу знаний' })).toBeVisible();
+
+	await page.getByRole('button', { name: 'Новый чат' }).click();
+	await prompt.fill('напиши скрипт на js, создай файл с этим скриптом');
+	await page.getByRole('button', { name: 'Отправить сообщение' }).click();
+	await page.getByRole('button', { name: 'Добавить в базу знаний' }).click();
+	const dialog = page.getByRole('dialog');
+	await dialog.getByLabel('Название элемента').fill('JS Script');
+	await dialog.getByLabel('Подход файла').selectOption({ label: 'Интервью' });
+	await dialog.getByRole('button', { name: 'Поставить рейтинг 5 из 5' }).click();
+	await dialog.locator('.modal-dialog__confirm').click();
+	await expect(page.getByRole('button', { name: 'В базе знаний' })).toBeDisabled();
+});
+
 test('large paste becomes a txt attachment', async ({ page }) => {
 	await installMockApi(page);
 	await page.goto('/');
