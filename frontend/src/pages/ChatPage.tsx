@@ -36,6 +36,7 @@ import type {
 	KnowledgeFilterDefinition,
 	PreviewFile,
 	SearchMode,
+	SelectedKnowledgeFilters,
 } from '../types/chat';
 import { attachmentToPreviewFile, createChatAttachment, fileToPreviewFile } from '../utils/files';
 import { reportError } from '../utils/reportError';
@@ -106,7 +107,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	const [knowledgeFileRating, setKnowledgeFileRating] = useState<number | null>(null);
 	const [knowledgeFileActive, setKnowledgeFileActive] = useState(true);
 	const [knowledgeFilters, setKnowledgeFilters] = useState<KnowledgeFilterDefinition[]>([]);
-	const [knowledgeFilterOptions, setKnowledgeFilterOptions] = useState<Record<string, string>>({});
+	const [knowledgeFilterOptions, setKnowledgeFilterOptions] = useState<SelectedKnowledgeFilters>({});
 	const [savingKnowledgeFile, setSavingKnowledgeFile] = useState(false);
 
 	const {
@@ -571,11 +572,14 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 		if (!knowledgeFileDialog || savingKnowledgeFile || !knowledgeFileTitle.trim()) return;
 		setSavingKnowledgeFile(true);
 		try {
+			const filters = Object.entries(knowledgeFilterOptions)
+				.filter(([, optionIds]) => optionIds.length > 0)
+				.map(([filterId, optionIds]) => ({ filterId, optionIds }));
 			const item = await saveGeneratedFileToKnowledge(knowledgeFileDialog.id, {
 				title: knowledgeFileTitle.trim(),
 				rating: knowledgeFileRating,
 				isActive: knowledgeFileActive,
-				filterOptionIds: Object.values(knowledgeFilterOptions).filter(Boolean),
+				filters,
 			});
 			setMessages((current) => current.map((message) => ({
 				...message,
@@ -797,8 +801,10 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 						<p>Файл: {knowledgeFileDialog.name}</p>
 						{knowledgeFilters.map((definition) => (
 							<label key={definition.id}>{definition.name}
-								<select aria-label={`${definition.name} файла`} value={knowledgeFilterOptions[definition.id] ?? ''} onChange={(event) => setKnowledgeFilterOptions((current) => ({ ...current, [definition.id]: event.target.value }))}>
-									<option value="">Не выбрано</option>
+								<select multiple aria-label={`${definition.name} файла`} value={knowledgeFilterOptions[definition.id] ?? []} onChange={(event) => {
+									const optionIds = Array.from(event.currentTarget.selectedOptions, (option) => option.value);
+									setKnowledgeFilterOptions((current) => ({ ...current, [definition.id]: optionIds }));
+								}}>
 									{definition.options.map((option) => <option key={option.id} value={option.id}>{option.value}</option>)}
 								</select>
 							</label>

@@ -21,10 +21,14 @@ from .config import settings
 from .database import get_db
 from .errors import AppError
 from .file_processing import extract_text, validate_file_name
+from .knowledge_filters import (
+	CanonicalFilterGroup, apply_filter_groups, canonicalize_filter_groups, canonicalize_option_ids,
+	normalize_filter_value, stable_filter_slug,
+)
 from .knowledge_retrieval import KnowledgeRetrievalResult, KnowledgeSearchOptions, knowledge_retrieval_service
 from .models import (
 	Attachment, Conversation, KnowledgeApproach, KnowledgeFilterDefinition, KnowledgeFilterOption,
-	KnowledgeItem, KnowledgeItemFilterValue, Message, MessageRating, User, new_id, utc_now,
+	KnowledgeFilterOptionAlias, KnowledgeItem, KnowledgeItemFilterValue, Message, MessageRating, User, new_id, utc_now,
 )
 from .storage import build_storage_key, get_file_storage
 
@@ -34,6 +38,11 @@ logger = logging.getLogger("velorian")
 RatingValue = Annotated[int, Field(strict=True, ge=1, le=5)]
 
 
+class KnowledgeFilterSelectionPayload(BaseModel):
+	filter_id: str = Field(min_length=1, max_length=36)
+	option_ids: list[str] = Field(default_factory=list, max_length=50)
+
+
 class KnowledgeCreatePayload(BaseModel):
 	title: str = Field(min_length=1, max_length=255)
 	content: str = Field(min_length=1, max_length=2_000_000)
@@ -41,6 +50,7 @@ class KnowledgeCreatePayload(BaseModel):
 	rating: RatingValue | None = None
 	approach_id: str | None = Field(default=None, max_length=36)
 	filter_option_ids: list[str] = Field(default_factory=list, max_length=50)
+	filters: list[KnowledgeFilterSelectionPayload] = Field(default_factory=list, max_length=50)
 
 
 class KnowledgeUpdatePayload(BaseModel):
@@ -50,6 +60,7 @@ class KnowledgeUpdatePayload(BaseModel):
 	rating: RatingValue | None = None
 	approach_id: str | None = Field(default=None, max_length=36)
 	filter_option_ids: list[str] | None = Field(default=None, max_length=50)
+	filters: list[KnowledgeFilterSelectionPayload] | None = Field(default=None, max_length=50)
 
 
 class ApproachPayload(BaseModel):
@@ -64,11 +75,16 @@ class FilterOptionPayload(BaseModel):
 	value: str = Field(min_length=1, max_length=120)
 
 
+class FilterAliasPayload(BaseModel):
+	value: str = Field(min_length=1, max_length=120)
+
+
 class GeneratedFileKnowledgePayload(BaseModel):
 	title: str = Field(min_length=1, max_length=255)
 	is_active: bool = True
 	rating: RatingValue | None = None
 	filter_option_ids: list[str] = Field(default_factory=list, max_length=50)
+	filters: list[KnowledgeFilterSelectionPayload] = Field(default_factory=list, max_length=50)
 
 
 DEFAULT_APPROACHES = (("Интервью", "интервью"), ("Шоу", "шоу"))
@@ -76,8 +92,7 @@ APPROACH_FILTER_SLUG = "podhod"
 
 
 def normalize_approach_slug(value: str) -> str:
-	normalized = value.casefold().replace("ё", "е").strip()
-	return re.sub(r"[^\w]+", "-", normalized, flags=re.UNICODE).strip("-")[:96]
+	return stable_filter_slug(value)
 
 
 def _markdown_filename(title: str, item_id: str) -> str:
@@ -85,15 +100,29 @@ def _markdown_filename(title: str, item_id: str) -> str:
 	return f"{base}-{item_id[:8]}.md"
 
 
-def filter_option_payload(option: KnowledgeFilterOption) -> dict:
-	return {"id": option.id, "value": option.value, "normalizedValue": option.normalized_value}
+def filter_alias_payload(alias: KnowledgeFilterOptionAlias) -> dict:
+	return {"id": alias.id, "value": alias.value, "normalizedValue": alias.normalized_value}
 
 
-def filter_definition_payload(definition: KnowledgeFilterDefinition) -> dict:
+def filter_option_payload(option: KnowledgeFilterOption, item_count: int = 0) -> dict:
 	return {
-		"id": definition.id, "name": definition.name, "slug": definition.slug, "type": definition.type,
+		"id": option.id, "value": option.value, "normalizedValue": option.normalized_value,
+		"itemCount": item_count,
+		"aliases": [filter_alias_payload(alias) for alias in sorted(option.aliases, key=lambda item: item.value.casefold())],
+	}
+
+
+def filter_definition_payload(
+	definition: KnowledgeFilterDefinition,
+	option_counts: dict[str, int] | None = None,
+	definition_count: int = 0,
+) -> dict:
+	return {
+		"id": definition.id, "name": definition.name, "normalizedName": definition.normalized_name,
+		"slug": definition.slug, "type": definition.type,
 		"isSystem": definition.is_system,
-		"options": [filter_option_payload(option) for option in sorted(definition.options, key=lambda item: item.value.casefold())],
+		"itemCount": definition_count,
+		"options": [filter_option_payload(option, (option_counts or {}).get(option.id, 0)) for option in sorted(definition.options, key=lambda item: item.value.casefold())],
 		"createdAt": definition.created_at.isoformat(), "updatedAt": definition.updated_at.isoformat(),
 	}
 
@@ -125,7 +154,8 @@ def ensure_default_approaches(db: Session, user_id: str) -> None:
 	))
 	if definition is None:
 		definition = KnowledgeFilterDefinition(
-			user_id=user_id, name="Подход", slug=APPROACH_FILTER_SLUG, type="single_select", is_system=True,
+			user_id=user_id, name="Подход", normalized_name=normalize_filter_value("Подход"),
+			slug=APPROACH_FILTER_SLUG, type="multi_select", is_system=True,
 		)
 		db.add(definition)
 		db.flush()
@@ -195,26 +225,60 @@ def owned_filter_definition(db: Session, definition_id: str, user_id: str) -> Kn
 
 
 def _owned_filter_options(db: Session, option_ids: list[str], user_id: str) -> list[KnowledgeFilterOption]:
-	unique_ids = list(dict.fromkeys(option_ids))
-	if not unique_ids:
-		return []
-	options = list(db.scalars(select(KnowledgeFilterOption).join(KnowledgeFilterDefinition).where(
-		KnowledgeFilterOption.id.in_(unique_ids), KnowledgeFilterDefinition.user_id == user_id,
-	)))
-	if len(options) != len(unique_ids):
-		raise AppError(422, "INVALID_KNOWLEDGE_FILTER_OPTION", "Выбранное значение фильтра недоступно")
-	if len({option.filter_definition_id for option in options}) != len(options):
-		raise AppError(422, "DUPLICATE_KNOWLEDGE_FILTER", "Для одного фильтра можно выбрать одно значение")
-	return options
+	groups = canonicalize_option_ids(db, user_id, option_ids)
+	canonical_ids = [option_id for group in groups for option_id in group.option_ids]
+	return list(db.scalars(select(KnowledgeFilterOption).where(KnowledgeFilterOption.id.in_(canonical_ids)))) if canonical_ids else []
 
 
-def _set_item_filters(db: Session, item: KnowledgeItem, option_ids: list[str], user_id: str) -> None:
-	options = _owned_filter_options(db, option_ids, user_id)
-	item.filter_values.clear()
-	for option in options:
+def _canonical_payload_groups(
+	db: Session,
+	user_id: str,
+	option_ids: list[str] | None,
+	groups: list[KnowledgeFilterSelectionPayload] | None,
+) -> tuple[CanonicalFilterGroup, ...]:
+	raw_groups = [(group.filter_id, group.option_ids) for group in (groups or [])]
+	legacy = canonicalize_option_ids(db, user_id, option_ids or [])
+	raw_groups.extend((group.filter_id, group.option_ids) for group in legacy)
+	return canonicalize_filter_groups(db, user_id, raw_groups)
+
+
+def _set_item_filters(
+	db: Session,
+	item: KnowledgeItem,
+	option_ids: list[str],
+	user_id: str,
+	groups: list[KnowledgeFilterSelectionPayload] | None = None,
+) -> None:
+	canonical = _canonical_payload_groups(db, user_id, option_ids, groups)
+	next_pairs = {
+		(group.filter_id, option_id)
+		for group in canonical
+		for option_id in group.option_ids
+	}
+	existing = {(value.filter_definition_id, value.filter_option_id): value for value in item.filter_values}
+	for pair, value in existing.items():
+		if pair not in next_pairs:
+			item.filter_values.remove(value)
+	for filter_id, option_id in next_pairs - existing.keys():
 		item.filter_values.append(KnowledgeItemFilterValue(
-			filter_definition_id=option.filter_definition_id, filter_option_id=option.id,
+			filter_definition_id=filter_id, filter_option_id=option_id,
 		))
+
+
+def _filter_usage_counts(db: Session, user_id: str) -> tuple[dict[str, int], dict[str, int]]:
+	option_counts = dict(db.execute(
+		select(KnowledgeItemFilterValue.filter_option_id, func.count(KnowledgeItemFilterValue.knowledge_item_id))
+		.join(KnowledgeItem, KnowledgeItem.id == KnowledgeItemFilterValue.knowledge_item_id)
+		.where(KnowledgeItem.user_id == user_id)
+		.group_by(KnowledgeItemFilterValue.filter_option_id)
+	).all())
+	definition_counts = dict(db.execute(
+		select(KnowledgeItemFilterValue.filter_definition_id, func.count(func.distinct(KnowledgeItemFilterValue.knowledge_item_id)))
+		.join(KnowledgeItem, KnowledgeItem.id == KnowledgeItemFilterValue.knowledge_item_id)
+		.where(KnowledgeItem.user_id == user_id)
+		.group_by(KnowledgeItemFilterValue.filter_definition_id)
+	).all())
+	return option_counts, definition_counts
 
 
 def _with_legacy_approach_option(db: Session, user_id: str, option_ids: list[str], approach: KnowledgeApproach | None) -> list[str]:
@@ -223,7 +287,7 @@ def _with_legacy_approach_option(db: Session, user_id: str, option_ids: list[str
 	option = db.scalar(select(KnowledgeFilterOption).join(KnowledgeFilterDefinition).where(
 		KnowledgeFilterDefinition.user_id == user_id,
 		KnowledgeFilterDefinition.slug == APPROACH_FILTER_SLUG,
-		KnowledgeFilterOption.normalized_value == approach.slug,
+		KnowledgeFilterOption.normalized_value.in_((approach.slug, normalize_filter_value(approach.name))),
 	))
 	return [*option_ids, option.id] if option and option.id not in option_ids else option_ids
 
@@ -268,8 +332,10 @@ def create_approach(payload: ApproachPayload, user: User = Depends(get_current_u
 	definition = db.scalar(select(KnowledgeFilterDefinition).where(
 		KnowledgeFilterDefinition.user_id == user.id, KnowledgeFilterDefinition.slug == APPROACH_FILTER_SLUG,
 	))
-	if definition is not None and not any(option.normalized_value == slug for option in definition.options):
-		db.add(KnowledgeFilterOption(filter_definition_id=definition.id, value=name, normalized_value=slug))
+	if definition is not None and not any(option.normalized_value == normalize_filter_value(name) for option in definition.options):
+		db.add(KnowledgeFilterOption(
+			filter_definition_id=definition.id, value=name, normalized_value=normalize_filter_value(name),
+		))
 	try:
 		db.commit()
 	except IntegrityError as error:
@@ -282,17 +348,18 @@ def create_approach(payload: ApproachPayload, user: User = Depends(get_current_u
 def rename_approach(approach_id: str, payload: ApproachPayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	item = owned_approach(db, approach_id, user.id)
 	legacy_slug = item.slug
+	legacy_name = item.name
 	item.name = " ".join(payload.name.split())
 	item.slug = normalize_approach_slug(item.name)
 	if not item.slug:
 		raise AppError(422, "INVALID_APPROACH_NAME", "Введите название подхода")
 	option = db.scalar(select(KnowledgeFilterOption).join(KnowledgeFilterDefinition).where(
 		KnowledgeFilterDefinition.user_id == user.id, KnowledgeFilterDefinition.slug == APPROACH_FILTER_SLUG,
-		KnowledgeFilterOption.normalized_value == legacy_slug,
+		KnowledgeFilterOption.normalized_value.in_((legacy_slug, normalize_filter_value(legacy_name))),
 	))
 	if option is not None:
 		option.value = item.name
-		option.normalized_value = item.slug
+		option.normalized_value = normalize_filter_value(item.name)
 		option.updated_at = utc_now()
 	item.updated_at = utc_now()
 	try:
@@ -308,7 +375,7 @@ def delete_approach(approach_id: str, user: User = Depends(get_current_user), db
 	item = owned_approach(db, approach_id, user.id)
 	option = db.scalar(select(KnowledgeFilterOption).join(KnowledgeFilterDefinition).where(
 		KnowledgeFilterDefinition.user_id == user.id, KnowledgeFilterDefinition.slug == APPROACH_FILTER_SLUG,
-		KnowledgeFilterOption.normalized_value == item.slug,
+		KnowledgeFilterOption.normalized_value.in_((item.slug, normalize_filter_value(item.name))),
 	))
 	db.execute(update(KnowledgeItem).where(
 		KnowledgeItem.user_id == user.id,
@@ -325,10 +392,14 @@ def delete_approach(approach_id: str, user: User = Depends(get_current_user), db
 def list_filter_definitions(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	ensure_default_approaches(db, user.id)
 	db.commit()
+	option_counts, definition_counts = _filter_usage_counts(db, user.id)
 	definitions = list(db.scalars(select(KnowledgeFilterDefinition).where(
 		KnowledgeFilterDefinition.user_id == user.id,
 	).order_by(KnowledgeFilterDefinition.is_system.desc(), KnowledgeFilterDefinition.name.asc())))
-	return {"items": [filter_definition_payload(definition) for definition in definitions]}
+	return {"items": [
+		filter_definition_payload(definition, option_counts, definition_counts.get(definition.id, 0))
+		for definition in definitions
+	]}
 
 
 @router.post("/filters")
@@ -337,13 +408,16 @@ def create_filter_definition(payload: FilterDefinitionPayload, user: User = Depe
 	slug = normalize_approach_slug(name)
 	if not slug:
 		raise AppError(422, "INVALID_KNOWLEDGE_FILTER_NAME", "Введите название фильтра")
-	definition = KnowledgeFilterDefinition(user_id=user.id, name=name, slug=slug, type="single_select")
+	definition = KnowledgeFilterDefinition(
+		user_id=user.id, name=name, normalized_name=normalize_filter_value(name),
+		slug=slug, type="multi_select",
+	)
 	db.add(definition)
 	try:
 		db.commit()
 	except IntegrityError as error:
 		db.rollback()
-		raise AppError(409, "KNOWLEDGE_FILTER_EXISTS", "Фильтр с таким названием уже существует") from error
+		raise AppError(409, "FILTER_ALREADY_EXISTS", "Фильтр с таким названием уже существует.") from error
 	return {"item": filter_definition_payload(definition)}
 
 
@@ -351,22 +425,24 @@ def create_filter_definition(payload: FilterDefinitionPayload, user: User = Depe
 def rename_filter_definition(definition_id: str, payload: FilterDefinitionPayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	definition = owned_filter_definition(db, definition_id, user.id)
 	definition.name = " ".join(payload.name.split())
-	if not definition.is_system:
-		definition.slug = normalize_approach_slug(definition.name)
+	definition.normalized_name = normalize_filter_value(definition.name)
+	if not definition.normalized_name:
+		raise AppError(422, "INVALID_KNOWLEDGE_FILTER_NAME", "Введите название фильтра")
 	definition.updated_at = utc_now()
 	try:
 		db.commit()
 	except IntegrityError as error:
 		db.rollback()
-		raise AppError(409, "KNOWLEDGE_FILTER_EXISTS", "Фильтр с таким названием уже существует") from error
-	return {"item": filter_definition_payload(definition)}
+		raise AppError(409, "FILTER_ALREADY_EXISTS", "Фильтр с таким названием уже существует.") from error
+	option_counts, definition_counts = _filter_usage_counts(db, user.id)
+	return {"item": filter_definition_payload(definition, option_counts, definition_counts.get(definition.id, 0))}
 
 
 @router.delete("/filters/{definition_id}", status_code=204)
 def delete_filter_definition(definition_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	definition = owned_filter_definition(db, definition_id, user.id)
 	if definition.is_system:
-		raise AppError(422, "SYSTEM_FILTER_REQUIRED", "Системный фильтр удалить нельзя")
+		raise AppError(422, "SYSTEM_FILTER_CANNOT_BE_DELETED", "Системный фильтр удалить нельзя")
 	db.delete(definition)
 	db.commit()
 	return Response(status_code=204)
@@ -376,7 +452,7 @@ def delete_filter_definition(definition_id: str, user: User = Depends(get_curren
 def create_filter_option(definition_id: str, payload: FilterOptionPayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	definition = owned_filter_definition(db, definition_id, user.id)
 	value = " ".join(payload.value.split())
-	normalized = normalize_approach_slug(value)
+	normalized = normalize_filter_value(value)
 	if not normalized:
 		raise AppError(422, "INVALID_KNOWLEDGE_FILTER_OPTION", "Введите значение фильтра")
 	option = KnowledgeFilterOption(filter_definition_id=definition.id, value=value, normalized_value=normalized)
@@ -385,7 +461,7 @@ def create_filter_option(definition_id: str, payload: FilterOptionPayload, user:
 		db.commit()
 	except IntegrityError as error:
 		db.rollback()
-		raise AppError(409, "KNOWLEDGE_FILTER_OPTION_EXISTS", "Такое значение уже существует") from error
+		raise AppError(409, "FILTER_OPTION_ALREADY_EXISTS", "Такое значение уже существует в этом фильтре.") from error
 	return {"item": filter_option_payload(option)}
 
 
@@ -398,14 +474,17 @@ def rename_filter_option(definition_id: str, option_id: str, payload: FilterOpti
 	if option is None:
 		raise AppError(404, "KNOWLEDGE_FILTER_OPTION_NOT_FOUND", "Значение фильтра не найдено")
 	option.value = " ".join(payload.value.split())
-	option.normalized_value = normalize_approach_slug(option.value)
+	option.normalized_value = normalize_filter_value(option.value)
+	if not option.normalized_value:
+		raise AppError(422, "INVALID_KNOWLEDGE_FILTER_OPTION", "Введите значение фильтра")
 	option.updated_at = utc_now()
 	try:
 		db.commit()
 	except IntegrityError as error:
 		db.rollback()
-		raise AppError(409, "KNOWLEDGE_FILTER_OPTION_EXISTS", "Такое значение уже существует") from error
-	return {"item": filter_option_payload(option)}
+		raise AppError(409, "FILTER_OPTION_ALREADY_EXISTS", "Такое значение уже существует в этом фильтре.") from error
+	option_counts, _ = _filter_usage_counts(db, user.id)
+	return {"item": filter_option_payload(option, option_counts.get(option.id, 0))}
 
 
 @router.delete("/filters/{definition_id}/options/{option_id}", status_code=204)
@@ -421,12 +500,74 @@ def delete_filter_option(definition_id: str, option_id: str, user: User = Depend
 	return Response(status_code=204)
 
 
+@router.post("/filters/{definition_id}/options/{option_id}/aliases")
+def create_filter_option_alias(
+	definition_id: str,
+	option_id: str,
+	payload: FilterAliasPayload,
+	user: User = Depends(get_current_user),
+	db: Session = Depends(get_db),
+):
+	definition = owned_filter_definition(db, definition_id, user.id)
+	option = db.scalar(select(KnowledgeFilterOption).where(
+		KnowledgeFilterOption.id == option_id, KnowledgeFilterOption.filter_definition_id == definition.id,
+	))
+	if option is None:
+		raise AppError(404, "KNOWLEDGE_FILTER_OPTION_NOT_FOUND", "Значение фильтра не найдено")
+	value = " ".join(payload.value.split())
+	normalized = normalize_filter_value(value)
+	if not normalized:
+		raise AppError(422, "INVALID_FILTER_OPTION_ALIAS", "Введите псевдоним")
+	alias = KnowledgeFilterOptionAlias(filter_option_id=option.id, value=value, normalized_value=normalized)
+	db.add(alias)
+	try:
+		db.commit()
+	except IntegrityError as error:
+		db.rollback()
+		raise AppError(409, "FILTER_OPTION_ALIAS_ALREADY_EXISTS", "Такой псевдоним уже существует для значения.") from error
+	return {"item": filter_alias_payload(alias)}
+
+
+@router.delete("/filters/{definition_id}/options/{option_id}/aliases/{alias_id}", status_code=204)
+def delete_filter_option_alias(
+	definition_id: str,
+	option_id: str,
+	alias_id: str,
+	user: User = Depends(get_current_user),
+	db: Session = Depends(get_db),
+):
+	definition = owned_filter_definition(db, definition_id, user.id)
+	alias = db.scalar(select(KnowledgeFilterOptionAlias).join(KnowledgeFilterOption).where(
+		KnowledgeFilterOptionAlias.id == alias_id,
+		KnowledgeFilterOptionAlias.filter_option_id == option_id,
+		KnowledgeFilterOption.filter_definition_id == definition.id,
+	))
+	if alias is None:
+		raise AppError(404, "FILTER_OPTION_ALIAS_NOT_FOUND", "Псевдоним не найден")
+	db.delete(alias)
+	db.commit()
+	return Response(status_code=204)
+
+
+def _parse_filter_groups(raw_value: str | None) -> list[KnowledgeFilterSelectionPayload]:
+	if not raw_value:
+		return []
+	try:
+		value = json.loads(raw_value)
+		if not isinstance(value, list):
+			raise ValueError
+		return [KnowledgeFilterSelectionPayload.model_validate(item) for item in value]
+	except (ValueError, TypeError, json.JSONDecodeError) as error:
+		raise AppError(422, "INVALID_FILTER_OPTION", "Некорректная комбинация фильтров") from error
+
+
 @router.get("")
 def list_knowledge_items(
 	search: str = Query(default="", max_length=200),
 	source_type: str | None = Query(default=None, max_length=32),
 	approach_id: str | None = Query(default=None, max_length=36),
 	filter_option_id: list[str] = Query(default=[]),
+	filter_groups: str | None = Query(default=None, alias="filters", max_length=10_000),
 	is_active: bool | None = None,
 	min_rating: int | None = Query(default=None, ge=1, le=5),
 	unrated: bool = False,
@@ -445,12 +586,10 @@ def list_knowledge_items(
 	if approach_id:
 		owned_approach(db, approach_id, user.id)
 		statement = statement.where(KnowledgeItem.approach_id == approach_id)
-	if filter_option_id:
-		_owned_filter_options(db, filter_option_id, user.id)
-		for option_id in dict.fromkeys(filter_option_id):
-			statement = statement.where(KnowledgeItem.filter_values.any(
-				KnowledgeItemFilterValue.filter_option_id == option_id,
-			))
+	canonical_filters = _canonical_payload_groups(
+		db, user.id, filter_option_id, _parse_filter_groups(filter_groups),
+	)
+	statement = apply_filter_groups(statement, canonical_filters)
 	if is_active is not None:
 		statement = statement.where(KnowledgeItem.is_active == is_active)
 	if unrated:
@@ -512,7 +651,10 @@ def create_manual_knowledge_item(payload: KnowledgeCreatePayload, user: User = D
 	)
 	item.original_filename = _markdown_filename(item.title, item.id)
 	db.add(item)
-	_set_item_filters(db, item, _with_legacy_approach_option(db, user.id, payload.filter_option_ids, approach), user.id)
+	_set_item_filters(
+		db, item, _with_legacy_approach_option(db, user.id, payload.filter_option_ids, approach),
+		user.id, payload.filters,
+	)
 	db.commit()
 	return {"item": knowledge_payload(item)}
 
@@ -525,6 +667,7 @@ async def upload_knowledge_file(
 	is_active: bool = Form(default=True),
 	approach_id: str | None = Form(default=None, max_length=36),
 	filter_option_ids: str = Form(default="[]"),
+	filters: str = Form(default="[]"),
 	user: User = Depends(get_current_user),
 	db: Session = Depends(get_db),
 ):
@@ -556,7 +699,10 @@ async def upload_knowledge_file(
 		item_metadata={"sha256": checksum, "extractionStatus": extracted.status},
 	)
 	db.add(item)
-	_set_item_filters(db, item, _with_legacy_approach_option(db, user.id, _parse_filter_option_ids(filter_option_ids), approach), user.id)
+	_set_item_filters(
+		db, item, _with_legacy_approach_option(db, user.id, _parse_filter_option_ids(filter_option_ids), approach),
+		user.id, _parse_filter_groups(filters),
+	)
 	db.flush()
 	storage_key = build_storage_key(user.id, "knowledge", item.id)
 	storage = get_file_storage()
@@ -671,7 +817,7 @@ def save_generated_file(
 		item_metadata={"chatId": attachment.conversation_id, "source": "assistant_generated_file"},
 	)
 	db.add(item)
-	_set_item_filters(db, item, payload.filter_option_ids, user.id)
+	_set_item_filters(db, item, payload.filter_option_ids, user.id, payload.filters)
 	try:
 		db.commit()
 	except IntegrityError as error:
@@ -706,8 +852,8 @@ def update_knowledge_item(item_id: str, payload: KnowledgeUpdatePayload, user: U
 				if value.definition.slug != APPROACH_FILTER_SLUG
 			]
 			_set_item_filters(db, item, _with_legacy_approach_option(db, user.id, custom_option_ids, item.approach), user.id)
-	if payload.filter_option_ids is not None:
-		_set_item_filters(db, item, payload.filter_option_ids, user.id)
+	if payload.filter_option_ids is not None or payload.filters is not None:
+		_set_item_filters(db, item, payload.filter_option_ids or [], user.id, payload.filters)
 	item.updated_at = utc_now()
 	db.commit()
 	return {"item": knowledge_payload(item)}

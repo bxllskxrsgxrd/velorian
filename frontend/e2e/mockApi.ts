@@ -56,16 +56,20 @@ export async function installMockApi(page: Page, options: Options = {}) {
 		{ id: 'approach-show', name: 'Шоу', slug: 'шоу', createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z' },
 	];
 	let filterDefinitions = [{
-		id: 'filter-approach', name: 'Подход', slug: 'podhod', type: 'single_select', isSystem: true,
+		id: 'filter-approach', name: 'Подход', normalizedName: 'подход', slug: 'podhod', type: 'multi_select', isSystem: true, itemCount: 0,
 		options: [
-			{ id: 'approach-interview', value: 'Интервью', normalizedValue: 'интервью' },
-			{ id: 'approach-show', value: 'Шоу', normalizedValue: 'шоу' },
+			{ id: 'approach-interview', value: 'Интервью', normalizedValue: 'интервью', itemCount: 0, aliases: [] },
+			{ id: 'approach-show', value: 'Шоу', normalizedValue: 'шоу', itemCount: 0, aliases: [] },
 		],
 		createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z',
 	}];
 	const resolveFilters = (optionIds: string[] = []) => filterDefinitions.flatMap((definition) => definition.options
 		.filter((option) => optionIds.includes(option.id))
 		.map((option) => ({ filterId: definition.id, filterName: definition.name, filterSlug: definition.slug, optionId: option.id, value: option.value })));
+	const payloadOptionIds = (payload: { filter_option_ids?: string[]; filters?: Array<{ filter_id: string; option_ids: string[] }> }) => [
+		...(payload.filter_option_ids ?? []),
+		...(payload.filters ?? []).flatMap((group) => group.option_ids),
+	];
 	const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
 	await page.route('**/api/**', async (route) => {
@@ -139,37 +143,69 @@ export async function installMockApi(page: Page, options: Options = {}) {
 		if (path === '/api/knowledge/filters' && method === 'GET') return json(route, { items: filterDefinitions });
 		if (path === '/api/knowledge/filters' && method === 'POST') {
 			const payload = request.postDataJSON() as { name: string };
-			const item = { id: `filter-${filterDefinitions.length + 1}`, name: payload.name, slug: payload.name.toLocaleLowerCase('ru'), type: 'single_select', isSystem: false, options: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+			const item = { id: `filter-${filterDefinitions.length + 1}`, name: payload.name, normalizedName: payload.name.toLocaleLowerCase('ru'), slug: payload.name.toLocaleLowerCase('ru'), type: 'multi_select', isSystem: false, itemCount: 0, options: [], createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
 			filterDefinitions = [...filterDefinitions, item];
 			return json(route, { item });
+		}
+		const filterMatch = path.match(/^\/api\/knowledge\/filters\/([^/]+)$/);
+		if (filterMatch && method === 'PATCH') {
+			const payload = request.postDataJSON() as { name: string };
+			filterDefinitions = filterDefinitions.map((definition) => definition.id === filterMatch[1] ? { ...definition, name: payload.name.trim(), normalizedName: payload.name.trim().toLocaleLowerCase('ru') } : definition);
+			knowledge = knowledge.map((item) => ({ ...item, filters: ((item.filters as Array<Record<string, unknown>>) ?? []).map((value) => value.filterId === filterMatch[1] ? { ...value, filterName: payload.name.trim() } : value) }));
+			return json(route, { item: filterDefinitions.find((definition) => definition.id === filterMatch[1]) });
+		}
+		if (filterMatch && method === 'DELETE') {
+			filterDefinitions = filterDefinitions.filter((definition) => definition.id !== filterMatch[1]);
+			knowledge = knowledge.map((item) => ({ ...item, filters: ((item.filters as Array<Record<string, unknown>>) ?? []).filter((value) => value.filterId !== filterMatch[1]) }));
+			return route.fulfill({ status: 204 });
 		}
 		const filterOptionMatch = path.match(/^\/api\/knowledge\/filters\/([^/]+)\/options$/);
 		if (filterOptionMatch && method === 'POST') {
 			const payload = request.postDataJSON() as { value: string };
-			const option = { id: `option-${Date.now()}`, value: payload.value, normalizedValue: payload.value.toLocaleLowerCase('ru') };
+			const option = { id: `option-${Date.now()}`, value: payload.value, normalizedValue: payload.value.toLocaleLowerCase('ru'), itemCount: 0, aliases: [] };
 			filterDefinitions = filterDefinitions.map((definition) => definition.id === filterOptionMatch[1] ? { ...definition, options: [...definition.options, option] } : definition);
 			return json(route, { item: option });
 		}
+		const optionMatch = path.match(/^\/api\/knowledge\/filters\/([^/]+)\/options\/([^/]+)$/);
+		if (optionMatch && method === 'PATCH') {
+			const payload = request.postDataJSON() as { value: string };
+			let updated: Record<string, unknown> | undefined;
+			filterDefinitions = filterDefinitions.map((definition) => definition.id === optionMatch[1] ? { ...definition, options: definition.options.map((option) => {
+				if (option.id !== optionMatch[2]) return option;
+				updated = { ...option, value: payload.value.trim(), normalizedValue: payload.value.trim().toLocaleLowerCase('ru') };
+				return updated as typeof option;
+			}) } : definition);
+			knowledge = knowledge.map((item) => ({ ...item, filters: ((item.filters as Array<Record<string, unknown>>) ?? []).map((value) => value.optionId === optionMatch[2] ? { ...value, value: payload.value.trim() } : value) }));
+			return json(route, { item: updated });
+		}
+		if (optionMatch && method === 'DELETE') {
+			filterDefinitions = filterDefinitions.map((definition) => definition.id === optionMatch[1] ? { ...definition, options: definition.options.filter((option) => option.id !== optionMatch[2]) } : definition);
+			knowledge = knowledge.map((item) => ({ ...item, filters: ((item.filters as Array<Record<string, unknown>>) ?? []).filter((value) => value.optionId !== optionMatch[2]) }));
+			return route.fulfill({ status: 204 });
+		}
 		if (path === '/api/knowledge' && method === 'GET') {
-			const optionIds = url.searchParams.getAll('filter_option_id');
-			return json(route, { items: optionIds.length ? knowledge.filter((item) => optionIds.every((id) => ((item.filters as Array<{ optionId: string }> | undefined) ?? []).some((value) => value.optionId === id))) : knowledge, pageInfo: { nextCursor: null, hasMore: false } });
+			const legacyOptionIds = url.searchParams.getAll('filter_option_id');
+			const groups = url.searchParams.get('filters') ? JSON.parse(url.searchParams.get('filters')!) as Array<{ filter_id: string; option_ids: string[] }> : [];
+			if (legacyOptionIds.length) groups.push(...legacyOptionIds.map((optionId) => ({ filter_id: '', option_ids: [optionId] })));
+			const items = groups.length ? knowledge.filter((item) => groups.every((group) => group.option_ids.some((id) => ((item.filters as Array<{ optionId: string }> | undefined) ?? []).some((value) => value.optionId === id)))) : knowledge;
+			return json(route, { items, pageInfo: { nextCursor: null, hasMore: false } });
 		}
 		if (path === '/api/knowledge' && method === 'POST') {
-			const payload = request.postDataJSON() as { title: string; content: string; rating?: number; is_active?: boolean; filter_option_ids?: string[] };
-			const item = { id: `k${knowledge.length + 1}`, sourceType: 'manual', title: payload.title, content: payload.content, mimeType: 'text/markdown', originalFilename: `knowledge-${knowledge.length + 1}.md`, rating: payload.rating ?? null, approach: null, filters: resolveFilters(payload.filter_option_ids), isActive: payload.is_active ?? true, metadata: {}, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), downloadUrl: null };
+			const payload = request.postDataJSON() as { title: string; content: string; rating?: number; is_active?: boolean; filter_option_ids?: string[]; filters?: Array<{ filter_id: string; option_ids: string[] }> };
+			const item = { id: `k${knowledge.length + 1}`, sourceType: 'manual', title: payload.title, content: payload.content, mimeType: 'text/markdown', originalFilename: `knowledge-${knowledge.length + 1}.md`, rating: payload.rating ?? null, approach: null, filters: resolveFilters(payloadOptionIds(payload)), isActive: payload.is_active ?? true, metadata: {}, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), downloadUrl: null };
 			knowledge = [item, ...knowledge]; return json(route, { item });
 		}
 		const generatedKnowledgeMatch = path.match(/^\/api\/knowledge\/generated-files\/([^/]+)$/);
 		if (generatedKnowledgeMatch && method === 'POST') {
-			const payload = request.postDataJSON() as { title: string; rating?: number | null; is_active?: boolean; filter_option_ids?: string[] };
-			const item = { id: `k${knowledge.length + 1}`, sourceType: 'assistant_generated_file', sourceFileId: generatedKnowledgeMatch[1], title: payload.title, content: 'console.log("Velorian");', mimeType: 'text/javascript', originalFilename: 'script.js', rating: payload.rating ?? null, approach: null, filters: resolveFilters(payload.filter_option_ids), isActive: payload.is_active ?? true, metadata: {}, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), downloadUrl: `/api/attachments/${generatedKnowledgeMatch[1]}` };
+			const payload = request.postDataJSON() as { title: string; rating?: number | null; is_active?: boolean; filter_option_ids?: string[]; filters?: Array<{ filter_id: string; option_ids: string[] }> };
+			const item = { id: `k${knowledge.length + 1}`, sourceType: 'assistant_generated_file', sourceFileId: generatedKnowledgeMatch[1], title: payload.title, content: 'console.log("Velorian");', mimeType: 'text/javascript', originalFilename: 'script.js', rating: payload.rating ?? null, approach: null, filters: resolveFilters(payloadOptionIds(payload)), isActive: payload.is_active ?? true, metadata: {}, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), downloadUrl: `/api/attachments/${generatedKnowledgeMatch[1]}` };
 			knowledge = [item, ...knowledge];
 			return json(route, { item });
 		}
 		const knowledgeMatch = path.match(/^\/api\/knowledge\/([^/]+)$/);
 		if (knowledgeMatch && method === 'PATCH') {
 			const payload = request.postDataJSON() as Record<string, unknown>;
-			knowledge = knowledge.map((item) => item.id === knowledgeMatch[1] ? { ...item, title: payload.title ?? item.title, content: payload.content ?? item.content, rating: payload.rating === undefined ? item.rating : payload.rating, filters: payload.filter_option_ids === undefined ? item.filters : resolveFilters(payload.filter_option_ids as string[]), isActive: payload.is_active ?? item.isActive, updatedAt: new Date().toISOString() } : item);
+			knowledge = knowledge.map((item) => item.id === knowledgeMatch[1] ? { ...item, title: payload.title ?? item.title, content: payload.content ?? item.content, rating: payload.rating === undefined ? item.rating : payload.rating, filters: payload.filters === undefined && payload.filter_option_ids === undefined ? item.filters : resolveFilters(payloadOptionIds(payload as { filter_option_ids?: string[]; filters?: Array<{ filter_id: string; option_ids: string[] }> })), isActive: payload.is_active ?? item.isActive, updatedAt: new Date().toISOString() } : item);
 			return json(route, { item: knowledge.find((item) => item.id === knowledgeMatch[1]) });
 		}
 		if (knowledgeMatch && method === 'DELETE') { knowledge = knowledge.filter((item) => item.id !== knowledgeMatch[1]); return route.fulfill({ status: 204 }); }

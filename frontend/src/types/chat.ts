@@ -56,17 +56,34 @@ export type KnowledgeFilterOption = {
 	id: string;
 	value: string;
 	normalizedValue: string;
+	itemCount: number;
+	aliases: KnowledgeFilterOptionAlias[];
+};
+
+export type KnowledgeFilterOptionAlias = {
+	id: string;
+	value: string;
+	normalizedValue: string;
 };
 
 export type KnowledgeFilterDefinition = {
 	id: string;
 	name: string;
+	normalizedName: string;
 	slug: string;
-	type: 'single_select';
+	type: 'multi_select';
 	isSystem: boolean;
+	itemCount: number;
 	options: KnowledgeFilterOption[];
 	createdAt: string;
 	updatedAt: string;
+};
+
+export type SelectedKnowledgeFilters = Record<string, string[]>;
+
+export type KnowledgeFilterSelection = {
+	filterId: string;
+	optionIds: string[];
 };
 
 export type KnowledgeItemFilter = {

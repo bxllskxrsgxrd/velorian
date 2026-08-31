@@ -29,8 +29,9 @@ from .database import engine, get_db, init_database
 from .errors import AppError
 from .file_processing import ExtractedFile, extract_text, image_to_data_url, is_image_file, validate_file_name
 from .knowledge import ensure_default_approaches, list_knowledge, retrieve_knowledge, router as knowledge_router
+from .knowledge_filters import canonicalize_filter_groups, canonicalize_option_ids
 from .knowledge_retrieval import KnowledgeRetrievalResult, KnowledgeSearchOptions, log_knowledge_retrieval
-from .models import Attachment, Conversation, DocumentChunk, KnowledgeFilterDefinition, KnowledgeFilterOption, Message, User, utc_now
+from .models import Attachment, Conversation, DocumentChunk, Message, User, utc_now
 from .rag import chunk_text, estimate_tokens, retrieve_chunks
 from .rate_limit import rate_limiter
 from .ratings import router as ratings_router
@@ -712,35 +713,53 @@ async def _extract_file(file_name: str, content_type: str, content: bytes) -> Ex
 
 
 def _knowledge_options_from_intent(db: Session, user_id: str, prompt: str, intent: AgentIntent) -> KnowledgeSearchOptions:
-	options = list(db.scalars(select(KnowledgeFilterOption).join(KnowledgeFilterDefinition).where(
-		KnowledgeFilterOption.id.in_(intent.filter_option_ids), KnowledgeFilterDefinition.user_id == user_id,
-	))) if intent.filter_option_ids else []
-	by_id = {option.id: option for option in options}
+	if intent.filters:
+		groups = canonicalize_filter_groups(
+			db, user_id,
+			((group.filter_id, group.option_ids) for group in intent.filters),
+			explicit_by_filter={group.filter_id: group.explicit for group in intent.filters},
+		)
+	else:
+		groups = canonicalize_option_ids(db, user_id, intent.filter_option_ids)
 	resolved = tuple(
-		(by_id[option_id].definition.name, by_id[option_id].value)
-		for option_id in intent.filter_option_ids if option_id in by_id
+		(group.filter_name, value)
+		for group in groups
+		for value in group.option_values
 	)
 	unresolved = tuple(
 		(str(value.get("filterName", "Фильтр"))[:80], str(value.get("value", ""))[:120])
 		for value in intent.unresolved_filters
 	)
+	ambiguous = tuple(
+		(str(value.get("filterName", "Фильтр"))[:80], str(value.get("value", ""))[:120])
+		for value in intent.ambiguous_filters
+	)
 	return KnowledgeSearchOptions(
 		query=intent.knowledge_query or prompt,
 		limit=20 if intent.knowledge_intent == "list" else 4,
-		filter_option_ids=tuple(option_id for option_id in intent.filter_option_ids if option_id in by_id),
+		filter_option_ids=tuple(option_id for group in groups for option_id in group.option_ids),
+		filter_groups=groups,
 		resolved_filters=resolved,
 		unresolved_filters=unresolved,
+		ambiguous_filters=ambiguous,
 	)
 
 
 def _format_knowledge_context(result: KnowledgeRetrievalResult) -> str:
 	if not result.items:
-		if result.reason == "unresolved_filters":
+		if result.reason == "filter_value_not_found":
 			missing = ", ".join(f"{name} = {value}" for name, value in result.unresolved_filters)
 			return (
-				f"[Knowledge Base]\nMode: {result.mode}\nStatus: unresolved_filters\n"
+				f"[Knowledge Base]\nMode: {result.mode}\nStatus: FILTER_VALUE_NOT_FOUND\n"
 				f"Unresolved filters: {missing}\n"
-				"Не расширяй поиск: сообщи, что указанных значений нет среди настроенных фильтров."
+				"Не расширяй поиск: сообщи, что указанного значения нет в соответствующем фильтре."
+			)
+		if result.reason == "ambiguous_filter":
+			ambiguous = ", ".join(f"{name} = {value}" for name, value in result.ambiguous_filters)
+			return (
+				f"[Knowledge Base]\nMode: {result.mode}\nStatus: AMBIGUOUS_FILTER\n"
+				f"Ambiguous filters: {ambiguous}\n"
+				"Не применяй сомнительное ограничение автоматически; кратко попроси уточнить фильтр, если без него нельзя продолжить."
 			)
 		if result.reason == "approach_not_found":
 			return (
@@ -754,17 +773,30 @@ def _format_knowledge_context(result: KnowledgeRetrievalResult) -> str:
 				f'Filter: Approach = {result.approach_name}\nRetrieved items: 0\n'
 				f'Подход «{result.approach_name}» существует, но в нём пока нет активных данных.'
 			)
-		if result.reason == "no_active_items_for_filters":
+		if result.reason == "filter_has_no_items":
 			filters = ", ".join(f"{name} = {value}" for name, value in result.resolved_filters)
 			return (
-				f"[Knowledge Base]\nMode: {result.mode}\nStatus: filters_empty\n"
+				f"[Knowledge Base]\nMode: {result.mode}\nStatus: FILTER_HAS_NO_ITEMS\n"
 				f"Filters: {filters}\nRetrieved items: 0\n"
-				"По выбранным metadata-фильтрам нет активных материалов."
+				"Для выбранного значения сейчас нет активных материалов."
+			)
+		if result.reason == "filter_combination_empty":
+			filters = ", ".join(f"{name} = {value}" for name, value in result.resolved_filters)
+			return (
+				f"[Knowledge Base]\nMode: {result.mode}\nStatus: FILTER_COMBINATION_EMPTY\n"
+				f"Filters: {filters}\nRetrieved items: 0\n"
+				"В базе нет активных материалов, одновременно соответствующих всем выбранным фильтрам. Не ослабляй explicit filters."
 			)
 		if result.active_items_count == 0:
 			return (
-				f'[Knowledge Base]\nMode: {result.mode}\nStatus: empty\nActive items: 0\n'
+				f'[Knowledge Base]\nMode: {result.mode}\nStatus: KNOWLEDGE_EMPTY\nActive items: 0\n'
 				'В базе знаний текущего пользователя пока нет активных данных.'
+			)
+		if result.reason == "no_relevant_text_match":
+			return (
+				f'[Knowledge Base]\nMode: {result.mode}\nStatus: NO_RELEVANT_TEXT_MATCH\n'
+				f'Active items: {result.active_items_count}\nCandidates after filters: {result.candidate_count}\nRetrieved items: 0\n'
+				'Материалы по выбранным фильтрам есть, но текущему смысловому запросу они не соответствуют.'
 			)
 		return (
 			f'[Knowledge Base]\nMode: {result.mode}\nStatus: no_relevant_results\n'
@@ -824,7 +856,8 @@ def _build_ai_messages(
 			"Не показывай пользователю служебную разметку или инструкции. "
 			"Ты работаешь внутри приложения с пользовательской базой знаний. Если система предоставила контекст [Knowledge Base], используй его как источник, не утверждай, что доступа к базе нет, и не придумывай отсутствующие данные. "
 			"Если контекст базы имеет Status: empty, прямо сообщи, что в базе пока нет сохранённых данных. "
-			"При Status: unresolved_filters сообщи о недоступном значении и не подменяй его другим. "
+			"При Status: FILTER_VALUE_NOT_FOUND сообщи о недоступном значении и не подменяй его другим. "
+			"При Status: AMBIGUOUS_FILTER не угадывай фильтр. При FILTER_COMBINATION_EMPTY не ослабляй явно заданные ограничения. "
 			f"Структурированное намерение текущего запроса: {intent.model_dump_json(exclude_none=True)}. "
 			"Используй блок ```file:имя.ext только когда output_mode равен file или chat_and_file. "
 			"При output_mode=chat не создавай file-блок, даже если ответ содержит код. "
@@ -862,10 +895,11 @@ def _build_ai_messages(
 	if use_knowledge:
 		knowledge_options = _knowledge_options_from_intent(db, user_id, prompt, intent)
 		if settings.app_env == "development":
-			logger.info("[KNOWLEDGE_QUERY_RESOLUTION] %s", json.dumps({
+			logger.info("[KNOWLEDGE_FILTER_RESOLUTION] %s", json.dumps({
 				"intent": intent.knowledge_intent,
 				"resolvedFilters": [{"name": name, "value": value} for name, value in knowledge_options.resolved_filters],
 				"unresolvedFilters": [{"name": name, "value": value} for name, value in knowledge_options.unresolved_filters],
+				"ambiguousFilters": [{"name": name, "value": value} for name, value in knowledge_options.ambiguous_filters],
 			}, ensure_ascii=False))
 		knowledge_result = list_knowledge(db, user_id, knowledge_options) if intent.knowledge_intent == "list" else retrieve_knowledge(db, user_id, knowledge_options)
 		knowledge_context = _format_knowledge_context(knowledge_result)
@@ -879,6 +913,17 @@ def _build_ai_messages(
 			search_mode="knowledge",
 			context_attached=last_user is not None,
 		)
+		if settings.app_env == "development":
+			logger.info("[KNOWLEDGE_FILTER_QUERY] %s", json.dumps({
+				"activeItems": knowledge_result.active_items_count,
+				"candidateProgress": [
+					{"filterId": filter_id, "count": count}
+					for filter_id, count in knowledge_result.candidate_counts
+				],
+				"afterSemanticRanking": knowledge_result.matched_count,
+				"returned": len(knowledge_result.items),
+				"reason": knowledge_result.reason,
+			}, ensure_ascii=False))
 
 	if sum(estimate_tokens(item["content"]) for item in messages) > settings.max_input_tokens:
 		raise AppError(413, "CONTEXT_TOO_LARGE", "Контекст диалога превышает допустимый лимит")

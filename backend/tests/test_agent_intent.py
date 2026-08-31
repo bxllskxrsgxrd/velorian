@@ -8,8 +8,17 @@ from app.agent_intent import resolve_agent_intent
 class CatalogSession:
 	def __init__(self):
 		self.definitions = [
-			SimpleNamespace(id="filter-approach", name="Подход", slug="podhod", options=[SimpleNamespace(id="option-interview", value="Интервью")]),
-			SimpleNamespace(id="filter-geo", name="ГЕО", slug="geo", options=[SimpleNamespace(id="option-brazil", value="Бразилия")]),
+			SimpleNamespace(id="filter-approach", name="Подход", slug="podhod", options=[
+				SimpleNamespace(id="option-interview", value="Интервью", normalized_value="интервью", aliases=[]),
+				SimpleNamespace(id="option-show-approach", value="Шоу", normalized_value="шоу", aliases=[]),
+			]),
+			SimpleNamespace(id="filter-geo", name="ГЕО", slug="geo", options=[
+				SimpleNamespace(id="option-brazil", value="Brazil", normalized_value="brazil", aliases=[SimpleNamespace(value="Бразилия")]),
+				SimpleNamespace(id="option-mexico", value="Mexico", normalized_value="mexico", aliases=[SimpleNamespace(value="Мексика")]),
+			]),
+			SimpleNamespace(id="filter-offer", name="Оффер", slug="offer", options=[
+				SimpleNamespace(id="option-show-offer", value="Show", normalized_value="show", aliases=[]),
+			]),
 		]
 
 	def scalars(self, _statement):
@@ -112,3 +121,45 @@ def test_resolver_does_not_turn_a_filter_definition_explanation_into_a_constrain
 	))
 	assert intent.action == "general"
 	assert intent.filter_option_ids == []
+
+
+def test_structured_groups_keep_or_options_together_and_validate_ids():
+	class GroupCompletions:
+		async def create(self, **_kwargs):
+			payload = {
+				"action": "knowledge_search", "output_mode": "chat", "knowledge_intent": "search",
+				"knowledge_query": "", "filters": [
+					{"filterId": "filter-geo", "optionIds": ["option-brazil", "option-mexico"], "status": "resolved", "confidence": .98, "explicit": True},
+					{"filterId": "filter-approach", "optionIds": ["option-interview"], "status": "resolved", "confidence": .95, "explicit": True},
+				],
+			}
+			return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))])
+
+	client = SimpleNamespace(chat=SimpleNamespace(completions=GroupCompletions()))
+	intent = asyncio.run(resolve_agent_intent(
+		CatalogSession(), "user-1", "интервью для Brazil и Mexico", client=client,
+	))
+	groups = {group.filter_id: set(group.option_ids) for group in intent.filters}
+	assert groups == {
+		"filter-approach": {"option-interview"},
+		"filter-geo": {"option-brazil", "option-mexico"},
+	}
+
+
+def test_ambiguous_resolution_is_not_applied_as_a_constraint():
+	class AmbiguousCompletions:
+		async def create(self, **_kwargs):
+			payload = {
+				"action": "knowledge_search", "output_mode": "chat", "knowledge_intent": "search",
+				"knowledge_query": "материалы", "filters": [
+					{"filterId": "filter-approach", "optionIds": ["option-show-approach"], "status": "ambiguous", "confidence": .45, "value": "show"},
+					{"filterId": "filter-offer", "optionIds": ["option-show-offer"], "status": "ambiguous", "confidence": .45, "value": "show"},
+				],
+			}
+			return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=json.dumps(payload)))])
+
+	client = SimpleNamespace(chat=SimpleNamespace(completions=AmbiguousCompletions()))
+	intent = asyncio.run(resolve_agent_intent(CatalogSession(), "user-1", "покажи show материалы", client=client))
+	assert intent.filter_option_ids == []
+	assert intent.filters == []
+	assert {value["filterName"] for value in intent.ambiguous_filters} == {"Подход", "Оффер"}

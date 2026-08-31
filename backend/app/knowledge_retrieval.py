@@ -10,7 +10,8 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from .config import settings
-from .models import KnowledgeItem, KnowledgeItemFilterValue
+from .knowledge_filters import CanonicalFilterGroup, apply_filter_groups, canonicalize_option_ids, progressive_candidate_counts
+from .models import KnowledgeItem
 
 
 logger = logging.getLogger("velorian")
@@ -18,7 +19,8 @@ KnowledgeIntent = Literal["list", "search"]
 TOKEN_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
 STOP_WORDS = {
 	"а", "в", "все", "всё", "дай", "для", "есть", "и", "из", "как", "какие", "какой", "мне", "моя", "моей",
-	"на", "о", "по", "про", "с", "там", "тебе", "ты", "у", "что", "это", "the", "a", "an", "and", "for", "in", "of", "to",
+	"материал", "материалы", "данные", "данных", "на", "о", "по", "про", "с", "там", "тебе", "ты", "у", "что", "это",
+	"the", "a", "an", "and", "for", "in", "of", "to",
 }
 
 
@@ -35,8 +37,10 @@ class KnowledgeSearchOptions:
 	query: str
 	limit: int = 4
 	filter_option_ids: tuple[str, ...] = ()
+	filter_groups: tuple[CanonicalFilterGroup, ...] = ()
 	resolved_filters: tuple[tuple[str, str], ...] = ()
 	unresolved_filters: tuple[tuple[str, str], ...] = ()
+	ambiguous_filters: tuple[tuple[str, str], ...] = ()
 	approach_id: str | None = None
 	approach_name: str | None = None
 	requested_approach: str | None = None
@@ -67,15 +71,26 @@ class KnowledgeRetrievalResult:
 	fallback_used: bool = False
 	resolved_filters: tuple[tuple[str, str], ...] = ()
 	unresolved_filters: tuple[tuple[str, str], ...] = ()
+	ambiguous_filters: tuple[tuple[str, str], ...] = ()
+	candidate_counts: tuple[tuple[str, int], ...] = ()
 
 
-def _empty_result(mode: KnowledgeIntent, options: KnowledgeSearchOptions, owned_count: int, active_count: int, candidate_count: int, reason: str) -> KnowledgeRetrievalResult:
+def _empty_result(
+	mode: KnowledgeIntent,
+	options: KnowledgeSearchOptions,
+	owned_count: int,
+	active_count: int,
+	candidate_count: int,
+	reason: str,
+	candidate_counts: tuple[tuple[str, int], ...] = (),
+) -> KnowledgeRetrievalResult:
 	return KnowledgeRetrievalResult(
 		mode=mode, items=[], matches=[], owned_items_count=owned_count, active_items_count=active_count,
 		candidate_count=candidate_count, matched_count=0, reason=reason,
 		approach_id=options.approach_id, approach_name=options.approach_name,
 		requested_approach=options.requested_approach, approach_exists=options.approach_exists,
 		resolved_filters=options.resolved_filters, unresolved_filters=options.unresolved_filters,
+		ambiguous_filters=options.ambiguous_filters, candidate_counts=candidate_counts,
 	)
 
 
@@ -91,19 +106,21 @@ class TextKnowledgeRetriever(KnowledgeRetriever):
 		owned_count = db.scalar(select(func.count()).select_from(KnowledgeItem).where(KnowledgeItem.user_id == user_id)) or 0
 		active_count = db.scalar(select(func.count()).select_from(KnowledgeItem).where(KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True))) or 0
 		if options.unresolved_filters:
-			return _empty_result("search", options, owned_count, active_count, 0, "unresolved_filters")
+			return _empty_result("search", options, owned_count, active_count, 0, "filter_value_not_found")
+		if options.ambiguous_filters:
+			return _empty_result("search", options, owned_count, active_count, 0, "ambiguous_filter")
 		if options.approach_exists is False:
 			return _empty_result("search", options, owned_count, active_count, 0, "approach_not_found")
 		conditions = [KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True)]
 		if options.approach_id:
 			conditions.append(KnowledgeItem.approach_id == options.approach_id)
-		for option_id in options.filter_option_ids:
-			conditions.append(KnowledgeItem.filter_values.any(
-				KnowledgeItemFilterValue.filter_option_id == option_id,
-			))
-		items = list(db.scalars(select(KnowledgeItem).where(*conditions).order_by(KnowledgeItem.updated_at.desc()).limit(300)))
+		groups = options.filter_groups or canonicalize_option_ids(db, user_id, options.filter_option_ids)
+		candidate_counts = progressive_candidate_counts(db, conditions, groups)
+		statement = apply_filter_groups(select(KnowledgeItem).where(*conditions), groups)
+		items = list(db.scalars(statement.order_by(KnowledgeItem.updated_at.desc()).limit(300)))
 		if not items:
-			return _empty_result("search", options, owned_count, active_count, 0, "no_active_items_for_filters" if options.filter_option_ids else "no_active_items_for_approach" if options.approach_id else "no_active_items")
+			reason = "filter_combination_empty" if len(groups) > 1 else "filter_has_no_items" if groups else "no_active_items_for_approach" if options.approach_id else "knowledge_empty"
+			return _empty_result("search", options, owned_count, active_count, 0, reason, candidate_counts)
 		terms = search_terms(options.query)
 		filter_terms = {term for _, value in options.resolved_filters for term in search_terms(value)}
 		terms = [term for term in terms if term not in filter_terms]
@@ -116,10 +133,11 @@ class TextKnowledgeRetriever(KnowledgeRetriever):
 			return KnowledgeRetrievalResult(
 				mode="search", items=selected_items, matches=matches, owned_items_count=owned_count,
 				active_items_count=active_count, candidate_count=len(items), matched_count=len(items),
-				reason="approach_scope_only" if options.approach_id else "no_meaningful_search_terms",
+				reason="metadata_scope_only" if groups else "approach_scope_only" if options.approach_id else "no_meaningful_search_terms",
 				approach_id=options.approach_id, approach_name=options.approach_name,
 				requested_approach=options.requested_approach, approach_exists=options.approach_exists,
 				resolved_filters=options.resolved_filters, unresolved_filters=options.unresolved_filters,
+				ambiguous_filters=options.ambiguous_filters, candidate_counts=candidate_counts,
 			)
 
 		scored: list[KnowledgeMatch] = []
@@ -149,17 +167,15 @@ class TextKnowledgeRetriever(KnowledgeRetriever):
 				scored.append(KnowledgeMatch(item, round(score, 4), tuple(matched_terms)))
 		scored.sort(key=lambda match: match.score, reverse=True)
 		selected = scored[:options.limit]
-		if not selected and options.filter_option_ids:
-			selected_items = items[:options.limit]
-			selected = [KnowledgeMatch(item, 0.1 + (item.rating or 0) * 0.01, ()) for item in selected_items]
 		return KnowledgeRetrievalResult(
 			mode="search", items=[match.item for match in selected], matches=selected,
 			owned_items_count=owned_count, active_items_count=active_count, candidate_count=len(items),
-			matched_count=len(scored), reason="matched" if scored else "metadata_scope_fallback" if selected else "no_textual_overlap",
+			matched_count=len(scored), reason="matched" if scored else "no_relevant_text_match",
 			approach_id=options.approach_id, approach_name=options.approach_name,
 			requested_approach=options.requested_approach, approach_exists=options.approach_exists,
-			fallback_used=any(match.score < 1 for match in selected),
+			fallback_used=False,
 			resolved_filters=options.resolved_filters, unresolved_filters=options.unresolved_filters,
+			ambiguous_filters=options.ambiguous_filters, candidate_counts=candidate_counts,
 		)
 
 
@@ -174,19 +190,21 @@ class KnowledgeRetrievalService:
 		owned_count = db.scalar(select(func.count()).select_from(KnowledgeItem).where(KnowledgeItem.user_id == user_id)) or 0
 		active_count = db.scalar(select(func.count()).select_from(KnowledgeItem).where(KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True))) or 0
 		if options.unresolved_filters:
-			return _empty_result("list", options, owned_count, active_count, 0, "unresolved_filters")
+			return _empty_result("list", options, owned_count, active_count, 0, "filter_value_not_found")
+		if options.ambiguous_filters:
+			return _empty_result("list", options, owned_count, active_count, 0, "ambiguous_filter")
 		if options.approach_exists is False:
 			return _empty_result("list", options, owned_count, active_count, 0, "approach_not_found")
 		conditions = [KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True)]
 		if options.approach_id:
 			conditions.append(KnowledgeItem.approach_id == options.approach_id)
-		for option_id in options.filter_option_ids:
-			conditions.append(KnowledgeItem.filter_values.any(
-				KnowledgeItemFilterValue.filter_option_id == option_id,
-			))
-		items = list(db.scalars(select(KnowledgeItem).where(*conditions).order_by(KnowledgeItem.updated_at.desc()).limit(options.limit)))
+		groups = options.filter_groups or canonicalize_option_ids(db, user_id, options.filter_option_ids)
+		candidate_counts = progressive_candidate_counts(db, conditions, groups)
+		statement = apply_filter_groups(select(KnowledgeItem).where(*conditions), groups)
+		items = list(db.scalars(statement.order_by(KnowledgeItem.updated_at.desc()).limit(options.limit)))
 		if not items:
-			return _empty_result("list", options, owned_count, active_count, 0, "no_active_items_for_filters" if options.filter_option_ids else "no_active_items_for_approach" if options.approach_id else "no_active_items")
+			reason = "filter_combination_empty" if len(groups) > 1 else "filter_has_no_items" if groups else "no_active_items_for_approach" if options.approach_id else "knowledge_empty"
+			return _empty_result("list", options, owned_count, active_count, 0, reason, candidate_counts)
 		matches = [KnowledgeMatch(item, 1.0, ()) for item in items]
 		return KnowledgeRetrievalResult(
 			mode="list", items=items, matches=matches, owned_items_count=owned_count,
@@ -194,6 +212,7 @@ class KnowledgeRetrievalService:
 			approach_id=options.approach_id, approach_name=options.approach_name,
 			requested_approach=options.requested_approach, approach_exists=options.approach_exists,
 			resolved_filters=options.resolved_filters, unresolved_filters=options.unresolved_filters,
+			ambiguous_filters=options.ambiguous_filters, candidate_counts=candidate_counts,
 		)
 
 	def get(self, db: Session, user_id: str, item_id: str) -> KnowledgeItem | None:
@@ -208,8 +227,10 @@ def log_knowledge_retrieval(result: KnowledgeRetrievalResult, *, user_id: str, q
 		"approachId": result.approach_id, "approachExists": result.approach_exists,
 		"resolvedFilters": [{"name": name, "value": value} for name, value in result.resolved_filters],
 		"unresolvedFilters": [{"name": name, "value": value} for name, value in result.unresolved_filters],
+		"ambiguousFilters": [{"name": name, "value": value} for name, value in result.ambiguous_filters],
 		"ownedItemsAvailable": result.owned_items_count, "activeItemsAvailable": result.active_items_count,
 		"candidatesAfterMetadataFilters": result.candidate_count, "matched": result.matched_count,
+		"candidateProgress": [{"filterId": filter_id, "count": count} for filter_id, count in result.candidate_counts],
 		"returned": len(result.items), "reason": result.reason, "fallbackUsed": result.fallback_used,
 		"contextAttached": context_attached,
 	}

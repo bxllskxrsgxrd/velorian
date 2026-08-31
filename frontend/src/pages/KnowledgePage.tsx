@@ -4,12 +4,16 @@ import {
 	createKnowledgeFilter,
 	createKnowledgeFilterOption,
 	createKnowledgeItem,
+	deleteKnowledgeFilter,
+	deleteKnowledgeFilterOption,
 	deleteConversation,
 	deleteKnowledgeItem,
 	listConversations,
 	listKnowledge,
 	listKnowledgeFilters,
 	renameConversation,
+	renameKnowledgeFilter,
+	renameKnowledgeFilterOption,
 	updateKnowledgeItem,
 	uploadKnowledgeFile,
 } from '../api/chatApi';
@@ -19,13 +23,18 @@ import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
 import { Rating } from '../components/ui/Rating/Rating';
 import { Checkbox } from '../components/ui/Checkbox/Checkbox';
 import { getStoredAccentTheme, setAccentTheme, type AccentTheme } from '../theme/accentTheme';
-import type { AuthUser, ConversationSummary, KnowledgeFilterDefinition, KnowledgeItem } from '../types/chat';
+import type { AuthUser, ConversationSummary, KnowledgeFilterDefinition, KnowledgeFilterOption, KnowledgeFilterSelection, KnowledgeItem, SelectedKnowledgeFilters } from '../types/chat';
 import { reportError } from '../utils/reportError';
 import './_knowledgePage.scss';
 
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor/MarkdownEditor'));
 
 type DialogState = { type: 'view' | 'edit' | 'delete'; item: KnowledgeItem } | { type: 'add' } | null;
+type FilterDialogState =
+	| { type: 'manage' | 'rename-filter' | 'delete-filter'; filterId: string }
+	| { type: 'add-option'; filterId: string }
+	| { type: 'rename-option' | 'delete-option'; filterId: string; optionId: string }
+	| null;
 type RatingFilter = 'all' | '5' | '4' | '3' | 'unrated';
 type SortMode = 'date_desc' | 'date_asc' | 'rating_desc' | 'rating_asc';
 
@@ -64,7 +73,12 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	const [rating, setRating] = useState<number | null>(null);
 	const [isActive, setIsActive] = useState(true);
 	const [filterDefinitions, setFilterDefinitions] = useState<KnowledgeFilterDefinition[]>([]);
-	const [selectedFilterOptions, setSelectedFilterOptions] = useState<Record<string, string>>({});
+	const [selectedFilterOptions, setSelectedFilterOptions] = useState<SelectedKnowledgeFilters>({});
+	const [filtersLoaded, setFiltersLoaded] = useState(false);
+	const [filterDialog, setFilterDialog] = useState<FilterDialogState>(null);
+	const [filterMutationValue, setFilterMutationValue] = useState('');
+	const [filterMutationError, setFilterMutationError] = useState('');
+	const [metadataMutationPending, setMetadataMutationPending] = useState(false);
 	const [newFilterName, setNewFilterName] = useState('');
 	const [newOptionValues, setNewOptionValues] = useState<Record<string, string>>({});
 	const [showFilterCreator, setShowFilterCreator] = useState(false);
@@ -87,8 +101,32 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 			.catch((error: unknown) => {
 				reportError('KNOWLEDGE_FILTERS_FAILED', error);
 				showToast(error instanceof Error ? error.message : 'Не удалось загрузить фильтры', 'error');
-			});
+			})
+			.finally(() => setFiltersLoaded(true));
 	}, [showToast]);
+
+	const pageFilterSelections = useMemo<KnowledgeFilterSelection[]>(() => filterDefinitions.flatMap((definition) => {
+		const raw = params.get(`filter.${definition.id}`);
+		const optionIds = raw ? raw.split(',').filter(Boolean) : [];
+		return optionIds.length ? [{ filterId: definition.id, optionIds }] : [];
+	}), [filterDefinitions, params]);
+
+	useEffect(() => {
+		if (!filtersLoaded) return;
+		const next = new URLSearchParams(params);
+		let changed = false;
+		for (const key of Array.from(next.keys())) {
+			if (!key.startsWith('filter.')) continue;
+			const filterId = key.slice('filter.'.length);
+			const definition = filterDefinitions.find((item) => item.id === filterId);
+			const validIds = new Set(definition?.options.map((option) => option.id) ?? []);
+			const selected = (next.get(key) ?? '').split(',').filter((optionId) => validIds.has(optionId));
+			if (!definition || selected.length === 0) next.delete(key);
+			else next.set(key, selected.join(','));
+			if ((params.get(key) ?? '') !== (next.get(key) ?? '')) changed = true;
+		}
+		if (changed) setParams(next, { replace: true });
+	}, [filterDefinitions, filtersLoaded, params, setParams]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -97,7 +135,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 			listKnowledge({
 				search: params.get('q') || undefined,
 				sourceType: sourceType || undefined,
-				filterOptionIds: filterDefinitions.map((definition) => params.get(`filter.${definition.id}`)).filter((value): value is string => Boolean(value)),
+				filters: pageFilterSelections,
 				isActive: activeFilter === 'all' ? undefined : activeFilter === 'active',
 				minRating: ratingFilter === 'all' || ratingFilter === 'unrated' ? undefined : Number(ratingFilter),
 				unrated: ratingFilter === 'unrated',
@@ -123,7 +161,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 			cancelled = true;
 			window.clearTimeout(timer);
 		};
-	}, [activeFilter, filterDefinitions, params, ratingFilter, showToast, sort, sourceType]);
+	}, [activeFilter, pageFilterSelections, params, ratingFilter, showToast, sort, sourceType]);
 
 	const filteredConversations = useMemo(() => {
 		const query = conversationSearch.trim().toLocaleLowerCase('ru');
@@ -141,6 +179,13 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 		const next = new URLSearchParams(params);
 		if (value && value !== defaultValue) next.set(name, value);
 		else next.delete(name);
+		setParams(next);
+	}
+	function setPageFilterSelection(filterId: string, optionIds: string[]) {
+		const next = new URLSearchParams(params);
+		const key = `filter.${filterId}`;
+		if (optionIds.length) next.set(key, Array.from(new Set(optionIds)).join(','));
+		else next.delete(key);
 		setParams(next);
 	}
 	function handleSearchChange(value: string) {
@@ -164,7 +209,9 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 		setContent(item.content);
 		setRating(item.rating);
 		setIsActive(item.isActive);
-		setSelectedFilterOptions(Object.fromEntries(item.filters.map((value) => [value.filterId, value.optionId])));
+		const selected: SelectedKnowledgeFilters = {};
+		for (const value of item.filters) selected[value.filterId] = [...(selected[value.filterId] ?? []), value.optionId];
+		setSelectedFilterOptions(selected);
 		setFile(null);
 		setDialog({ type: 'edit', item });
 	}
@@ -180,6 +227,9 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 		ratingFilter !== 'all' ||
 		sort !== 'date_desc',
 	);
+	const formFilterSelections = Object.entries(selectedFilterOptions)
+		.filter(([, optionIds]) => optionIds.length > 0)
+		.map(([filterId, optionIds]) => ({ filterId, optionIds: Array.from(new Set(optionIds)) }));
 
 	async function addFilter() {
 		const name = newFilterName.trim();
@@ -197,6 +247,11 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 			setCreatingMetadata(false);
 		}
 	}
+	function refreshFilterSchema() {
+		void listKnowledgeFilters()
+			.then(setFilterDefinitions)
+			.catch((error: unknown) => reportError('KNOWLEDGE_FILTER_REFRESH_FAILED', error));
+	}
 	async function addFilterOption(definition: KnowledgeFilterDefinition) {
 		const value = (newOptionValues[definition.id] ?? '').trim();
 		if (!value || creatingMetadata) return;
@@ -204,13 +259,99 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 		try {
 			const created = await createKnowledgeFilterOption(definition.id, value);
 			setFilterDefinitions((current) => current.map((item) => item.id === definition.id ? { ...item, options: [...item.options, created] } : item));
-			setSelectedFilterOptions((current) => ({ ...current, [definition.id]: created.id }));
+			setSelectedFilterOptions((current) => ({
+				...current,
+				[definition.id]: [...(current[definition.id] ?? []), created.id],
+			}));
 			setNewOptionValues((current) => ({ ...current, [definition.id]: '' }));
 		} catch (error) {
 			showToast(error instanceof Error ? error.message : 'Не удалось создать значение', 'error');
 		} finally {
 			setCreatingMetadata(false);
 		}
+	}
+	function openFilterDialog(next: NonNullable<FilterDialogState>, value = '') {
+		setFilterMutationValue(value);
+		setFilterMutationError('');
+		setFilterDialog(next);
+	}
+	async function runMetadataMutation(action: () => Promise<void>) {
+		if (metadataMutationPending) return;
+		setMetadataMutationPending(true);
+		setFilterMutationError('');
+		try {
+			await action();
+		} catch (error) {
+			setFilterMutationError(error instanceof Error ? error.message : 'Не удалось выполнить действие');
+		} finally {
+			setMetadataMutationPending(false);
+		}
+	}
+	async function submitFilterRename(filter: KnowledgeFilterDefinition) {
+		await runMetadataMutation(async () => {
+			const updated = await renameKnowledgeFilter(filter.id, filterMutationValue.trim());
+			setFilterDefinitions((current) => current.map((item) => item.id === updated.id ? updated : item));
+			setItems((current) => current.map((item) => ({
+				...item,
+				filters: item.filters.map((value) => value.filterId === updated.id ? { ...value, filterName: updated.name, filterSlug: updated.slug } : value),
+			})));
+			setFilterDialog({ type: 'manage', filterId: updated.id });
+		});
+	}
+	async function submitOptionRename(filter: KnowledgeFilterDefinition, option: KnowledgeFilterOption) {
+		await runMetadataMutation(async () => {
+			const updated = await renameKnowledgeFilterOption(filter.id, option.id, filterMutationValue.trim());
+			setFilterDefinitions((current) => current.map((item) => item.id === filter.id ? {
+				...item, options: item.options.map((entry) => entry.id === updated.id ? updated : entry),
+			} : item));
+			setItems((current) => current.map((item) => ({
+				...item,
+				filters: item.filters.map((value) => value.optionId === updated.id ? { ...value, value: updated.value } : value),
+			})));
+			setFilterDialog({ type: 'manage', filterId: filter.id });
+		});
+	}
+	async function submitManagedOption(filter: KnowledgeFilterDefinition) {
+		await runMetadataMutation(async () => {
+			const created = await createKnowledgeFilterOption(filter.id, filterMutationValue.trim());
+			setFilterDefinitions((current) => current.map((item) => item.id === filter.id ? {
+				...item, options: [...item.options, created],
+			} : item));
+			setFilterDialog({ type: 'manage', filterId: filter.id });
+		});
+	}
+	async function removeFilterOption(filter: KnowledgeFilterDefinition, option: KnowledgeFilterOption) {
+		await runMetadataMutation(async () => {
+			await deleteKnowledgeFilterOption(filter.id, option.id);
+			setFilterDefinitions(await listKnowledgeFilters());
+			setItems((current) => current.map((item) => ({ ...item, filters: item.filters.filter((value) => value.optionId !== option.id) })));
+			setSelectedFilterOptions((current) => ({
+				...current,
+				[filter.id]: (current[filter.id] ?? []).filter((optionId) => optionId !== option.id),
+			}));
+			const next = new URLSearchParams(params);
+			const remaining = (next.get(`filter.${filter.id}`) ?? '').split(',').filter((optionId) => optionId && optionId !== option.id);
+			if (remaining.length) next.set(`filter.${filter.id}`, remaining.join(','));
+			else next.delete(`filter.${filter.id}`);
+			setParams(next, { replace: true });
+			setFilterDialog({ type: 'manage', filterId: filter.id });
+		});
+	}
+	async function removeFilterDefinition(filter: KnowledgeFilterDefinition) {
+		await runMetadataMutation(async () => {
+			await deleteKnowledgeFilter(filter.id);
+			setFilterDefinitions(await listKnowledgeFilters());
+			setItems((current) => current.map((item) => ({ ...item, filters: item.filters.filter((value) => value.filterId !== filter.id) })));
+			setSelectedFilterOptions((current) => {
+				const next = { ...current };
+				delete next[filter.id];
+				return next;
+			});
+			const next = new URLSearchParams(params);
+			next.delete(`filter.${filter.id}`);
+			setParams(next, { replace: true });
+			setFilterDialog(null);
+		});
 	}
 	function markPending(id: string, pending: boolean) {
 		setPendingItemIds((current) => {
@@ -223,12 +364,12 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 
 	async function saveDialog() {
 		try {
-			const filterOptionIds = Object.values(selectedFilterOptions).filter(Boolean);
 			if (dialog?.type === 'add') {
 				const created = file
-					? await uploadKnowledgeFile(file, title, rating, isActive, null, filterOptionIds)
-					: await createKnowledgeItem(title.trim(), content, rating, isActive, null, filterOptionIds);
+					? await uploadKnowledgeFile(file, title, rating, isActive, null, [], formFilterSelections)
+					: await createKnowledgeItem(title.trim(), content, rating, isActive, null, [], formFilterSelections);
 				setItems((current) => [created, ...current]);
+				refreshFilterSchema();
 				showToast('Данные добавлены в базу знаний', 'success');
 			} else if (dialog?.type === 'edit') {
 				const updated = await updateKnowledgeItem(dialog.item.id, {
@@ -236,9 +377,10 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 					content,
 					rating,
 					isActive,
-					filterOptionIds,
+					filters: formFilterSelections,
 				});
 				setItems((current) => current.map((item) => (item.id === updated.id ? updated : item)));
+				refreshFilterSchema();
 				showToast('Изменения сохранены', 'success');
 			}
 			setDialog(null);
@@ -283,6 +425,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 		try {
 			await deleteKnowledgeItem(item.id);
 			setItems((current) => current.filter((entry) => entry.id !== item.id));
+			refreshFilterSchema();
 			setDialog(null);
 			showToast('Элемент удалён', 'success');
 		} catch (error) {
@@ -297,7 +440,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 			const result = await listKnowledge({
 				search: params.get('q') || undefined,
 				sourceType: sourceType || undefined,
-				filterOptionIds: filterDefinitions.map((definition) => params.get(`filter.${definition.id}`)).filter((value): value is string => Boolean(value)),
+				filters: pageFilterSelections,
 				isActive: activeFilter === 'all' ? undefined : activeFilter === 'active',
 				minRating: ratingFilter === 'all' || ratingFilter === 'unrated' ? undefined : Number(ratingFilter),
 				unrated: ratingFilter === 'unrated',
@@ -319,8 +462,10 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 			{filterDefinitions.map((definition) => (
 				<div key={definition.id} className="knowledge-form__metadata-row">
 					<label>{definition.name}
-						<select aria-label={`${definition.name} элемента`} value={selectedFilterOptions[definition.id] ?? ''} onChange={(event) => setSelectedFilterOptions((current) => ({ ...current, [definition.id]: event.target.value }))}>
-							<option value="">Не выбрано</option>
+						<select multiple aria-label={`${definition.name} элемента`} value={selectedFilterOptions[definition.id] ?? []} onChange={(event) => {
+							const optionIds = Array.from(event.currentTarget.selectedOptions, (option) => option.value);
+							setSelectedFilterOptions((current) => ({ ...current, [definition.id]: optionIds }));
+						}}>
 							{definition.options.map((option) => <option key={option.id} value={option.id}>{option.value}</option>)}
 						</select>
 					</label>
@@ -332,6 +477,10 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 			))}
 		</div>
 	);
+	const managedFilter = filterDialog ? filterDefinitions.find((definition) => definition.id === filterDialog.filterId) : undefined;
+	const managedOption = managedFilter && filterDialog && 'optionId' in filterDialog
+		? managedFilter.options.find((option) => option.id === filterDialog.optionId)
+		: undefined;
 
 	return (
 		<div className="knowledge-shell">
@@ -411,22 +560,28 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 						<option value="rated_content">Оценённые ответы</option>
 					</select>
 					{systemFilterDefinitions.map((definition) => (
-						<select key={definition.id} value={params.get(`filter.${definition.id}`) ?? ''} onChange={(event) => setFilter(`filter.${definition.id}`, event.target.value)} aria-label={definition.name}>
-							<option value="">{definition.name}: все</option>
-							{definition.options.map((option) => <option key={option.id} value={option.id}>{option.value}</option>)}
-						</select>
+						<div className="knowledge-page__filter-control" key={definition.id}>
+							<label>{definition.name}
+								<select multiple value={pageFilterSelections.find((group) => group.filterId === definition.id)?.optionIds ?? []} onChange={(event) => setPageFilterSelection(definition.id, Array.from(event.currentTarget.selectedOptions, (option) => option.value))} aria-label={definition.name}>
+									{definition.options.map((option) => <option key={option.id} value={option.id}>{option.value}</option>)}
+								</select>
+							</label>
+							<button type="button" aria-label={`Управление фильтром ${definition.name}`} onClick={() => openFilterDialog({ type: 'manage', filterId: definition.id })}>•••</button>
+						</div>
 					))}
 					{customFilterDefinitions.length > 0 && (
 						<details className="knowledge-page__extra-filters">
 							<summary>Доп. фильтры{activeCustomFilterCount ? ` (${activeCustomFilterCount})` : ''}</summary>
 							<div>
 								{customFilterDefinitions.map((definition) => (
-									<label key={definition.id}>{definition.name}
-										<select value={params.get(`filter.${definition.id}`) ?? ''} onChange={(event) => setFilter(`filter.${definition.id}`, event.target.value)} aria-label={definition.name}>
-											<option value="">Все</option>
+									<div className="knowledge-page__filter-control" key={definition.id}>
+										<label>{definition.name}
+										<select multiple value={pageFilterSelections.find((group) => group.filterId === definition.id)?.optionIds ?? []} onChange={(event) => setPageFilterSelection(definition.id, Array.from(event.currentTarget.selectedOptions, (option) => option.value))} aria-label={definition.name}>
 											{definition.options.map((option) => <option key={option.id} value={option.id}>{option.value}</option>)}
 										</select>
 									</label>
+										<button type="button" aria-label={`Управление фильтром ${definition.name}`} onClick={() => openFilterDialog({ type: 'manage', filterId: definition.id })}>•••</button>
+									</div>
 								))}
 							</div>
 						</details>
@@ -482,7 +637,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 									<div>
 										<strong>{item.title}</strong>
 										<Rating value={item.rating} readonly size="small" showValue ariaLabel={`Рейтинг ${item.title}`} />
-										{item.filters.map((value) => <span key={value.filterId} className="knowledge-card__approach">{value.filterName}: {value.value}</span>)}
+										{item.filters.map((value) => <span key={value.optionId} className="knowledge-card__approach">{value.filterName}: {value.value}</span>)}
 										<span>
 											{item.sourceType === 'rated_content'
 												? 'Ответ агента'
@@ -599,7 +754,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 						onConfirm={() => setDialog(null)}
 					>
 						<Rating value={dialog.item.rating} readonly showValue />
-						{dialog.item.filters.map((value) => <p key={value.filterId}>{value.filterName}: {value.value}</p>)}
+						{dialog.item.filters.map((value) => <p key={value.optionId}>{value.filterName}: {value.value}</p>)}
 						<div className="knowledge-view">
 							<Suspense fallback={<span>Загрузка предпросмотра…</span>}>
 								<MarkdownEditor value={dialog.item.content} onChange={() => undefined} readonly />
@@ -616,6 +771,60 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 						onConfirm={() => void removeItem(dialog.item)}
 					>
 						<p>«{dialog.item.title}» будет удалён из базы знаний.</p>
+					</ModalDialog>
+				)}
+				{filterDialog?.type === 'manage' && managedFilter && (
+					<ModalDialog title={`Фильтр «${managedFilter.name}»`} confirmLabel="Закрыть" onClose={() => setFilterDialog(null)} onConfirm={() => setFilterDialog(null)}>
+						<div className="knowledge-filter-manager">
+							<p>Используется в {managedFilter.itemCount} записях</p>
+							<div className="knowledge-filter-manager__actions">
+								<button type="button" onClick={() => openFilterDialog({ type: 'rename-filter', filterId: managedFilter.id }, managedFilter.name)}>Переименовать</button>
+								<button type="button" onClick={() => openFilterDialog({ type: 'add-option', filterId: managedFilter.id })}>+ Добавить значение</button>
+								{!managedFilter.isSystem && <button className="knowledge-filter-manager__danger" type="button" onClick={() => openFilterDialog({ type: 'delete-filter', filterId: managedFilter.id })}>Удалить фильтр</button>}
+							</div>
+							<div className="knowledge-filter-manager__options">
+								{managedFilter.options.length === 0 && <p>Значений пока нет</p>}
+								{managedFilter.options.map((option) => (
+									<div key={option.id}>
+										<span><strong>{option.value}</strong> — {option.itemCount} записей</span>
+										<div>
+											<button type="button" aria-label={`Переименовать ${option.value}`} onClick={() => openFilterDialog({ type: 'rename-option', filterId: managedFilter.id, optionId: option.id }, option.value)}>Переименовать</button>
+											<button type="button" aria-label={`Удалить ${option.value}`} onClick={() => openFilterDialog({ type: 'delete-option', filterId: managedFilter.id, optionId: option.id })}>Удалить</button>
+										</div>
+									</div>
+								))}
+							</div>
+						</div>
+					</ModalDialog>
+				)}
+				{filterDialog?.type === 'rename-filter' && managedFilter && (
+					<ModalDialog title="Переименовать фильтр" confirmLabel={metadataMutationPending ? 'Сохранение…' : 'Сохранить'} confirmDisabled={metadataMutationPending || !filterMutationValue.trim() || filterMutationValue.trim() === managedFilter.name} onClose={() => setFilterDialog({ type: 'manage', filterId: managedFilter.id })} onConfirm={() => void submitFilterRename(managedFilter)}>
+						<label>Название фильтра<input autoFocus value={filterMutationValue} onChange={(event) => setFilterMutationValue(event.target.value)} /></label>
+						{filterMutationError && <p className="knowledge-filter-manager__error" role="alert">{filterMutationError}</p>}
+					</ModalDialog>
+				)}
+				{filterDialog?.type === 'add-option' && managedFilter && (
+					<ModalDialog title={`Новое значение — ${managedFilter.name}`} confirmLabel={metadataMutationPending ? 'Добавление…' : 'Добавить'} confirmDisabled={metadataMutationPending || !filterMutationValue.trim()} onClose={() => setFilterDialog({ type: 'manage', filterId: managedFilter.id })} onConfirm={() => void submitManagedOption(managedFilter)}>
+						<label>Новое значение<input autoFocus value={filterMutationValue} onChange={(event) => setFilterMutationValue(event.target.value)} /></label>
+						{filterMutationError && <p className="knowledge-filter-manager__error" role="alert">{filterMutationError}</p>}
+					</ModalDialog>
+				)}
+				{filterDialog?.type === 'rename-option' && managedFilter && managedOption && (
+					<ModalDialog title="Переименовать значение" confirmLabel={metadataMutationPending ? 'Сохранение…' : 'Сохранить'} confirmDisabled={metadataMutationPending || !filterMutationValue.trim() || filterMutationValue.trim() === managedOption.value} onClose={() => setFilterDialog({ type: 'manage', filterId: managedFilter.id })} onConfirm={() => void submitOptionRename(managedFilter, managedOption)}>
+						<label>Значение<input autoFocus value={filterMutationValue} onChange={(event) => setFilterMutationValue(event.target.value)} /></label>
+						{filterMutationError && <p className="knowledge-filter-manager__error" role="alert">{filterMutationError}</p>}
+					</ModalDialog>
+				)}
+				{filterDialog?.type === 'delete-option' && managedFilter && managedOption && (
+					<ModalDialog title={`Удалить значение «${managedOption.value}»?`} confirmLabel={metadataMutationPending ? 'Удаление…' : 'Удалить'} danger confirmDisabled={metadataMutationPending} onClose={() => setFilterDialog({ type: 'manage', filterId: managedFilter.id })} onConfirm={() => void removeFilterOption(managedFilter, managedOption)}>
+						<p>Оно используется в {managedOption.itemCount} записях. Значение будет удалено из этих записей. Сами материалы удалены не будут.</p>
+						{filterMutationError && <p className="knowledge-filter-manager__error" role="alert">{filterMutationError}</p>}
+					</ModalDialog>
+				)}
+				{filterDialog?.type === 'delete-filter' && managedFilter && !managedFilter.isSystem && (
+					<ModalDialog title={`Удалить фильтр «${managedFilter.name}»?`} confirmLabel={metadataMutationPending ? 'Удаление…' : 'Удалить'} danger confirmDisabled={metadataMutationPending} onClose={() => setFilterDialog({ type: 'manage', filterId: managedFilter.id })} onConfirm={() => void removeFilterDefinition(managedFilter)}>
+						<p>Фильтр используется в {managedFilter.itemCount} записях. Все его значения будут удалены из этих записей. Сами материалы базы знаний удалены не будут.</p>
+						{filterMutationError && <p className="knowledge-filter-manager__error" role="alert">{filterMutationError}</p>}
 					</ModalDialog>
 				)}
 			</main>

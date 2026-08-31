@@ -119,7 +119,7 @@ def _add_dynamic_knowledge_filters(connection: Connection) -> None:
 			continue
 		definition_id = new_id()
 		connection.execute(insert(definition_table).values(
-			id=definition_id, user_id=user_id, name="Подход", slug="podhod", type="single_select",
+			id=definition_id, user_id=user_id, name="Подход", normalized_name="подход", slug="podhod", type="multi_select",
 			is_system=True, created_at=utc_now(), updated_at=utc_now(),
 		))
 		definitions[user_id] = definition_id
@@ -171,6 +171,68 @@ def _add_knowledge_source_message_ref(connection: Connection) -> None:
 	))
 
 
+def _upgrade_knowledge_filter_multiselect(connection: Connection) -> None:
+	from .database import Base
+	from .knowledge_filters import normalize_filter_value
+
+	inspector = inspect(connection)
+	definition_table = Base.metadata.tables["knowledge_filter_definitions"]
+	option_table = Base.metadata.tables["knowledge_filter_options"]
+	value_table = Base.metadata.tables["knowledge_item_filter_values"]
+	alias_table = Base.metadata.tables["knowledge_filter_option_aliases"]
+	columns = {column["name"] for column in inspector.get_columns("knowledge_filter_definitions")}
+	if "normalized_name" not in columns:
+		connection.execute(text("ALTER TABLE knowledge_filter_definitions ADD COLUMN normalized_name VARCHAR(96)"))
+	for definition_id, name in connection.execute(text("SELECT id, name FROM knowledge_filter_definitions")):
+		connection.execute(
+			definition_table.update().where(definition_table.c.id == definition_id).values(
+				normalized_name=normalize_filter_value(name), type="multi_select",
+			)
+		)
+	for option_id, value in connection.execute(text("SELECT id, value FROM knowledge_filter_options")):
+		connection.execute(
+			option_table.update().where(option_table.c.id == option_id).values(
+				normalized_value=normalize_filter_value(value),
+			)
+		)
+	if connection.dialect.name == "postgresql":
+		connection.execute(text("ALTER TABLE knowledge_filter_definitions ALTER COLUMN normalized_name SET NOT NULL"))
+	unique_sets = {
+		tuple(constraint.get("column_names") or ())
+		for constraint in inspect(connection).get_unique_constraints("knowledge_filter_definitions")
+	}
+	if ("user_id", "normalized_name") not in unique_sets:
+		connection.execute(text(
+			"CREATE UNIQUE INDEX IF NOT EXISTS ux_knowledge_filter_definition_user_normalized_name "
+			"ON knowledge_filter_definitions (user_id, normalized_name)"
+		))
+
+	alias_table.create(bind=connection, checkfirst=True)
+	value_uniques = {constraint.get("name") for constraint in inspect(connection).get_unique_constraints("knowledge_item_filter_values")}
+	if "uq_knowledge_item_filter_definition" in value_uniques:
+		if connection.dialect.name == "sqlite":
+			for index in inspect(connection).get_indexes("knowledge_item_filter_values"):
+				if index.get("name"):
+					connection.execute(text(f'DROP INDEX IF EXISTS "{index["name"]}"'))
+			connection.execute(text("ALTER TABLE knowledge_item_filter_values RENAME TO knowledge_item_filter_values_legacy"))
+			value_table.create(bind=connection, checkfirst=False)
+			connection.execute(text(
+				"INSERT INTO knowledge_item_filter_values "
+				"(id, knowledge_item_id, filter_definition_id, filter_option_id, created_at) "
+				"SELECT id, knowledge_item_id, filter_definition_id, filter_option_id, created_at "
+				"FROM knowledge_item_filter_values_legacy"
+			))
+			connection.execute(text("DROP TABLE knowledge_item_filter_values_legacy"))
+		else:
+			connection.execute(text(
+				"ALTER TABLE knowledge_item_filter_values DROP CONSTRAINT uq_knowledge_item_filter_definition"
+			))
+			connection.execute(text(
+				"ALTER TABLE knowledge_item_filter_values ADD CONSTRAINT uq_knowledge_item_filter_option "
+				"UNIQUE (knowledge_item_id, filter_definition_id, filter_option_id)"
+			))
+
+
 MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260825_01_ratings_and_knowledge", _create_ratings_and_knowledge),
 	("20260825_02_storage_keys", _add_storage_keys),
@@ -181,6 +243,7 @@ MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260827_01_knowledge_approaches", _add_knowledge_approaches),
 	("20260828_01_dynamic_knowledge_filters", _add_dynamic_knowledge_filters),
 	("20260828_02_knowledge_source_message_ref", _add_knowledge_source_message_ref),
+	("20260831_01_knowledge_filter_multiselect", _upgrade_knowledge_filter_multiselect),
 )
 
 

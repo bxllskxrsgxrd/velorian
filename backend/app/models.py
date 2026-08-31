@@ -182,14 +182,16 @@ class KnowledgeFilterDefinition(Base):
 	__tablename__ = "knowledge_filter_definitions"
 	__table_args__ = (
 		UniqueConstraint("user_id", "slug", name="uq_knowledge_filter_definition_user_slug"),
+		UniqueConstraint("user_id", "normalized_name", name="uq_knowledge_filter_definition_user_normalized_name"),
 		Index("ix_knowledge_filter_definition_user_name", "user_id", "name"),
 	)
 
 	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
 	user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
 	name: Mapped[str] = mapped_column(String(80))
+	normalized_name: Mapped[str] = mapped_column(String(96))
 	slug: Mapped[str] = mapped_column(String(96))
-	type: Mapped[str] = mapped_column(String(24), default="single_select")
+	type: Mapped[str] = mapped_column(String(24), default="multi_select")
 	is_system: Mapped[bool] = mapped_column(Boolean, default=False)
 	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
@@ -215,12 +217,29 @@ class KnowledgeFilterOption(Base):
 
 	definition: Mapped[KnowledgeFilterDefinition] = relationship(back_populates="options")
 	item_values: Mapped[list["KnowledgeItemFilterValue"]] = relationship(back_populates="option", cascade="all, delete-orphan")
+	aliases: Mapped[list["KnowledgeFilterOptionAlias"]] = relationship(back_populates="option", cascade="all, delete-orphan", lazy="selectin")
+
+
+class KnowledgeFilterOptionAlias(Base):
+	__tablename__ = "knowledge_filter_option_aliases"
+	__table_args__ = (
+		UniqueConstraint("filter_option_id", "normalized_value", name="uq_knowledge_filter_option_alias_value"),
+		Index("ix_knowledge_filter_option_alias_lookup", "filter_option_id", "normalized_value"),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+	filter_option_id: Mapped[str] = mapped_column(ForeignKey("knowledge_filter_options.id", ondelete="CASCADE"), index=True)
+	value: Mapped[str] = mapped_column(String(120))
+	normalized_value: Mapped[str] = mapped_column(String(140))
+	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+
+	option: Mapped[KnowledgeFilterOption] = relationship(back_populates="aliases")
 
 
 class KnowledgeItemFilterValue(Base):
 	__tablename__ = "knowledge_item_filter_values"
 	__table_args__ = (
-		UniqueConstraint("knowledge_item_id", "filter_definition_id", name="uq_knowledge_item_filter_definition"),
+		UniqueConstraint("knowledge_item_id", "filter_definition_id", "filter_option_id", name="uq_knowledge_item_filter_option"),
 		Index("ix_knowledge_item_filter_lookup", "filter_definition_id", "filter_option_id", "knowledge_item_id"),
 	)
 

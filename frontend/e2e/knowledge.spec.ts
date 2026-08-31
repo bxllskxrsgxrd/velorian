@@ -84,6 +84,55 @@ test('creates a custom filter, preserves Markdown and renders preview without du
 	await expect(edit.getByLabel('Содержимое')).toHaveValue('**1. Тихий вечер**\n\nОсновной текст.');
 });
 
+test('renames and deletes filters and options while multiselect URL state stays valid', async ({ page }) => {
+	await installMockApi(page);
+	await page.goto('/knowledge');
+	await page.getByRole('button', { name: '+ Добавить фильтр' }).click();
+	await page.getByLabel('Название нового фильтра').fill('ГЕО');
+	await page.locator('.knowledge-page__filter-creator').getByRole('button', { name: 'Создать' }).click();
+	await page.getByText('Доп. фильтры').click();
+	await page.getByRole('button', { name: 'Управление фильтром ГЕО' }).click();
+	await page.getByRole('button', { name: '+ Добавить значение' }).click();
+	await page.getByRole('textbox', { name: 'Новое значение' }).fill('Brasil');
+	await page.getByRole('button', { name: 'Добавить', exact: true }).click();
+	await page.getByRole('button', { name: '+ Добавить значение' }).click();
+	await page.getByRole('textbox', { name: 'Новое значение' }).fill('Mexico');
+	await page.getByRole('button', { name: 'Добавить', exact: true }).click();
+	await page.getByRole('button', { name: 'Переименовать', exact: true }).click();
+	await page.getByLabel('Название фильтра').fill('Страна');
+	await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+	await page.getByRole('button', { name: 'Переименовать Brasil' }).click();
+	await page.getByRole('textbox', { name: 'Значение' }).fill('Brazil');
+	await page.getByRole('button', { name: 'Сохранить', exact: true }).click();
+	await page.locator('.modal-dialog__confirm').click();
+
+	await page.getByRole('button', { name: 'Добавить данные' }).click();
+	const addDialog = page.getByRole('dialog');
+	await addDialog.getByLabel('Название').fill('Материал LATAM');
+	await addDialog.getByLabel('Содержимое').fill('Общий материал');
+	await addDialog.getByLabel('Страна элемента').selectOption([{ label: 'Brazil' }, { label: 'Mexico' }]);
+	await addDialog.locator('.modal-dialog__confirm').click();
+	await expect(page.getByText('Страна: Brazil')).toBeVisible();
+	await expect(page.getByText('Страна: Mexico')).toBeVisible();
+
+	await page.getByLabel('Страна', { exact: true }).selectOption([{ label: 'Brazil' }, { label: 'Mexico' }]);
+	await expect(page).toHaveURL(/filter\.filter-/);
+	const urlBeforeReload = page.url();
+	await page.reload();
+	await expect(page).toHaveURL(urlBeforeReload);
+	await expect(page.getByLabel('Страна', { exact: true })).toHaveValues([/option-/, /option-/]);
+
+	await page.getByText('Доп. фильтры').click();
+	await page.getByRole('button', { name: 'Управление фильтром Страна' }).click();
+	await page.getByRole('button', { name: 'Удалить Brazil' }).click();
+	await page.getByRole('dialog').getByRole('button', { name: 'Удалить', exact: true }).click();
+	await expect(page).not.toHaveURL(/undefined/);
+	await page.getByRole('button', { name: 'Удалить фильтр' }).click();
+	await page.getByRole('dialog').getByRole('button', { name: 'Удалить', exact: true }).click();
+	await expect(page).toHaveURL(/\/knowledge$/);
+	await expect(page.getByText('Материал LATAM')).toBeVisible();
+});
+
 test('agent can browse and search the current user knowledge through chat', async ({ page }) => {
 	await installMockApi(page);
 	await page.goto('/knowledge');

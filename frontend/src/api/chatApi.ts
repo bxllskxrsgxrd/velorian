@@ -1,4 +1,4 @@
-import type { AuthUser, ChatAttachment, ChatMessage, Conversation, ConversationSummary, KnowledgeApproach, KnowledgeFilterDefinition, KnowledgeFilterOption, KnowledgeItem, KnowledgePageResult, MessageRating, SearchMode } from '../types/chat';
+import type { AuthUser, ChatAttachment, ChatMessage, Conversation, ConversationSummary, KnowledgeApproach, KnowledgeFilterDefinition, KnowledgeFilterOption, KnowledgeFilterOptionAlias, KnowledgeFilterSelection, KnowledgeItem, KnowledgePageResult, MessageRating, SearchMode } from '../types/chat';
 import type { AttachmentLimits } from '../constants/attachmentLimits';
 import { getUserFacingError } from '../errors/userErrorMessages';
 import { reportError } from '../utils/reportError';
@@ -186,12 +186,13 @@ export async function saveMessageToKnowledge(messageId: string): Promise<Knowled
 	return (await requestJson<{ items: KnowledgeItem[] }>(`/knowledge/messages/${messageId}`, { method: 'POST' })).items.map(normalizeKnowledgeItem);
 }
 
-export async function listKnowledge(params: { search?: string; sourceType?: string; approachId?: string; filterOptionIds?: string[]; isActive?: boolean; minRating?: number; unrated?: boolean; sort?: string; limit?: number; cursor?: string } = {}): Promise<KnowledgePageResult> {
+export async function listKnowledge(params: { search?: string; sourceType?: string; approachId?: string; filterOptionIds?: string[]; filters?: KnowledgeFilterSelection[]; isActive?: boolean; minRating?: number; unrated?: boolean; sort?: string; limit?: number; cursor?: string } = {}): Promise<KnowledgePageResult> {
 	const query = new URLSearchParams();
 	if (params.search) query.set('search', params.search);
 	if (params.sourceType) query.set('source_type', params.sourceType);
 	if (params.approachId) query.set('approach_id', params.approachId);
 	params.filterOptionIds?.forEach((optionId) => query.append('filter_option_id', optionId));
+	if (params.filters?.length) query.set('filters', JSON.stringify(params.filters.map((group) => ({ filter_id: group.filterId, option_ids: group.optionIds }))));
 	if (params.isActive !== undefined) query.set('is_active', String(params.isActive));
 	if (params.minRating !== undefined) query.set('min_rating', String(params.minRating));
 	if (params.unrated) query.set('unrated', 'true');
@@ -202,11 +203,11 @@ export async function listKnowledge(params: { search?: string; sourceType?: stri
 	return { ...result, items: result.items.map(normalizeKnowledgeItem) };
 }
 
-export async function createKnowledgeItem(title: string, content: string, rating: number | null = null, isActive = true, approachId: string | null = null, filterOptionIds: string[] = []): Promise<KnowledgeItem> {
-	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>('/knowledge', { method: 'POST', body: JSON.stringify({ title, content, rating, is_active: isActive, approach_id: approachId, filter_option_ids: filterOptionIds }) })).item);
+export async function createKnowledgeItem(title: string, content: string, rating: number | null = null, isActive = true, approachId: string | null = null, filterOptionIds: string[] = [], filters: KnowledgeFilterSelection[] = []): Promise<KnowledgeItem> {
+	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>('/knowledge', { method: 'POST', body: JSON.stringify({ title, content, rating, is_active: isActive, approach_id: approachId, filter_option_ids: filterOptionIds, filters: filters.map((group) => ({ filter_id: group.filterId, option_ids: group.optionIds })) }) })).item);
 }
 
-export async function uploadKnowledgeFile(file: File, title = '', rating: number | null = null, isActive = true, approachId: string | null = null, filterOptionIds: string[] = []): Promise<KnowledgeItem> {
+export async function uploadKnowledgeFile(file: File, title = '', rating: number | null = null, isActive = true, approachId: string | null = null, filterOptionIds: string[] = [], filters: KnowledgeFilterSelection[] = []): Promise<KnowledgeItem> {
 	const body = new FormData();
 	body.append('file', file);
 	body.append('title', title);
@@ -214,13 +215,14 @@ export async function uploadKnowledgeFile(file: File, title = '', rating: number
 	body.append('is_active', String(isActive));
 	if (approachId) body.append('approach_id', approachId);
 	body.append('filter_option_ids', JSON.stringify(filterOptionIds));
+	body.append('filters', JSON.stringify(filters.map((group) => ({ filter_id: group.filterId, option_ids: group.optionIds }))));
 	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>('/knowledge/files', { method: 'POST', body })).item);
 }
 
-export async function updateKnowledgeItem(id: string, patch: { title?: string; content?: string; isActive?: boolean; rating?: number | null; approachId?: string | null; filterOptionIds?: string[] }): Promise<KnowledgeItem> {
+export async function updateKnowledgeItem(id: string, patch: { title?: string; content?: string; isActive?: boolean; rating?: number | null; approachId?: string | null; filterOptionIds?: string[]; filters?: KnowledgeFilterSelection[] }): Promise<KnowledgeItem> {
 	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>(`/knowledge/${id}`, {
 		method: 'PATCH',
-		body: JSON.stringify({ title: patch.title, content: patch.content, is_active: patch.isActive, rating: patch.rating, approach_id: patch.approachId, filter_option_ids: patch.filterOptionIds }),
+		body: JSON.stringify({ title: patch.title, content: patch.content, is_active: patch.isActive, rating: patch.rating, approach_id: patch.approachId, filter_option_ids: patch.filterOptionIds, filters: patch.filters?.map((group) => ({ filter_id: group.filterId, option_ids: group.optionIds })) }),
 	})).item);
 }
 
@@ -254,16 +256,42 @@ export async function createKnowledgeFilter(name: string): Promise<KnowledgeFilt
 	})).item;
 }
 
+export async function renameKnowledgeFilter(id: string, name: string): Promise<KnowledgeFilterDefinition> {
+	return (await requestJson<{ item: KnowledgeFilterDefinition }>(`/knowledge/filters/${id}`, {
+		method: 'PATCH', body: JSON.stringify({ name }),
+	})).item;
+}
+
+export async function deleteKnowledgeFilter(id: string): Promise<void> {
+	await apiFetch(`/knowledge/filters/${id}`, { method: 'DELETE' });
+}
+
 export async function createKnowledgeFilterOption(filterId: string, value: string): Promise<KnowledgeFilterOption> {
 	return (await requestJson<{ item: KnowledgeFilterOption }>(`/knowledge/filters/${filterId}/options`, {
 		method: 'POST', body: JSON.stringify({ value }),
 	})).item;
 }
 
-export async function saveGeneratedFileToKnowledge(attachmentId: string, payload: { title: string; rating: number | null; isActive: boolean; filterOptionIds: string[] }): Promise<KnowledgeItem> {
+export async function renameKnowledgeFilterOption(filterId: string, optionId: string, value: string): Promise<KnowledgeFilterOption> {
+	return (await requestJson<{ item: KnowledgeFilterOption }>(`/knowledge/filters/${filterId}/options/${optionId}`, {
+		method: 'PATCH', body: JSON.stringify({ value }),
+	})).item;
+}
+
+export async function deleteKnowledgeFilterOption(filterId: string, optionId: string): Promise<void> {
+	await apiFetch(`/knowledge/filters/${filterId}/options/${optionId}`, { method: 'DELETE' });
+}
+
+export async function createKnowledgeFilterOptionAlias(filterId: string, optionId: string, value: string): Promise<KnowledgeFilterOptionAlias> {
+	return (await requestJson<{ item: KnowledgeFilterOptionAlias }>(`/knowledge/filters/${filterId}/options/${optionId}/aliases`, {
+		method: 'POST', body: JSON.stringify({ value }),
+	})).item;
+}
+
+export async function saveGeneratedFileToKnowledge(attachmentId: string, payload: { title: string; rating: number | null; isActive: boolean; filterOptionIds?: string[]; filters?: KnowledgeFilterSelection[] }): Promise<KnowledgeItem> {
 	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>(`/knowledge/generated-files/${attachmentId}`, {
 		method: 'POST',
-		body: JSON.stringify({ title: payload.title, rating: payload.rating, is_active: payload.isActive, filter_option_ids: payload.filterOptionIds }),
+		body: JSON.stringify({ title: payload.title, rating: payload.rating, is_active: payload.isActive, filter_option_ids: payload.filterOptionIds ?? [], filters: payload.filters?.map((group) => ({ filter_id: group.filterId, option_ids: group.optionIds })) ?? [] }),
 	})).item);
 }
 

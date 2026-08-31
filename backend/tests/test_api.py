@@ -515,6 +515,41 @@ def test_knowledge_schema_has_non_destructive_constraints_and_indexes():
 	assert foreign_keys["approach_id"]["options"]["ondelete"] == "SET NULL"
 	approach_indexes = {index["name"] for index in inspector.get_indexes("knowledge_approaches")}
 	assert {"ix_knowledge_approaches_user_id", "ix_knowledge_approach_user_name"}.issubset(approach_indexes)
+	definition_columns = {column["name"] for column in inspector.get_columns("knowledge_filter_definitions")}
+	assert "normalized_name" in definition_columns
+	definition_uniques = {constraint["name"] for constraint in inspector.get_unique_constraints("knowledge_filter_definitions")}
+	assert "uq_knowledge_filter_definition_user_normalized_name" in definition_uniques
+	value_uniques = {constraint["name"] for constraint in inspector.get_unique_constraints("knowledge_item_filter_values")}
+	assert "uq_knowledge_item_filter_option" in value_uniques
+	value_indexes = {index["name"] for index in inspector.get_indexes("knowledge_item_filter_values")}
+	assert {"ix_knowledge_item_filter_lookup", "ix_knowledge_item_filter_values_filter_option_id"}.issubset(value_indexes)
+	alias_indexes = {index["name"] for index in inspector.get_indexes("knowledge_filter_option_aliases")}
+	assert {"ix_knowledge_filter_option_alias_lookup", "ix_knowledge_filter_option_aliases_filter_option_id"}.issubset(alias_indexes)
+
+
+def test_multiselect_migration_rebuilds_legacy_sqlite_join_without_losing_links():
+	from sqlalchemy import create_engine, inspect, text
+
+	from app.migrations import _upgrade_knowledge_filter_multiselect
+
+	legacy = create_engine("sqlite:///:memory:")
+	with legacy.begin() as connection:
+		connection.execute(text("CREATE TABLE users (id VARCHAR(36) PRIMARY KEY)"))
+		connection.execute(text("CREATE TABLE knowledge_items (id VARCHAR(36) PRIMARY KEY, user_id VARCHAR(36))"))
+		connection.execute(text("CREATE TABLE knowledge_filter_definitions (id VARCHAR(36) PRIMARY KEY, user_id VARCHAR(36), name VARCHAR(80), slug VARCHAR(96), type VARCHAR(24), is_system BOOLEAN, created_at DATETIME, updated_at DATETIME)"))
+		connection.execute(text("CREATE TABLE knowledge_filter_options (id VARCHAR(36) PRIMARY KEY, filter_definition_id VARCHAR(36), value VARCHAR(120), normalized_value VARCHAR(140), created_at DATETIME, updated_at DATETIME)"))
+		connection.execute(text("CREATE TABLE knowledge_item_filter_values (id VARCHAR(36) PRIMARY KEY, knowledge_item_id VARCHAR(36), filter_definition_id VARCHAR(36), filter_option_id VARCHAR(36), created_at DATETIME, CONSTRAINT uq_knowledge_item_filter_definition UNIQUE (knowledge_item_id, filter_definition_id))"))
+		connection.execute(text("INSERT INTO users VALUES ('user-1')"))
+		connection.execute(text("INSERT INTO knowledge_items VALUES ('item-1', 'user-1')"))
+		connection.execute(text("INSERT INTO knowledge_filter_definitions VALUES ('filter-1', 'user-1', ' ГЕО ', 'geo', 'single_select', 0, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
+		connection.execute(text("INSERT INTO knowledge_filter_options VALUES ('option-1', 'filter-1', ' Brazil ', 'brazil', CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)"))
+		connection.execute(text("INSERT INTO knowledge_item_filter_values VALUES ('link-1', 'item-1', 'filter-1', 'option-1', CURRENT_TIMESTAMP)"))
+		_upgrade_knowledge_filter_multiselect(connection)
+		assert connection.scalar(text("SELECT normalized_name FROM knowledge_filter_definitions WHERE id='filter-1'")) == "гео"
+		assert connection.scalar(text("SELECT normalized_value FROM knowledge_filter_options WHERE id='option-1'")) == "brazil"
+		assert connection.scalar(text("SELECT COUNT(*) FROM knowledge_item_filter_values WHERE id='link-1'")) == 1
+		unique_names = {constraint["name"] for constraint in inspect(connection).get_unique_constraints("knowledge_item_filter_values")}
+		assert "uq_knowledge_item_filter_option" in unique_names
 
 
 def test_knowledge_file_delete_failure_preserves_database_item(authenticated_client, monkeypatch):
@@ -589,7 +624,7 @@ def test_knowledge_list_intent_browses_metadata_without_toggle(authenticated_cli
 	)
 	empty_context = completions.calls[0]["messages"][-1]["content"]
 	assert "Mode: list" in empty_context
-	assert "Status: empty" in empty_context
+	assert "Status: KNOWLEDGE_EMPTY" in empty_context
 	assert "пока нет активных данных" in empty_context
 
 	authenticated_client.post("/api/knowledge", json={
@@ -629,7 +664,7 @@ def test_knowledge_list_intent_is_owner_scoped(client, monkeypatch):
 	conversation_id = client.post("/api/conversations", json={"title": "Изоляция списка"}).json()["conversation"]["id"]
 	client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Что находится в моей базе знаний?"})
 	context = completions.calls[0]["messages"][-1]["content"]
-	assert "Status: empty" in context
+	assert "Status: KNOWLEDGE_EMPTY" in context
 	assert "Owner Material" not in context
 	assert "owner-only knowledge" not in context
 
@@ -692,7 +727,7 @@ def test_three_active_items_retrieval_browse_toggle_and_sources(authenticated_cl
 	)
 	inactive_context = completions.calls[-1]["messages"][-1]["content"]
 	assert "Active items: 2" in inactive_context
-	assert "Status: no_relevant_results" in inactive_context
+	assert "Status: NO_RELEVANT_TEXT_MATCH" in inactive_context
 	assert "Facebook Hooks" not in inactive_context
 
 	authenticated_client.patch(f"/api/knowledge/{created[0]['id']}", json={"is_active": True})
@@ -818,13 +853,13 @@ def test_dynamic_approach_resolver_scopes_context_and_distinguishes_empty(authen
 		data={"prompt": "Что есть для подхода Несуществующий?", "search_mode": "none"},
 	)
 	assert unknown.status_code == 200
-	assert "Status: unresolved_filters" in completions.calls[-1]["messages"][-1]["content"]
+	assert "Status: FILTER_VALUE_NOT_FOUND" in completions.calls[-1]["messages"][-1]["content"]
 	empty_response = authenticated_client.post(
 		f"/api/conversations/{conversation_id}/stream",
 		data={"prompt": f"Что есть по {empty['name']}?", "search_mode": "none"},
 	)
 	assert empty_response.status_code == 200
-	assert "Status: filters_empty" in completions.calls[-1]["messages"][-1]["content"]
+	assert "Status: FILTER_HAS_NO_ITEMS" in completions.calls[-1]["messages"][-1]["content"]
 
 
 def test_manual_knowledge_is_markdown_without_title_duplication(authenticated_client):
@@ -946,10 +981,157 @@ def test_dynamic_metadata_filters_use_and_semantics_and_enforce_ownership(authen
 		"title": "Чужой option", "content": "Запрещено", "filter_option_ids": [brazil["id"]],
 	})
 	assert foreign.status_code == 422
-	assert foreign.json()["error"]["code"] == "INVALID_KNOWLEDGE_FILTER_OPTION"
+	assert foreign.json()["error"]["code"] == "INVALID_FILTER_OPTION"
 	assert authenticated_client.patch(f"/api/knowledge/filters/{geo['id']}", json={"name": "Чужой"}).status_code == 404
 	assert authenticated_client.post(f"/api/knowledge/filters/{geo['id']}/options", json={"value": "Франция"}).status_code == 404
 	assert authenticated_client.delete(f"/api/knowledge/filters/{geo['id']}/options/{brazil['id']}").status_code == 404
+
+
+def test_filter_and_option_rename_preserve_ids_links_counts_and_block_normalized_duplicates(authenticated_client):
+	geo = authenticated_client.post("/api/knowledge/filters", json={"name": "ГЕО"}).json()["item"]
+	brazil = authenticated_client.post(f"/api/knowledge/filters/{geo['id']}/options", json={"value": "Brasil"}).json()["item"]
+	mexico = authenticated_client.post(f"/api/knowledge/filters/{geo['id']}/options", json={"value": "Mexico"}).json()["item"]
+	item_ids = [
+		authenticated_client.post("/api/knowledge", json={
+			"title": f"Материал {index}", "content": "Контент",
+			"filters": [{"filter_id": geo["id"], "option_ids": [brazil["id"]]}],
+		}).json()["item"]["id"]
+		for index in range(5)
+	]
+	schema = authenticated_client.get("/api/knowledge/filters").json()["items"]
+	geo_schema = next(item for item in schema if item["id"] == geo["id"])
+	assert geo_schema["itemCount"] == 5
+	assert next(option for option in geo_schema["options"] if option["id"] == brazil["id"])["itemCount"] == 5
+
+	renamed = authenticated_client.patch(f"/api/knowledge/filters/{geo['id']}", json={"name": "  Страна  "}).json()["item"]
+	assert renamed["id"] == geo["id"]
+	assert renamed["slug"] == geo["slug"]
+	assert renamed["name"] == "Страна"
+	from app.agent_intent import available_filter_catalog
+	from app.database import SessionLocal
+	user_id = authenticated_client.get("/api/auth/me").json()["user"]["id"]
+	with SessionLocal() as db:
+		assert next(definition for definition in available_filter_catalog(db, user_id) if definition["id"] == geo["id"])["name"] == "Страна"
+	for item_id in item_ids:
+		item = authenticated_client.get(f"/api/knowledge/{item_id}").json()["item"]
+		assert len(item["filters"]) == 1
+		assert item["filters"][0]["filterId"] == geo["id"]
+		assert item["filters"][0]["filterName"] == "Страна"
+
+	renamed_option = authenticated_client.patch(
+		f"/api/knowledge/filters/{geo['id']}/options/{brazil['id']}", json={"value": "  БРАЗИЛИЯ  "},
+	).json()["item"]
+	assert renamed_option["id"] == brazil["id"]
+	assert renamed_option["value"] == "БРАЗИЛИЯ"
+	assert renamed_option["normalizedValue"] == "бразилия"
+	alias = authenticated_client.post(
+		f"/api/knowledge/filters/{geo['id']}/options/{brazil['id']}/aliases", json={"value": "Brazil"},
+	)
+	assert alias.status_code == 200
+	with SessionLocal() as db:
+		catalog_option = next(
+			option
+			for definition in available_filter_catalog(db, user_id) if definition["id"] == geo["id"]
+			for option in definition["options"] if option["id"] == brazil["id"]
+		)
+	assert catalog_option["value"] == "БРАЗИЛИЯ"
+	assert catalog_option["aliases"] == ["Brazil"]
+	assert all(
+		authenticated_client.get(f"/api/knowledge/{item_id}").json()["item"]["filters"][0]["value"] == "БРАЗИЛИЯ"
+		for item_id in item_ids
+	)
+
+	duplicate_option = authenticated_client.patch(
+		f"/api/knowledge/filters/{geo['id']}/options/{mexico['id']}", json={"value": "  бразилия "},
+	)
+	assert duplicate_option.status_code == 409
+	assert duplicate_option.json()["error"]["code"] == "FILTER_OPTION_ALREADY_EXISTS"
+	geo_after_duplicate = next(definition for definition in authenticated_client.get("/api/knowledge/filters").json()["items"] if definition["id"] == geo["id"])
+	assert next(option for option in geo_after_duplicate["options"] if option["id"] == mexico["id"])["value"] == "Mexico"
+
+	offer = authenticated_client.post("/api/knowledge/filters", json={"name": "Оффер"}).json()["item"]
+	duplicate_filter = authenticated_client.patch(f"/api/knowledge/filters/{offer['id']}", json={"name": " страна "})
+	assert duplicate_filter.status_code == 409
+	assert duplicate_filter.json()["error"]["code"] == "FILTER_ALREADY_EXISTS"
+	assert authenticated_client.get("/api/knowledge/filters").status_code == 200
+
+	assert authenticated_client.delete(f"/api/knowledge/filters/{geo['id']}/options/{brazil['id']}").status_code == 204
+	assert all(authenticated_client.get(f"/api/knowledge/{item_id}").status_code == 200 for item_id in item_ids)
+	assert all(authenticated_client.get(f"/api/knowledge/{item_id}").json()["item"]["filters"] == [] for item_id in item_ids)
+	assert authenticated_client.delete(f"/api/knowledge/filters/{geo['id']}").status_code == 204
+	assert all(authenticated_client.get(f"/api/knowledge/{item_id}").status_code == 200 for item_id in item_ids)
+	system_filter = next(item for item in authenticated_client.get("/api/knowledge/filters").json()["items"] if item["isSystem"])
+	system_delete = authenticated_client.delete(f"/api/knowledge/filters/{system_filter['id']}")
+	assert system_delete.status_code == 422
+	assert system_delete.json()["error"]["code"] == "SYSTEM_FILTER_CANNOT_BE_DELETED"
+
+
+def test_multiselect_filter_groups_use_or_inside_and_between_and_validate_pairs(authenticated_client, monkeypatch):
+	geo = authenticated_client.post("/api/knowledge/filters", json={"name": "ГЕО"}).json()["item"]
+	brazil = authenticated_client.post(f"/api/knowledge/filters/{geo['id']}/options", json={"value": "Brazil"}).json()["item"]
+	mexico = authenticated_client.post(f"/api/knowledge/filters/{geo['id']}/options", json={"value": "Mexico"}).json()["item"]
+	offer = authenticated_client.post("/api/knowledge/filters", json={"name": "Оффер"}).json()["item"]
+	xp = authenticated_client.post(f"/api/knowledge/filters/{offer['id']}/options", json={"value": "XP"}).json()["item"]
+	magalu = authenticated_client.post(f"/api/knowledge/filters/{offer['id']}/options", json={"value": "Magalu"}).json()["item"]
+	approach = next(item for item in authenticated_client.get("/api/knowledge/filters").json()["items"] if item["isSystem"])
+	interview = next(option for option in approach["options"] if option["value"] == "Интервью")
+	show = next(option for option in approach["options"] if option["value"] == "Шоу")
+
+	def create(title, selections):
+		return authenticated_client.post("/api/knowledge", json={
+			"title": title, "content": title,
+			"filters": [{"filter_id": filter_id, "option_ids": option_ids} for filter_id, option_ids in selections],
+		}).json()["item"]
+
+	item_a = create("Brazil XP Interview", [(geo["id"], [brazil["id"]]), (offer["id"], [xp["id"]]), (approach["id"], [interview["id"]])])
+	item_b = create("Mexico XP Interview", [(geo["id"], [mexico["id"]]), (offer["id"], [xp["id"]]), (approach["id"], [interview["id"]])])
+	item_c = create("Brazil Magalu Show", [(geo["id"], [brazil["id"]]), (offer["id"], [magalu["id"]]), (approach["id"], [show["id"]])])
+	item_d = create("Dual geo XP Interview", [(geo["id"], [brazil["id"], mexico["id"]]), (offer["id"], [xp["id"]]), (approach["id"], [interview["id"]])])
+
+	def filtered(groups):
+		response = authenticated_client.get("/api/knowledge", params={
+			"filters": json.dumps([{"filter_id": filter_id, "option_ids": option_ids} for filter_id, option_ids in groups]),
+		})
+		assert response.status_code == 200
+		return {item["id"] for item in response.json()["items"]}
+
+	assert filtered([(geo["id"], [brazil["id"]])]) == {item_a["id"], item_c["id"], item_d["id"]}
+	assert filtered([(geo["id"], [brazil["id"], mexico["id"]])]) == {item_a["id"], item_b["id"], item_c["id"], item_d["id"]}
+	assert filtered([(geo["id"], [brazil["id"], mexico["id"]]), (offer["id"], [xp["id"]])]) == {item_a["id"], item_b["id"], item_d["id"]}
+	assert filtered([(geo["id"], [brazil["id"], mexico["id"]]), (offer["id"], [xp["id"]]), (approach["id"], [interview["id"]])]) == {item_a["id"], item_b["id"], item_d["id"]}
+	assert filtered([(geo["id"], [brazil["id"]]), (geo["id"], [mexico["id"]])]) == {item_a["id"], item_b["id"], item_c["id"], item_d["id"]}
+
+	invalid = authenticated_client.get("/api/knowledge", params={
+		"filters": json.dumps([{"filter_id": geo["id"], "option_ids": [xp["id"]]}]),
+	})
+	assert invalid.status_code == 422
+	assert invalid.json()["error"]["code"] == "INVALID_FILTER_OPTION"
+
+	updated = authenticated_client.patch(f"/api/knowledge/{item_d['id']}", json={
+		"filters": [{"filter_id": geo["id"], "option_ids": [brazil["id"], mexico["id"], brazil["id"]]}],
+	})
+	assert updated.status_code == 200
+	assert {value["optionId"] for value in updated.json()["item"]["filters"]} == {brazil["id"], mexico["id"]}
+
+	import app.main as main_module
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	install_structured_intents(monkeypatch, main_module, lambda _prompt: {
+		"action": "knowledge_search", "knowledge_intent": "search", "knowledge_query": "",
+		"filters": [
+			{"filterId": geo["id"], "optionIds": [mexico["id"]], "status": "resolved", "confidence": 1, "explicit": True},
+			{"filterId": offer["id"], "optionIds": [magalu["id"]], "status": "resolved", "confidence": 1, "explicit": True},
+		],
+	})
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Пустая комбинация"}).json()["conversation"]["id"]
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "только Mexico и только Magalu"})
+	assert "Status: FILTER_COMBINATION_EMPTY" in completions.calls[-1]["messages"][-1]["content"]
+	install_structured_intents(monkeypatch, main_module, lambda _prompt: {
+		"action": "knowledge_search", "knowledge_intent": "search", "knowledge_query": "show",
+		"ambiguous_filters": [{"filterName": "Подход / Оффер", "value": "Show"}],
+	})
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "покажи show материалы"})
+	assert "Status: AMBIGUOUS_FILTER" in completions.calls[-1]["messages"][-1]["content"]
 
 
 def test_csrf_rejects_missing_invalid_and_rotated_tokens(client):
