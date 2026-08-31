@@ -66,4 +66,12 @@ describe('MessageBubble actions', () => {
 		fireEvent.click(screen.getByRole('button', { name: 'Поставить рейтинг 5 из 5' }));
 		expect(onRate).toHaveBeenCalledWith(5, undefined);
 	});
+
+	it('creates a Markdown file once and exposes progress state', async () => {
+		const onCreateFile = vi.fn().mockResolvedValue(undefined);
+		render(<MessageBubble message={{ id: 'assistant-file', role: 'assistant', content: '## Статья', status: 'done' }} onOpenAttachment={vi.fn()} onCreateFile={onCreateFile} />);
+		fireEvent.click(screen.getByRole('button', { name: 'Создать файл' }));
+		expect(onCreateFile).toHaveBeenCalledOnce();
+		expect(await screen.findByRole('button', { name: 'Файл создан' })).toBeDisabled();
+	});
 });

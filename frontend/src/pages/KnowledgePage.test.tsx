@@ -17,7 +17,9 @@ vi.mock('../api/chatApi', () => api);
 
 const item = {
 	id: 'knowledge-1', sourceType: 'manual' as const, title: 'Оффер', content: 'Проверенный текст', mimeType: 'text/plain',
-	rating: 5, approach: null, isActive: true, metadata: {}, createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z',
+	fileName: 'Оффер.md', rating: 5, approach: null, isActive: true, metadata: {},
+	filters: { geo: null, celebrity: null, offer: null, news_source: null },
+	createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z',
 };
 
 function LocationProbe() {
@@ -48,8 +50,17 @@ describe('KnowledgePage', () => {
 		fireEvent.change(await within(dialog).findByPlaceholderText('Вставьте текст'), { target: { value: 'Проверенный текст' } });
 		fireEvent.click(within(dialog).getByRole('button', { name: 'Поставить рейтинг 5 из 5' }));
 		fireEvent.click(within(dialog).getByRole('button', { name: 'Добавить' }));
-		await waitFor(() => expect(api.createKnowledgeItem).toHaveBeenCalledWith('Оффер', 'Проверенный текст', 5, true, null));
-		expect(await screen.findByText('Оффер')).toBeInTheDocument();
+		await waitFor(() => expect(api.createKnowledgeItem).toHaveBeenCalledWith('Оффер', 'Проверенный текст', 5, true, null, {
+			geo: null, celebrity: null, offer: null, news_source: null,
+		}));
+		expect(await screen.findByText('Оффер.md')).toBeInTheDocument();
+	});
+
+	it('combines all four metadata filters in the list request', async () => {
+		renderKnowledge('/knowledge?geo=Бразилия&celebrity=Alexandre%20Benchimol&offer=XP%20Investimentos&news_source=G1');
+		await waitFor(() => expect(api.listKnowledge).toHaveBeenCalledWith(expect.objectContaining({
+			filters: { geo: 'Бразилия', celebrity: 'Alexandre Benchimol', offer: 'XP Investimentos', news_source: 'G1' },
+		})));
 	});
 
 	it('resets every filter and removes all query parameters', async () => {

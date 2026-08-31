@@ -22,11 +22,14 @@ type MessageBubbleProps = {
 	onRate?: (score: number, comment?: string) => void;
 	onRemoveRating?: () => void;
 	onSaveToKnowledge?: () => void;
+	onCreateFile?: () => Promise<void>;
+	onAddAttachmentToKnowledge?: (attachment: ChatAttachment) => void;
 };
 
-export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, branch, onRate, onRemoveRating, onSaveToKnowledge }: MessageBubbleProps) {
+export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, branch, onRate, onRemoveRating, onSaveToKnowledge, onCreateFile, onAddAttachmentToKnowledge }: MessageBubbleProps) {
 	const [isEditing, setIsEditing] = useState(false);
 	const [draft, setDraft] = useState(message.content);
+	const [fileState, setFileState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 	const isUser = message.role === CHAT_ROLES.USER;
 
 	const isPending = !isUser && message.status === CHAT_MESSAGE_STATUSES.PENDING && !message.content;
@@ -93,7 +96,7 @@ export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, bran
 			{hasFiles && (
 				<div className="message__files">
 					{fileAttachments?.map((attachment) => (
-						<MessageAttachment key={attachment.id} attachment={attachment} onOpen={() => onOpenAttachment(attachment)} />
+						<MessageAttachment key={attachment.id} attachment={attachment} onOpen={() => onOpenAttachment(attachment)} onAddToKnowledge={attachment.generated && onAddAttachmentToKnowledge ? () => onAddAttachmentToKnowledge(attachment) : undefined} />
 					))}
 				</div>
 			)}
@@ -120,6 +123,15 @@ export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, bran
 			)}
 			{!isUser && !isPending && !isStreaming && !isCancelled && onRate && onRemoveRating && (
 				<MessageRating rating={message.rating} onRate={onRate} onRemove={onRemoveRating} onSaveToKnowledge={onSaveToKnowledge} />
+			)}
+			{!isUser && !isPending && !isStreaming && !isCancelled && onCreateFile && hasText && (
+				<div className="message__actions message__actions--file">
+					<button type="button" disabled={fileState === 'loading' || fileState === 'success'} onClick={() => {
+						setFileState('loading');
+						void onCreateFile().then(() => setFileState('success')).catch(() => setFileState('error'));
+					}}>{fileState === 'loading' ? 'Создание…' : fileState === 'success' ? 'Файл создан' : 'Создать файл'}</button>
+					{fileState === 'error' && <span role="status">Не удалось создать файл</span>}
+				</div>
 			)}
 			{isUser && !isEditing && (onEdit || (branch && branch.total > 1)) && (
 				<div className="message__user-actions">

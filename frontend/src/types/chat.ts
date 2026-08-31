@@ -12,8 +12,9 @@ export type ChatAttachment = {
 	url: string;
 	downloadUrl?: string;
 	isImage: boolean;
-	extractionStatus?: 'ready' | 'empty' | 'ocr_unavailable' | 'unsupported' | 'generated';
+	extractionStatus?: 'ready' | 'empty' | 'ocr_unavailable' | 'unsupported' | 'generated' | 'generated_markdown';
 	generated?: boolean;
+	knowledgeSaved?: boolean;
 };
 
 export type ChatMessageStatus = (typeof CHAT_MESSAGE_STATUSES)[keyof typeof CHAT_MESSAGE_STATUSES];
@@ -49,6 +50,13 @@ export type KnowledgeApproach = {
 	slug: string;
 	createdAt: string;
 	updatedAt: string;
+};
+
+export type KnowledgeFilters = {
+	geo: string | null;
+	celebrity: string | null;
+	offer: string | null;
+	news_source: string | null;
 };
 
 export type ChatMessage = {
@@ -96,20 +104,23 @@ export type AuthUser = {
 
 export type KnowledgeItem = {
 	id: string;
-	sourceType: 'assistant_message' | 'uploaded_file' | 'manual' | 'rated_content';
+	sourceType: 'assistant_message' | 'assistant_file' | 'uploaded_file' | 'manual' | 'rated_content';
 	sourceMessageId?: string | null;
 	sourceFileId?: string | null;
 	title: string;
 	content: string;
 	mimeType: string;
+	fileName: string;
 	originalFilename?: string | null;
 	rating: number | null;
 	approach: KnowledgeApproach | null;
 	isActive: boolean;
 	metadata: Record<string, unknown>;
+	filters: KnowledgeFilters;
 	createdAt: string;
 	updatedAt: string;
 	downloadUrl?: string | null;
+	originalDownloadUrl?: string | null;
 };
 
 export type KnowledgePageResult = {

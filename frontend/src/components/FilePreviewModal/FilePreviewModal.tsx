@@ -8,6 +8,7 @@ import { IconButton } from '../ui/IconButton/IconButton';
 import './_filePreviewModal.scss';
 
 const HighlightedCode = lazy(() => import('../MessageBubble/AssistantMessageContent').then((module) => ({ default: module.HighlightedCode })));
+const MarkdownPreview = lazy(() => import('../MessageBubble/AssistantMessageContent'));
 
 type FilePreviewModalProps = {
 	file: PreviewFile;
@@ -20,6 +21,7 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 	const isImage = file.type.startsWith('image/');
 	const isPdf = file.type === 'application/pdf';
 	const isText = isTextPreview(file);
+	const isMarkdown = file.type === 'text/markdown' || file.name.toLowerCase().endsWith('.md');
 
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
@@ -60,6 +62,9 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 
 		if (isText) {
 			const textContent = textPreview?.url === file.url ? textPreview.content : 'Загрузка…';
+			if (isMarkdown) {
+				return <div className="file-preview__markdown"><Suspense fallback={<pre className="file-preview__text">{textContent}</pre>}><MarkdownPreview content={textContent} isStreaming={false} /></Suspense></div>;
+			}
 
 			return (
 				<Suspense fallback={<pre className="file-preview__text">{textContent}</pre>}><HighlightedCode

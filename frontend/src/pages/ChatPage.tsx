@@ -2,12 +2,14 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
 	activateMessageBranch,
+	createMessageMarkdownFile,
 	createConversation,
 	deleteConversation,
 	getConversation,
 	listConversations,
 	renameConversation,
 	removeMessageRating,
+	saveAttachmentToKnowledge,
 	saveMessageToKnowledge,
 	setMessageRating,
 	streamChat,
@@ -18,6 +20,9 @@ import { FilePreviewModal } from '../components/FilePreviewModal/FilePreviewModa
 import { MessageList } from '../components/MessageList/MessageList';
 import { PromptBar } from '../components/PromptBar/PromptBar';
 import { RequestMap } from '../components/RequestMap/RequestMap';
+import { KnowledgeFilterFields } from '../components/KnowledgeFilterFields/KnowledgeFilterFields';
+import { EMPTY_KNOWLEDGE_FILTERS } from '../constants/knowledgeFilters';
+import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
 import { DropZone } from '../components/ui/DropZone/DropZone';
 import { CHAT_MESSAGE_STATUSES } from '../constants/chatMessageStatuses';
 import { CHAT_ROLES } from '../constants/chatRoles';
@@ -28,6 +33,7 @@ import type {
 	ChatAttachment,
 	ChatMessage,
 	ConversationSummary,
+	KnowledgeFilters,
 	PreviewFile,
 	SearchMode,
 } from '../types/chat';
@@ -95,6 +101,9 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	const sendOperationRef = useRef<Promise<void> | null>(null);
 	const [isCreatingConversation, setIsCreatingConversation] = useState(false);
 	const [promptResetSequence, setPromptResetSequence] = useState(0);
+	const [knowledgeAttachment, setKnowledgeAttachment] = useState<ChatAttachment | null>(null);
+	const [knowledgeFilters, setKnowledgeFilters] = useState<KnowledgeFilters>({ ...EMPTY_KNOWLEDGE_FILTERS });
+	const [knowledgeSaveState, setKnowledgeSaveState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
 
 	const {
 		isDragging,
@@ -542,6 +551,44 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 		}
 	}
 
+	async function handleCreateFile(message: ChatMessage) {
+		try {
+			const { attachment, created } = await createMessageMarkdownFile(message.id);
+			setMessages((current) => current.map((entry) => entry.id === message.id
+				? { ...entry, attachments: [...(entry.attachments ?? []).filter((item) => item.id !== attachment.id), attachment] }
+				: entry));
+			showToast(created ? 'Markdown-файл создан' : 'Файл для этого ответа уже создан', created ? 'success' : 'info');
+		} catch (error) {
+			reportError('MESSAGE_MARKDOWN_FILE_FAILED', error, { messageId: message.id });
+			showToast(error instanceof Error ? error.message : 'Не удалось создать файл', 'error');
+			throw error;
+		}
+	}
+
+	function openKnowledgeAttachmentDialog(attachment: ChatAttachment) {
+		setKnowledgeAttachment(attachment);
+		setKnowledgeFilters({ ...EMPTY_KNOWLEDGE_FILTERS });
+		setKnowledgeSaveState('idle');
+	}
+
+	async function handleSaveAttachmentToKnowledge() {
+		if (!knowledgeAttachment || knowledgeSaveState === 'loading' || knowledgeSaveState === 'success') return;
+		setKnowledgeSaveState('loading');
+		try {
+			const result = await saveAttachmentToKnowledge(knowledgeAttachment.id, knowledgeFilters);
+			setMessages((current) => current.map((message) => ({
+				...message,
+				attachments: message.attachments?.map((attachment) => attachment.id === knowledgeAttachment.id ? { ...attachment, knowledgeSaved: true } : attachment),
+			})));
+			setKnowledgeSaveState('success');
+			showToast(result.created ? 'Добавлено в базу знаний' : 'Файл уже находится в базе знаний', result.created ? 'success' : 'info');
+		} catch (error) {
+			reportError('ATTACHMENT_KNOWLEDGE_SAVE_FAILED', error, { attachmentId: knowledgeAttachment.id });
+			setKnowledgeSaveState('error');
+			showToast(error instanceof Error ? error.message : 'Не удалось добавить файл в базу знаний', 'error');
+		}
+	}
+
 	function handleNewConversation() {
 		suppressInitialFallbackRef.current = true;
 		if (isGenerating) requestControllerRef.current?.abort();
@@ -683,6 +730,8 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 								onRate={(message, score, comment) => void handleRateMessage(message, score, comment)}
 								onRemoveRating={(message) => void handleRemoveRating(message)}
 								onSaveToKnowledge={(message) => void handleSaveToKnowledge(message)}
+								onCreateFile={handleCreateFile}
+								onAddAttachmentToKnowledge={openKnowledgeAttachmentDialog}
 							/>
 						) : (
 							<div className="chat-page__start">
@@ -726,6 +775,18 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 				/>
 			)}
 			{previewFile && <FilePreviewModal file={previewFile} onClose={closePreview} />}
+			{knowledgeAttachment && <ModalDialog
+				title={`Добавить «${knowledgeAttachment.name}» в БД`}
+				confirmLabel={knowledgeSaveState === 'loading' ? 'Добавление…' : knowledgeSaveState === 'success' ? 'Добавлено' : 'Добавить в БД'}
+				confirmDisabled={knowledgeSaveState === 'loading' || knowledgeSaveState === 'success'}
+				closeDisabled={knowledgeSaveState === 'loading'}
+				onClose={() => setKnowledgeAttachment(null)}
+				onConfirm={() => void handleSaveAttachmentToKnowledge()}
+			><div className="chat-knowledge-form">
+				<p>Фильтры необязательны. Markdown будет сохранён без преобразования в HTML.</p>
+				<KnowledgeFilterFields value={knowledgeFilters} onChange={setKnowledgeFilters} disabled={knowledgeSaveState === 'loading' || knowledgeSaveState === 'success'} />
+				{knowledgeSaveState === 'error' && <p role="alert">Не удалось добавить файл в базу знаний. Можно повторить попытку.</p>}
+			</div></ModalDialog>}
 		</div>
 	);
 }

@@ -231,3 +231,7 @@
 		}
 	}
 }
+.chat-knowledge-form { display: grid; gap: 12px; }
+.chat-knowledge-form > p { margin: 0; font-size: 13px; }
+.knowledge-filter-fields { display: grid; gap: 9px; }
+.knowledge-filter-fields label { display: grid; gap: 5px; color: var(--color-text-secondary); font-size: 12px; }

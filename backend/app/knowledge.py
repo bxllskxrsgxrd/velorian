@@ -11,7 +11,7 @@ from typing import Annotated, Literal
 from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
-from pydantic import BaseModel, Field
+from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, asc, desc, func, or_, select, update
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
@@ -22,6 +22,7 @@ from .database import get_db
 from .errors import AppError
 from .file_processing import extract_text, validate_file_name
 from .knowledge_retrieval import KnowledgeRetrievalResult, KnowledgeSearchOptions, knowledge_retrieval_service
+from .markdown_files import markdown_file_name, markdown_title
 from .models import Attachment, Conversation, KnowledgeApproach, KnowledgeItem, Message, MessageRating, User, utc_now
 from .storage import build_storage_key, get_file_storage
 
@@ -29,6 +30,45 @@ from .storage import build_storage_key, get_file_storage
 router = APIRouter(prefix=f"{settings.api_prefix}/knowledge", tags=["knowledge"])
 logger = logging.getLogger("velorian")
 RatingValue = Annotated[int, Field(strict=True, ge=1, le=5)]
+KNOWLEDGE_FILTER_KEYS = ("geo", "celebrity", "offer", "news_source")
+
+
+class KnowledgeFiltersPayload(BaseModel):
+	geo: str | None = Field(default=None, max_length=160)
+	celebrity: str | None = Field(default=None, max_length=160)
+	offer: str | None = Field(default=None, max_length=160)
+	news_source: str | None = Field(default=None, max_length=160)
+
+	@field_validator("geo", "celebrity", "offer", "news_source", mode="before")
+	@classmethod
+	def normalize_optional_value(cls, value):
+		if value is None:
+			return None
+		if not isinstance(value, str):
+			return value
+		normalized = " ".join(value.split())
+		if normalized.casefold() in {"undefined", "null"}:
+			raise ValueError("Invalid empty filter marker")
+		return normalized or None
+
+
+def knowledge_filters(metadata: dict | None) -> dict[str, str | None]:
+	metadata = metadata or {}
+	return {
+		key: value.strip() if isinstance(value := metadata.get(key), str) and value.strip() else None
+		for key in KNOWLEDGE_FILTER_KEYS
+	}
+
+
+def merge_knowledge_filters(metadata: dict | None, filters: KnowledgeFiltersPayload | None) -> dict:
+	result = dict(metadata or {})
+	values = filters.model_dump() if filters is not None else {key: None for key in KNOWLEDGE_FILTER_KEYS}
+	for key, value in values.items():
+		if value is None:
+			result.pop(key, None)
+		else:
+			result[key] = value
+	return result
 
 
 class KnowledgeCreatePayload(BaseModel):
@@ -37,6 +77,7 @@ class KnowledgeCreatePayload(BaseModel):
 	is_active: bool = True
 	rating: RatingValue | None = None
 	approach_id: str | None = Field(default=None, max_length=36)
+	filters: KnowledgeFiltersPayload = Field(default_factory=KnowledgeFiltersPayload)
 
 
 class KnowledgeUpdatePayload(BaseModel):
@@ -45,6 +86,14 @@ class KnowledgeUpdatePayload(BaseModel):
 	is_active: bool | None = None
 	rating: RatingValue | None = None
 	approach_id: str | None = Field(default=None, max_length=36)
+	filters: KnowledgeFiltersPayload | None = None
+
+
+class KnowledgeAttachmentPayload(BaseModel):
+	title: str | None = Field(default=None, max_length=255)
+	is_active: bool = True
+	approach_id: str | None = Field(default=None, max_length=36)
+	filters: KnowledgeFiltersPayload = Field(default_factory=KnowledgeFiltersPayload)
 
 
 class ApproachPayload(BaseModel):
@@ -99,6 +148,7 @@ def _knowledge_search_condition(db: Session, raw_term: str):
 
 
 def knowledge_payload(item: KnowledgeItem) -> dict:
+	file_name = markdown_file_name(item.title, "knowledge")
 	return {
 		"id": item.id,
 		"sourceType": item.source_type,
@@ -106,15 +156,18 @@ def knowledge_payload(item: KnowledgeItem) -> dict:
 		"sourceFileId": item.source_file_id,
 		"title": item.title,
 		"content": item.content,
-		"mimeType": item.mime_type,
+		"mimeType": "text/markdown",
+		"fileName": file_name,
 		"originalFilename": item.original_filename,
 		"rating": item.rating,
 		"approach": approach_payload(item.approach) if item.approach else None,
 		"isActive": item.is_active,
 		"metadata": item.item_metadata or {},
+		"filters": knowledge_filters(item.item_metadata),
 		"createdAt": item.created_at.isoformat(),
 		"updatedAt": item.updated_at.isoformat(),
-		"downloadUrl": f"{settings.api_prefix}/knowledge/{item.id}/file" if item.storage_key or item.storage_path or item.source_file_id else None,
+		"downloadUrl": f"{settings.api_prefix}/knowledge/{item.id}/file",
+		"originalDownloadUrl": f"{settings.api_prefix}/knowledge/{item.id}/file?original=true" if item.storage_key or item.storage_path or item.source_file_id else None,
 	}
 
 
@@ -184,6 +237,10 @@ def list_knowledge_items(
 	search: str = Query(default="", max_length=200),
 	source_type: str | None = Query(default=None, max_length=32),
 	approach_id: str | None = Query(default=None, max_length=36),
+	geo: str | None = Query(default=None, max_length=160),
+	celebrity: str | None = Query(default=None, max_length=160),
+	offer: str | None = Query(default=None, max_length=160),
+	news_source: str | None = Query(default=None, max_length=160),
 	is_active: bool | None = None,
 	min_rating: int | None = Query(default=None, ge=1, le=5),
 	unrated: bool = False,
@@ -202,6 +259,9 @@ def list_knowledge_items(
 	if approach_id:
 		owned_approach(db, approach_id, user.id)
 		statement = statement.where(KnowledgeItem.approach_id == approach_id)
+	for key, value in {"geo": geo, "celebrity": celebrity, "offer": offer, "news_source": news_source}.items():
+		if value and value.strip():
+			statement = statement.where(KnowledgeItem.item_metadata[key].as_string() == " ".join(value.split()))
 	if is_active is not None:
 		statement = statement.where(KnowledgeItem.is_active == is_active)
 	if unrated:
@@ -255,10 +315,11 @@ def create_manual_knowledge_item(payload: KnowledgeCreatePayload, user: User = D
 		source_type="manual",
 		title=payload.title.strip(),
 		content=payload.content,
-		mime_type="text/plain",
+		mime_type="text/markdown",
 		is_active=payload.is_active,
 		rating=payload.rating,
 		approach=approach,
+		item_metadata=merge_knowledge_filters({}, payload.filters),
 	)
 	db.add(item)
 	db.commit()
@@ -272,6 +333,10 @@ async def upload_knowledge_file(
 	rating: int | None = Form(default=None, ge=1, le=5),
 	is_active: bool = Form(default=True),
 	approach_id: str | None = Form(default=None, max_length=36),
+	geo: str | None = Form(default=None, max_length=160),
+	celebrity: str | None = Form(default=None, max_length=160),
+	offer: str | None = Form(default=None, max_length=160),
+	news_source: str | None = Form(default=None, max_length=160),
 	user: User = Depends(get_current_user),
 	db: Session = Depends(get_db),
 ):
@@ -300,7 +365,10 @@ async def upload_knowledge_file(
 		rating=rating,
 		is_active=is_active,
 		approach=approach,
-		item_metadata={"sha256": checksum, "extractionStatus": extracted.status},
+		item_metadata=merge_knowledge_filters(
+			{"sha256": checksum, "extractionStatus": extracted.status},
+			KnowledgeFiltersPayload(geo=geo, celebrity=celebrity, offer=offer, news_source=news_source),
+		),
 	)
 	db.add(item)
 	db.flush()
@@ -318,6 +386,59 @@ async def upload_knowledge_file(
 			logger.exception("Knowledge upload cleanup failed: storage_key=%s", storage_key)
 		raise
 	return {"item": knowledge_payload(item)}
+
+
+@router.post("/attachments/{attachment_id}")
+def save_attachment_to_knowledge(
+	attachment_id: str,
+	payload: KnowledgeAttachmentPayload,
+	user: User = Depends(get_current_user),
+	db: Session = Depends(get_db),
+):
+	attachment = db.scalar(
+		select(Attachment)
+		.join(Conversation, Conversation.id == Attachment.conversation_id)
+		.where(Attachment.id == attachment_id, Conversation.user_id == user.id)
+	)
+	if attachment is None:
+		raise AppError(404, "ATTACHMENT_NOT_FOUND", "Файл не найден")
+	existing = db.scalar(select(KnowledgeItem).where(
+		KnowledgeItem.user_id == user.id,
+		KnowledgeItem.source_file_id == attachment.id,
+	))
+	if existing is not None:
+		return {"item": knowledge_payload(existing), "created": False}
+	if not attachment.extracted_text.strip():
+		raise AppError(422, "EMPTY_KNOWLEDGE_FILE", "Пустой файл нельзя добавить в базу знаний")
+	approach = optional_owned_approach(db, payload.approach_id, user.id)
+	title = (payload.title or Path(attachment.name).stem).strip()[:255]
+	item = KnowledgeItem(
+		user_id=user.id,
+		source_type="assistant_file" if attachment.extraction_status.startswith("generated") else "uploaded_file",
+		source_message_id=attachment.message_id,
+		source_file_id=attachment.id,
+		title=title or "Сохранённый файл",
+		content=attachment.extracted_text,
+		mime_type="text/markdown" if attachment.name.lower().endswith(".md") else attachment.content_type,
+		original_filename=attachment.name,
+		is_active=payload.is_active,
+		approach=approach,
+		item_metadata=merge_knowledge_filters(
+			{"extractionStatus": attachment.extraction_status}, payload.filters,
+		),
+	)
+	db.add(item)
+	try:
+		db.commit()
+	except IntegrityError as error:
+		db.rollback()
+		existing = db.scalar(select(KnowledgeItem).where(
+			KnowledgeItem.user_id == user.id, KnowledgeItem.source_file_id == attachment.id,
+		))
+		if existing is None:
+			raise
+		return {"item": knowledge_payload(existing), "created": False}
+	return {"item": knowledge_payload(item), "created": True}
 
 
 @router.post("/messages/{message_id}")
@@ -339,8 +460,9 @@ def save_rated_message(message_id: str, user: User = Depends(get_current_user), 
 			user_id=user.id,
 			source_type="rated_content",
 			source_message_id=message.id,
-			title=(message.content.strip().splitlines()[0][:255] or "Сохранённый ответ"),
+			title=markdown_title(message.content, "Сохранённый ответ")[:255],
 			content=message.content,
+			mime_type="text/markdown",
 			rating=rating.score,
 		)
 		db.add(message_item)
@@ -391,6 +513,8 @@ def update_knowledge_item(item_id: str, payload: KnowledgeUpdatePayload, user: U
 		item.rating = payload.rating
 	if "approach_id" in payload.model_fields_set:
 		item.approach = optional_owned_approach(db, payload.approach_id, user.id)
+	if "filters" in payload.model_fields_set:
+		item.item_metadata = merge_knowledge_filters(item.item_metadata, payload.filters)
 	item.updated_at = utc_now()
 	db.commit()
 	return {"item": knowledge_payload(item)}
@@ -437,8 +561,20 @@ async def delete_knowledge_item(item_id: str, user: User = Depends(get_current_u
 
 
 @router.get("/{item_id}/file")
-async def download_knowledge_file(item_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def download_knowledge_file(
+	item_id: str,
+	original: bool = Query(default=False),
+	user: User = Depends(get_current_user),
+	db: Session = Depends(get_db),
+):
 	item = owned_knowledge_item(db, item_id, user.id)
+	if not original:
+		name = markdown_file_name(item.title, "knowledge")
+		return Response(
+			item.content.encode("utf-8"),
+			media_type="text/markdown",
+			headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"},
+		)
 	storage_key: str | None = None
 	legacy_path: Path | None = None
 	if item.storage_key or item.storage_path:

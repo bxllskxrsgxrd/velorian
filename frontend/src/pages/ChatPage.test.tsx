@@ -13,7 +13,7 @@ const api = vi.hoisted(() => ({
 	listConversations: vi.fn(),
 	renameConversation: vi.fn(),
 	streamChat: vi.fn(),
-	activateMessageBranch: vi.fn(), removeMessageRating: vi.fn(), saveMessageToKnowledge: vi.fn(), setMessageRating: vi.fn(),
+	activateMessageBranch: vi.fn(), createMessageMarkdownFile: vi.fn(), removeMessageRating: vi.fn(), saveAttachmentToKnowledge: vi.fn(), saveMessageToKnowledge: vi.fn(), setMessageRating: vi.fn(),
 }));
 
 vi.mock('../api/chatApi', () => api);

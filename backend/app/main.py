@@ -29,6 +29,7 @@ from .errors import AppError
 from .file_processing import ExtractedFile, extract_text, image_to_data_url, is_image_file, validate_file_name
 from .knowledge import ensure_default_approaches, list_knowledge, retrieve_knowledge, router as knowledge_router
 from .knowledge_retrieval import KnowledgeRetrievalResult, log_knowledge_retrieval, resolve_knowledge_query
+from .markdown_files import markdown_file_name, markdown_title, unique_markdown_file_name
 from .models import Attachment, Conversation, DocumentChunk, Message, User, utc_now
 from .rag import chunk_text, estimate_tokens, retrieve_chunks
 from .rate_limit import rate_limiter
@@ -56,6 +57,10 @@ class ConversationPayload(BaseModel):
 	title: str = Field(default="Новый чат", min_length=1, max_length=160)
 
 
+class MarkdownFilePayload(BaseModel):
+	name: str | None = Field(default=None, max_length=255)
+
+
 def _request_id(request: Request) -> str:
 	return getattr(request.state, "request_id", str(uuid4()))
 
@@ -80,7 +85,8 @@ def _attachment_payload(attachment: Attachment) -> dict:
 		"url": f"{settings.api_prefix}/attachments/{attachment.id}",
 		"downloadUrl": f"{settings.api_prefix}/attachments/{attachment.id}?download=true",
 		"extractionStatus": attachment.extraction_status,
-		"generated": attachment.extraction_status == "generated",
+		"generated": attachment.extraction_status.startswith("generated"),
+		"knowledgeSaved": bool(attachment.knowledge_items),
 	}
 
 
@@ -322,7 +328,7 @@ async def _store_generated_files(db: Session, user_id: str, conversation_id: str
 		attachment_id = str(uuid4())
 		data = content.encode("utf-8")
 		content_type = mimetypes.guess_type(name)[0] or "text/plain"
-		storage_key = build_storage_key(user_id, "conversations", conversation_id, message.id)
+		storage_key = build_storage_key(user_id, "conversations", conversation_id, message.id, attachment_id)
 		await storage.save(storage_key, data, content_type)
 		db.add(Attachment(
 			id=attachment_id,
@@ -345,9 +351,11 @@ async def _copy_message_attachments(db: Session, user_id: str, source: Message, 
 			content = await storage.get(source_attachment.storage_key)
 		else:
 			content = await asyncio.to_thread(Path(source_attachment.storage_path).read_bytes)
-		storage_key = build_storage_key(user_id, "conversations", target.conversation_id, target.id)
+		attachment_id = str(uuid4())
+		storage_key = build_storage_key(user_id, "conversations", target.conversation_id, target.id, attachment_id)
 		await storage.save(storage_key, content, source_attachment.content_type)
 		db.add(Attachment(
+			id=attachment_id,
 			conversation_id=target.conversation_id,
 			message_id=target.id,
 			name=source_attachment.name,
@@ -384,6 +392,74 @@ app.add_middleware(
 	allow_methods=["GET", "POST", "PATCH", "DELETE", "OPTIONS"],
 	allow_headers=["Content-Type", "X-Request-ID", "X-CSRF-Token"],
 )
+
+
+@app.post(f"{settings.api_prefix}/messages/{{message_id}}/markdown-file", tags=["messages"])
+async def create_message_markdown_file(
+	message_id: str,
+	payload: MarkdownFilePayload,
+	user: User = Depends(get_current_user),
+	db: Session = Depends(get_db),
+):
+	message = db.scalar(
+		select(Message)
+		.options(selectinload(Message.attachments))
+		.join(Conversation, Conversation.id == Message.conversation_id)
+		.where(Message.id == message_id, Message.role == "assistant", Conversation.user_id == user.id)
+	)
+	if message is None:
+		raise AppError(404, "MESSAGE_NOT_FOUND", "Ответ не найден")
+	if message.status != "done":
+		raise AppError(409, "MESSAGE_NOT_READY", "Ответ ещё не готов")
+	if not message.content.strip():
+		raise AppError(422, "EMPTY_ASSISTANT_RESPONSE", "Пустой ответ нельзя превратить в файл")
+	data = message.content.encode("utf-8")
+	if len(data) > settings.max_file_size:
+		raise AppError(413, "FILE_SIZE_LIMIT_EXCEEDED", "Ответ превышает допустимый размер файла", {
+			"actualSize": len(data), "maximumSize": settings.max_file_size,
+		})
+
+	existing_generated = next(
+		(item for item in message.attachments if item.extraction_status == "generated_markdown"),
+		None,
+	)
+	if existing_generated is not None:
+		return {"attachment": _attachment_payload(existing_generated), "created": False}
+
+	requested_title = payload.name or markdown_title(message.content)
+	owned_names = set(db.scalars(
+		select(Attachment.name)
+		.join(Conversation, Conversation.id == Attachment.conversation_id)
+		.where(Conversation.user_id == user.id)
+	))
+	name = unique_markdown_file_name(requested_title, owned_names)
+	attachment_id = str(uuid4())
+	storage_key = build_storage_key(user.id, "conversations", message.conversation_id, message.id, attachment_id)
+	storage = get_file_storage()
+	try:
+		await storage.save(storage_key, data, "text/markdown")
+		attachment = Attachment(
+			id=attachment_id,
+			conversation_id=message.conversation_id,
+			message_id=message.id,
+			name=name,
+			content_type="text/markdown",
+			size=len(data),
+			storage_path="",
+			storage_key=storage_key,
+			extracted_text=message.content,
+			extraction_status="generated_markdown",
+		)
+		db.add(attachment)
+		db.commit()
+	except Exception:
+		db.rollback()
+		try:
+			await storage.delete(storage_key)
+		except Exception:
+			logger.exception("Generated Markdown cleanup failed: storage_key=%s", storage_key)
+		raise
+	return {"attachment": _attachment_payload(attachment), "created": True}
 
 
 @app.middleware("http")
@@ -716,6 +792,10 @@ async def _extract_file(file_name: str, content_type: str, content: bytes) -> Ex
 
 
 def _format_knowledge_context(result: KnowledgeRetrievalResult) -> str:
+	filter_labels = {"geo": "ГЕО", "celebrity": "Селеба", "offer": "Оффер", "news_source": "Новостник"}
+	metadata_filter_lines = "".join(
+		f"Filter: {filter_labels.get(key, key)} = {value}\n" for key, value in result.applied_filters
+	)
 	if not result.items:
 		if result.reason == "approach_not_found":
 			return (
@@ -736,6 +816,7 @@ def _format_knowledge_context(result: KnowledgeRetrievalResult) -> str:
 			)
 		return (
 			f'[Knowledge Base]\nMode: {result.mode}\nStatus: no_relevant_results\n'
+			f'{metadata_filter_lines}'
 			f'Active items: {result.active_items_count}\nRetrieved items: 0\n'
 			'В базе знаний есть активные данные, но по текущему запросу не удалось найти достаточно релевантные материалы.'
 		)
@@ -744,9 +825,11 @@ def _format_knowledge_context(result: KnowledgeRetrievalResult) -> str:
 		rating = f"{item.rating}/5" if item.rating is not None else "не указан"
 		content = item.content[:600] if result.mode == "list" else item.content[:6000]
 		sections.append(
-			f"Source: {item.title}\nType: {item.source_type}\nApproach: {item.approach.name if item.approach else 'не указан'}\nRating: {rating}\nContent:\n{content}"
+			f"Source: {markdown_file_name(item.title, 'knowledge')}\nType: {item.source_type}\nApproach: {item.approach.name if item.approach else 'не указан'}\n"
+			f"Metadata: {json.dumps({key: (item.item_metadata or {}).get(key) for key in ('geo', 'celebrity', 'offer', 'news_source') if (item.item_metadata or {}).get(key)}, ensure_ascii=False)}\n"
+			f"Rating: {rating}\nContent:\n{content}"
 		)
-	filter_line = f"Filter: Approach = {result.approach_name}\n" if result.approach_name else ""
+	filter_line = (f"Filter: Approach = {result.approach_name}\n" if result.approach_name else "") + metadata_filter_lines
 	return (
 		f"[Knowledge Base]\nMode: {result.mode}\nStatus: found\n"
 		f"{filter_line}"
@@ -822,7 +905,7 @@ def _build_ai_messages(
 			last_user["content"] += "\n\n<document_context>\n" + document_context + "\n</document_context>"
 
 	knowledge_query = resolve_knowledge_query(db, user_id, prompt, explicit_search=knowledge_search)
-	use_knowledge = knowledge_search or knowledge_query.intent == "list" or knowledge_query.options.requested_approach is not None
+	use_knowledge = knowledge_search or knowledge_query.intent == "list" or knowledge_query.options.requested_approach is not None or bool(knowledge_query.options.metadata_filters)
 	knowledge_result: KnowledgeRetrievalResult | None = None
 	if use_knowledge:
 		knowledge_result = list_knowledge(db, user_id, knowledge_query.options) if knowledge_query.intent == "list" else retrieve_knowledge(db, user_id, knowledge_query.options)

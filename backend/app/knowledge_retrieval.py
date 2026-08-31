@@ -18,8 +18,9 @@ KnowledgeIntent = Literal["list", "search"]
 TOKEN_PATTERN = re.compile(r"[^\W_]+", re.UNICODE)
 STOP_WORDS = {
 	"а", "в", "все", "всё", "дай", "для", "есть", "и", "из", "как", "какие", "какой", "мне", "моя", "моей",
-	"на", "о", "по", "про", "с", "там", "тебе", "ты", "у", "что", "это", "the", "a", "an", "and", "for", "in", "of", "to",
+	"на", "найди", "о", "по", "про", "с", "там", "тебе", "текст", "тексты", "ты", "у", "что", "это", "the", "a", "an", "and", "for", "in", "of", "to",
 }
+FILTER_KEYS = ("geo", "celebrity", "offer", "news_source")
 
 
 def normalize_text(value: str) -> str:
@@ -60,12 +61,57 @@ class KnowledgeSearchOptions:
 	approach_name: str | None = None
 	requested_approach: str | None = None
 	approach_exists: bool | None = None
+	geo: str | None = None
+	celebrity: str | None = None
+	offer: str | None = None
+	news_source: str | None = None
+
+	@property
+	def metadata_filters(self) -> dict[str, str]:
+		return {
+			key: value for key in FILTER_KEYS
+			if isinstance(value := getattr(self, key), str) and value
+		}
 
 
 @dataclass(frozen=True)
 class KnowledgeQueryResolution:
 	intent: KnowledgeIntent
 	options: KnowledgeSearchOptions
+
+
+def _terms_equivalent(left: str, right: str) -> bool:
+	if left == right:
+		return True
+	shared = min(len(left), len(right)) - 1
+	return shared >= 5 and left[:shared] == right[:shared]
+
+
+def _query_contains_metadata_value(query: str, value: str) -> bool:
+	normalized_value = normalize_text(value)
+	if re.search(rf"(?<!\w){re.escape(normalized_value)}(?!\w)", query):
+		return True
+	query_tokens = TOKEN_PATTERN.findall(query)
+	return all(
+		any(_terms_equivalent(value_token, query_token) for query_token in query_tokens)
+		for value_token in TOKEN_PATTERN.findall(normalized_value)
+	)
+
+
+def _resolve_metadata_filters(db: Session, user_id: str, normalized_query: str) -> dict[str, str]:
+	values: dict[str, set[str]] = {key: set() for key in FILTER_KEYS}
+	for metadata in db.scalars(select(KnowledgeItem.item_metadata).where(KnowledgeItem.user_id == user_id)):
+		if not isinstance(metadata, dict):
+			continue
+		for key in FILTER_KEYS:
+			value = metadata.get(key)
+			if isinstance(value, str) and value.strip():
+				values[key].add(value.strip())
+	return {
+		key: max(matches, key=len)
+		for key, candidates in values.items()
+		if (matches := [value for value in candidates if _query_contains_metadata_value(normalized_query, value)])
+	}
 
 
 def resolve_knowledge_query(db: Session, user_id: str, query: str, *, explicit_search: bool, limit: int = 4) -> KnowledgeQueryResolution:
@@ -79,6 +125,7 @@ def resolve_knowledge_query(db: Session, user_id: str, query: str, *, explicit_s
 	requested = approach.name if approach else " ".join(explicit_match.group(1).split()) if explicit_match else None
 	approach_exists = True if approach else False if requested else None
 	intent = detect_knowledge_intent(query, explicit_search=explicit_search)
+	metadata_filters = _resolve_metadata_filters(db, user_id, normalized_query)
 	if approach and re.search(
 		r"(?:\bчто\b|\bкакие\b|\bесть\b|покаж\w*|перечисл\w*|\bсписок\b|дай\s+(?:мне\s+)?(?:данн\w*|информац\w*|материал\w*))",
 		normalized_query,
@@ -91,6 +138,7 @@ def resolve_knowledge_query(db: Session, user_id: str, query: str, *, explicit_s
 		approach_name=approach.name if approach else None,
 		requested_approach=requested,
 		approach_exists=approach_exists,
+		**metadata_filters,
 	))
 
 
@@ -116,6 +164,7 @@ class KnowledgeRetrievalResult:
 	requested_approach: str | None = None
 	approach_exists: bool | None = None
 	fallback_used: bool = False
+	applied_filters: tuple[tuple[str, str], ...] = ()
 
 
 def _empty_result(mode: KnowledgeIntent, options: KnowledgeSearchOptions, owned_count: int, active_count: int, candidate_count: int, reason: str) -> KnowledgeRetrievalResult:
@@ -124,6 +173,7 @@ def _empty_result(mode: KnowledgeIntent, options: KnowledgeSearchOptions, owned_
 		candidate_count=candidate_count, matched_count=0, reason=reason,
 		approach_id=options.approach_id, approach_name=options.approach_name,
 		requested_approach=options.requested_approach, approach_exists=options.approach_exists,
+		applied_filters=tuple(options.metadata_filters.items()),
 	)
 
 
@@ -143,22 +193,28 @@ class TextKnowledgeRetriever(KnowledgeRetriever):
 		conditions = [KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True)]
 		if options.approach_id:
 			conditions.append(KnowledgeItem.approach_id == options.approach_id)
+		for key, value in options.metadata_filters.items():
+			conditions.append(KnowledgeItem.item_metadata[key].as_string() == value)
 		items = list(db.scalars(select(KnowledgeItem).where(*conditions).order_by(KnowledgeItem.updated_at.desc()).limit(300)))
 		if not items:
-			return _empty_result("search", options, owned_count, active_count, 0, "no_active_items_for_approach" if options.approach_id else "no_active_items")
+			reason = "no_active_items_for_approach" if options.approach_id else "no_active_items_for_filters" if options.metadata_filters else "no_active_items"
+			return _empty_result("search", options, owned_count, active_count, 0, reason)
 		terms = search_terms(options.query)
 		if options.approach_name:
 			approach_terms = set(search_terms(options.approach_name))
 			terms = [term for term in terms if term not in approach_terms]
+		filter_terms = [term for value in options.metadata_filters.values() for term in search_terms(value)]
+		terms = [term for term in terms if not any(_terms_equivalent(term, filter_term) for filter_term in filter_terms)]
 		if not terms:
 			selected_items = items[:options.limit]
 			matches = [KnowledgeMatch(item, 1.0, ()) for item in selected_items]
 			return KnowledgeRetrievalResult(
 				mode="search", items=selected_items, matches=matches, owned_items_count=owned_count,
 				active_items_count=active_count, candidate_count=len(items), matched_count=len(items),
-				reason="approach_scope_only" if options.approach_id else "no_meaningful_search_terms",
+				reason="metadata_scope_only" if options.metadata_filters else "approach_scope_only" if options.approach_id else "no_meaningful_search_terms",
 				approach_id=options.approach_id, approach_name=options.approach_name,
 				requested_approach=options.requested_approach, approach_exists=options.approach_exists,
+				applied_filters=tuple(options.metadata_filters.items()),
 			)
 
 		scored: list[KnowledgeMatch] = []
@@ -195,6 +251,7 @@ class TextKnowledgeRetriever(KnowledgeRetriever):
 			approach_id=options.approach_id, approach_name=options.approach_name,
 			requested_approach=options.requested_approach, approach_exists=options.approach_exists,
 			fallback_used=any(match.score < 1 for match in selected),
+			applied_filters=tuple(options.metadata_filters.items()),
 		)
 
 
@@ -213,15 +270,19 @@ class KnowledgeRetrievalService:
 		conditions = [KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True)]
 		if options.approach_id:
 			conditions.append(KnowledgeItem.approach_id == options.approach_id)
+		for key, value in options.metadata_filters.items():
+			conditions.append(KnowledgeItem.item_metadata[key].as_string() == value)
 		items = list(db.scalars(select(KnowledgeItem).where(*conditions).order_by(KnowledgeItem.updated_at.desc()).limit(options.limit)))
 		if not items:
-			return _empty_result("list", options, owned_count, active_count, 0, "no_active_items_for_approach" if options.approach_id else "no_active_items")
+			reason = "no_active_items_for_approach" if options.approach_id else "no_active_items_for_filters" if options.metadata_filters else "no_active_items"
+			return _empty_result("list", options, owned_count, active_count, 0, reason)
 		matches = [KnowledgeMatch(item, 1.0, ()) for item in items]
 		return KnowledgeRetrievalResult(
 			mode="list", items=items, matches=matches, owned_items_count=owned_count,
 			active_items_count=active_count, candidate_count=len(items), matched_count=len(items), reason="listed",
 			approach_id=options.approach_id, approach_name=options.approach_name,
 			requested_approach=options.requested_approach, approach_exists=options.approach_exists,
+			applied_filters=tuple(options.metadata_filters.items()),
 		)
 
 	def get(self, db: Session, user_id: str, item_id: str) -> KnowledgeItem | None:
@@ -234,6 +295,7 @@ def log_knowledge_retrieval(result: KnowledgeRetrievalResult, *, user_id: str, q
 		"userId": user_id, "searchMode": search_mode, "intent": result.mode,
 		"retriever": settings.knowledge_search_driver, "approachRequested": result.requested_approach,
 		"approachId": result.approach_id, "approachExists": result.approach_exists,
+		"metadataFilters": dict(result.applied_filters),
 		"ownedItemsAvailable": result.owned_items_count, "activeItemsAvailable": result.active_items_count,
 		"candidatesAfterApproachFilter": result.candidate_count, "matched": result.matched_count,
 		"returned": len(result.items), "reason": result.reason, "fallbackUsed": result.fallback_used,

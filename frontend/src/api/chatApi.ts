@@ -1,4 +1,4 @@
-import type { AuthUser, ChatAttachment, ChatMessage, Conversation, ConversationSummary, KnowledgeApproach, KnowledgeItem, KnowledgePageResult, MessageRating, SearchMode } from '../types/chat';
+import type { AuthUser, ChatAttachment, ChatMessage, Conversation, ConversationSummary, KnowledgeApproach, KnowledgeFilters, KnowledgeItem, KnowledgePageResult, MessageRating, SearchMode } from '../types/chat';
 import type { AttachmentLimits } from '../constants/attachmentLimits';
 import { getUserFacingError } from '../errors/userErrorMessages';
 import { reportError } from '../utils/reportError';
@@ -33,12 +33,30 @@ function normalizeMessage(message: ChatMessage): ChatMessage {
 }
 
 function normalizeKnowledgeItem(item: KnowledgeItem): KnowledgeItem {
+	const metadata = item.metadata ?? {};
+	const filters = item.filters ?? {
+		geo: typeof metadata.geo === 'string' ? metadata.geo : null,
+		celebrity: typeof metadata.celebrity === 'string' ? metadata.celebrity : null,
+		offer: typeof metadata.offer === 'string' ? metadata.offer : null,
+		news_source: typeof metadata.news_source === 'string' ? metadata.news_source : null,
+	};
 	return {
 		...item,
 		rating: item.rating ?? null,
-		metadata: item.metadata ?? {},
+		metadata,
+		filters,
+		fileName: item.fileName || `${item.title}.md`,
 		approach: item.approach ?? null,
 		downloadUrl: item.downloadUrl?.startsWith('/') ? `${API_ORIGIN}${item.downloadUrl}` : item.downloadUrl,
+		originalDownloadUrl: item.originalDownloadUrl?.startsWith('/') ? `${API_ORIGIN}${item.originalDownloadUrl}` : item.originalDownloadUrl,
+	};
+}
+
+function cleanFilters(filters?: Partial<KnowledgeFilters>): KnowledgeFilters {
+	const clean = (value: string | null | undefined) => value?.trim() || null;
+	return {
+		geo: clean(filters?.geo), celebrity: clean(filters?.celebrity),
+		offer: clean(filters?.offer), news_source: clean(filters?.news_source),
 	};
 }
 
@@ -185,11 +203,30 @@ export async function saveMessageToKnowledge(messageId: string): Promise<Knowled
 	return (await requestJson<{ items: KnowledgeItem[] }>(`/knowledge/messages/${messageId}`, { method: 'POST' })).items.map(normalizeKnowledgeItem);
 }
 
-export async function listKnowledge(params: { search?: string; sourceType?: string; approachId?: string; isActive?: boolean; minRating?: number; unrated?: boolean; sort?: string; limit?: number; cursor?: string } = {}): Promise<KnowledgePageResult> {
+export async function createMessageMarkdownFile(messageId: string): Promise<{ attachment: ChatAttachment; created: boolean }> {
+	const result = await requestJson<{ attachment: Omit<ChatAttachment, 'isImage'>; created: boolean }>(`/messages/${messageId}/markdown-file`, {
+		method: 'POST', body: JSON.stringify({}),
+	});
+	return { ...result, attachment: normalizeAttachment(result.attachment) };
+}
+
+export async function saveAttachmentToKnowledge(attachmentId: string, filters?: Partial<KnowledgeFilters>): Promise<{ item: KnowledgeItem; created: boolean }> {
+	const result = await requestJson<{ item: KnowledgeItem; created: boolean }>(`/knowledge/attachments/${attachmentId}`, {
+		method: 'POST', body: JSON.stringify({ filters: cleanFilters(filters) }),
+	});
+	return { ...result, item: normalizeKnowledgeItem(result.item) };
+}
+
+export async function listKnowledge(params: { search?: string; sourceType?: string; approachId?: string; filters?: Partial<KnowledgeFilters>; isActive?: boolean; minRating?: number; unrated?: boolean; sort?: string; limit?: number; cursor?: string } = {}): Promise<KnowledgePageResult> {
 	const query = new URLSearchParams();
 	if (params.search) query.set('search', params.search);
 	if (params.sourceType) query.set('source_type', params.sourceType);
 	if (params.approachId) query.set('approach_id', params.approachId);
+	const filters = cleanFilters(params.filters);
+	if (filters.geo) query.set('geo', filters.geo);
+	if (filters.celebrity) query.set('celebrity', filters.celebrity);
+	if (filters.offer) query.set('offer', filters.offer);
+	if (filters.news_source) query.set('news_source', filters.news_source);
 	if (params.isActive !== undefined) query.set('is_active', String(params.isActive));
 	if (params.minRating !== undefined) query.set('min_rating', String(params.minRating));
 	if (params.unrated) query.set('unrated', 'true');
@@ -200,24 +237,29 @@ export async function listKnowledge(params: { search?: string; sourceType?: stri
 	return { ...result, items: result.items.map(normalizeKnowledgeItem) };
 }
 
-export async function createKnowledgeItem(title: string, content: string, rating: number | null = null, isActive = true, approachId: string | null = null): Promise<KnowledgeItem> {
-	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>('/knowledge', { method: 'POST', body: JSON.stringify({ title, content, rating, is_active: isActive, approach_id: approachId }) })).item);
+export async function createKnowledgeItem(title: string, content: string, rating: number | null = null, isActive = true, approachId: string | null = null, filters?: Partial<KnowledgeFilters>): Promise<KnowledgeItem> {
+	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>('/knowledge', { method: 'POST', body: JSON.stringify({ title, content, rating, is_active: isActive, approach_id: approachId, filters: cleanFilters(filters) }) })).item);
 }
 
-export async function uploadKnowledgeFile(file: File, title = '', rating: number | null = null, isActive = true, approachId: string | null = null): Promise<KnowledgeItem> {
+export async function uploadKnowledgeFile(file: File, title = '', rating: number | null = null, isActive = true, approachId: string | null = null, filters?: Partial<KnowledgeFilters>): Promise<KnowledgeItem> {
 	const body = new FormData();
 	body.append('file', file);
 	body.append('title', title);
 	if (rating !== null) body.append('rating', String(rating));
 	body.append('is_active', String(isActive));
 	if (approachId) body.append('approach_id', approachId);
+	const cleaned = cleanFilters(filters);
+	if (cleaned.geo) body.append('geo', cleaned.geo);
+	if (cleaned.celebrity) body.append('celebrity', cleaned.celebrity);
+	if (cleaned.offer) body.append('offer', cleaned.offer);
+	if (cleaned.news_source) body.append('news_source', cleaned.news_source);
 	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>('/knowledge/files', { method: 'POST', body })).item);
 }
 
-export async function updateKnowledgeItem(id: string, patch: { title?: string; content?: string; isActive?: boolean; rating?: number | null; approachId?: string | null }): Promise<KnowledgeItem> {
+export async function updateKnowledgeItem(id: string, patch: { title?: string; content?: string; isActive?: boolean; rating?: number | null; approachId?: string | null; filters?: Partial<KnowledgeFilters> | null }): Promise<KnowledgeItem> {
 	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>(`/knowledge/${id}`, {
 		method: 'PATCH',
-		body: JSON.stringify({ title: patch.title, content: patch.content, is_active: patch.isActive, rating: patch.rating, approach_id: patch.approachId }),
+		body: JSON.stringify({ title: patch.title, content: patch.content, is_active: patch.isActive, rating: patch.rating, approach_id: patch.approachId, filters: patch.filters === undefined ? undefined : cleanFilters(patch.filters ?? undefined) }),
 	})).item);
 }
 

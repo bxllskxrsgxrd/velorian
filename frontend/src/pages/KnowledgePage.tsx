@@ -6,8 +6,10 @@ import { useToast } from '../components/Toast/ToastContext';
 import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
 import { Rating } from '../components/ui/Rating/Rating';
 import { Checkbox } from '../components/ui/Checkbox/Checkbox';
+import { KnowledgeFilterFields } from '../components/KnowledgeFilterFields/KnowledgeFilterFields';
+import { EMPTY_KNOWLEDGE_FILTERS } from '../constants/knowledgeFilters';
 import { getStoredAccentTheme, setAccentTheme, type AccentTheme } from '../theme/accentTheme';
-import type { AuthUser, ConversationSummary, KnowledgeApproach, KnowledgeItem } from '../types/chat';
+import type { AuthUser, ConversationSummary, KnowledgeApproach, KnowledgeFilters, KnowledgeItem } from '../types/chat';
 import { reportError } from '../utils/reportError';
 import './_knowledgePage.scss';
 
@@ -30,6 +32,15 @@ function extractionStatusLabel(item: KnowledgeItem) {
 	return null;
 }
 
+function storedFilters(item: KnowledgeItem): KnowledgeFilters {
+	return item.filters ?? {
+		geo: typeof item.metadata?.geo === 'string' ? item.metadata.geo : null,
+		celebrity: typeof item.metadata?.celebrity === 'string' ? item.metadata.celebrity : null,
+		offer: typeof item.metadata?.offer === 'string' ? item.metadata.offer : null,
+		news_source: typeof item.metadata?.news_source === 'string' ? item.metadata.news_source : null,
+	};
+}
+
 export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: () => Promise<void> }) {
 	const navigate = useNavigate();
 	const [params, setParams] = useSearchParams();
@@ -38,6 +49,10 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	const [search, setSearch] = useState(params.get('q') ?? '');
 	const sourceType = params.get('source') ?? '';
 	const approachId = params.get('approach') ?? '';
+	const geo = params.get('geo') ?? '';
+	const celebrity = params.get('celebrity') ?? '';
+	const offer = params.get('offer') ?? '';
+	const newsSource = params.get('news_source') ?? '';
 	const activeFilter = params.get('active') ?? 'all';
 	const ratingFilter = (params.get('rating') as RatingFilter | null) ?? 'all';
 	const sort = (params.get('sort') as SortMode | null) ?? 'date_desc';
@@ -49,6 +64,8 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	const [rating, setRating] = useState<number | null>(null);
 	const [isActive, setIsActive] = useState(true);
 	const [selectedApproachId, setSelectedApproachId] = useState('');
+	const [formFilters, setFormFilters] = useState<KnowledgeFilters>({ ...EMPTY_KNOWLEDGE_FILTERS });
+	const [saving, setSaving] = useState(false);
 	const [approaches, setApproaches] = useState<KnowledgeApproach[]>([]);
 	const [newApproachName, setNewApproachName] = useState('');
 	const [showApproachCreator, setShowApproachCreator] = useState(false);
@@ -78,6 +95,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 				search: params.get('q') || undefined,
 				sourceType: sourceType || undefined,
 				approachId: approachId || undefined,
+				filters: { geo, celebrity, offer, news_source: newsSource },
 				isActive: activeFilter === 'all' ? undefined : activeFilter === 'active',
 				minRating: ratingFilter === 'all' || ratingFilter === 'unrated' ? undefined : Number(ratingFilter),
 				unrated: ratingFilter === 'unrated', sort, limit: 20,
@@ -89,7 +107,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 			}).finally(() => { if (!cancelled) setLoading(false); });
 		}, 250);
 		return () => { cancelled = true; window.clearTimeout(timer); };
-	}, [activeFilter, approachId, params, ratingFilter, showToast, sort, sourceType]);
+	}, [activeFilter, approachId, celebrity, geo, newsSource, offer, params, ratingFilter, showToast, sort, sourceType]);
 
 	const filteredConversations = useMemo(() => {
 		const query = conversationSearch.trim().toLocaleLowerCase('ru');
@@ -109,10 +127,10 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 		setParams(next, { replace: true });
 	}
 	function resetApproachCreator() { setNewApproachName(''); setShowApproachCreator(false); }
-	function openAdd() { setTitle(''); setContent(''); setRating(null); setIsActive(true); setSelectedApproachId(''); setFile(null); resetApproachCreator(); setDialog({ type: 'add' }); }
-	function openEdit(item: KnowledgeItem) { setTitle(item.title); setContent(item.content); setRating(item.rating); setIsActive(item.isActive); setSelectedApproachId(item.approach?.id ?? ''); setFile(null); resetApproachCreator(); setDialog({ type: 'edit', item }); }
+	function openAdd() { setTitle(''); setContent(''); setRating(null); setIsActive(true); setSelectedApproachId(''); setFormFilters({ ...EMPTY_KNOWLEDGE_FILTERS }); setFile(null); setSaving(false); resetApproachCreator(); setDialog({ type: 'add' }); }
+	function openEdit(item: KnowledgeItem) { setTitle(item.title); setContent(item.content); setRating(item.rating); setIsActive(item.isActive); setSelectedApproachId(item.approach?.id ?? ''); setFormFilters(storedFilters(item)); setFile(null); setSaving(false); resetApproachCreator(); setDialog({ type: 'edit', item }); }
 	function resetFilters() { setSearch(''); setParams({}, { replace: true }); }
-	const hasActiveFilters = Boolean(search.trim() || sourceType || approachId || activeFilter !== 'all' || ratingFilter !== 'all' || sort !== 'date_desc');
+	const hasActiveFilters = Boolean(search.trim() || sourceType || approachId || geo || celebrity || offer || newsSource || activeFilter !== 'all' || ratingFilter !== 'all' || sort !== 'date_desc');
 
 	async function addApproach() {
 		const name = newApproachName.trim();
@@ -137,13 +155,15 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	}
 
 	async function saveDialog() {
+		if (saving) return;
+		setSaving(true);
 		try {
 			if (dialog?.type === 'add') {
-				const created = file ? await uploadKnowledgeFile(file, title, rating, isActive, selectedApproachId || null) : await createKnowledgeItem(title.trim(), content.trim(), rating, isActive, selectedApproachId || null);
+				const created = file ? await uploadKnowledgeFile(file, title, rating, isActive, selectedApproachId || null, formFilters) : await createKnowledgeItem(title.trim(), content, rating, isActive, selectedApproachId || null, formFilters);
 				setItems((current) => [created, ...current]);
 				showToast('Данные добавлены в базу знаний', 'success');
 			} else if (dialog?.type === 'edit') {
-				const updated = await updateKnowledgeItem(dialog.item.id, { title: title.trim(), content: content.trim(), rating, isActive, approachId: selectedApproachId || null });
+				const updated = await updateKnowledgeItem(dialog.item.id, { title: title.trim(), content, rating, isActive, approachId: selectedApproachId || null, filters: formFilters });
 				setItems((current) => current.map((item) => item.id === updated.id ? updated : item));
 				showToast('Изменения сохранены', 'success');
 			}
@@ -151,7 +171,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 		} catch (error) {
 			reportError('KNOWLEDGE_SAVE_FAILED', error);
 			showToast(error instanceof Error ? error.message : 'Не удалось сохранить данные', 'error');
-		}
+		} finally { setSaving(false); }
 	}
 
 	async function changeRating(item: KnowledgeItem, value: number | null) {
@@ -186,7 +206,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 		if (!nextCursor || loadingMore) return;
 		setLoadingMore(true);
 		try {
-			const result = await listKnowledge({ search: params.get('q') || undefined, sourceType: sourceType || undefined, approachId: approachId || undefined, isActive: activeFilter === 'all' ? undefined : activeFilter === 'active', minRating: ratingFilter === 'all' || ratingFilter === 'unrated' ? undefined : Number(ratingFilter), unrated: ratingFilter === 'unrated', sort, limit: 20, cursor: nextCursor });
+			const result = await listKnowledge({ search: params.get('q') || undefined, sourceType: sourceType || undefined, approachId: approachId || undefined, filters: { geo, celebrity, offer, news_source: newsSource }, isActive: activeFilter === 'all' ? undefined : activeFilter === 'active', minRating: ratingFilter === 'all' || ratingFilter === 'unrated' ? undefined : Number(ratingFilter), unrated: ratingFilter === 'unrated', sort, limit: 20, cursor: nextCursor });
 			setItems((current) => [...current, ...result.items]); setNextCursor(result.pageInfo.nextCursor);
 		} catch (error) { showToast(error instanceof Error ? error.message : 'Не удалось загрузить следующую страницу', 'error'); }
 		finally { setLoadingMore(false); }
@@ -204,6 +224,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 			<button type="button" onClick={resetApproachCreator}>Отмена</button>
 		</div> : <button className="knowledge-form__new-approach" type="button" onClick={() => setShowApproachCreator(true)}>Создать новый подход</button>}
 	</div>;
+	const filterFields = <KnowledgeFilterFields value={formFilters} onChange={setFormFilters} disabled={saving} />;
 
 	return <div className="knowledge-shell">
 		<ChatSidebar user={user} conversations={filteredConversations} activeConversationId={null} search={conversationSearch} accentTheme={accent} isOpen={sidebarOpen} isCollapsed={sidebarCollapsed} activeSection="knowledge"
@@ -219,6 +240,10 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 				<input value={search} onChange={(event) => handleSearchChange(event.target.value)} placeholder="Поиск по названию, содержимому и имени файла" aria-label="Поиск по базе знаний" />
 				<select value={sourceType} onChange={(event) => setFilter('source', event.target.value)} aria-label="Источник"><option value="">Все источники</option><option value="manual">Вручную</option><option value="uploaded_file">Файлы</option><option value="rated_content">Оценённые ответы</option></select>
 				<select value={approachId} onChange={(event) => setFilter('approach', event.target.value)} aria-label="Подход"><option value="">Все подходы</option>{approaches.map((approach) => <option key={approach.id} value={approach.id}>{approach.name}</option>)}</select>
+				<input value={geo} onChange={(event) => setFilter('geo', event.target.value)} placeholder="ГЕО" aria-label="ГЕО" />
+				<input value={celebrity} onChange={(event) => setFilter('celebrity', event.target.value)} placeholder="Селеба" aria-label="Селеба" />
+				<input value={offer} onChange={(event) => setFilter('offer', event.target.value)} placeholder="Оффер" aria-label="Оффер" />
+				<input value={newsSource} onChange={(event) => setFilter('news_source', event.target.value)} placeholder="Новостник" aria-label="Новостник" />
 				<select value={ratingFilter} onChange={(event) => setFilter('rating', event.target.value, 'all')} aria-label="Рейтинг"><option value="all">Все рейтинги</option><option value="5">5 из 5</option><option value="4">4 и выше</option><option value="3">3 и выше</option><option value="unrated">Без рейтинга</option></select>
 				<select value={sort} onChange={(event) => setFilter('sort', event.target.value, 'date_desc')} aria-label="Сортировка"><option value="date_desc">Сначала новые</option><option value="date_asc">Сначала старые</option><option value="rating_desc">Рейтинг: высокий</option><option value="rating_asc">Рейтинг: низкий</option></select>
 				<select value={activeFilter} onChange={(event) => setFilter('active', event.target.value, 'all')} aria-label="Использование"><option value="all">Все состояния</option><option value="active">Используются агентом</option><option value="inactive">Отключены</option></select>
@@ -228,16 +253,16 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 				{loading && <p className="knowledge-page__empty">Загрузка…</p>}
 				{!loading && items.length === 0 && <p className="knowledge-page__empty">Сохранённых данных пока нет</p>}
 				{!loading && items.map((item) => <article className="knowledge-card" key={item.id}>
-					<div className="knowledge-card__head"><div><strong>{item.title}</strong><Rating value={item.rating} readonly size="small" showValue ariaLabel={`Рейтинг ${item.title}`} />{item.approach && <span className="knowledge-card__approach">Подход: {item.approach.name}</span>}<span>{item.sourceType === 'rated_content' ? 'Ответ агента' : item.sourceType === 'uploaded_file' ? 'Файл' : 'Добавлено вручную'} · {new Date(item.createdAt).toLocaleDateString('ru-RU')}</span>{extractionStatusLabel(item) && <span className="knowledge-card__extraction-warning">{extractionStatusLabel(item)}</span>}</div><Checkbox checked={item.isActive} disabled={pendingItemIds.has(item.id)} onChange={(checked) => void toggleItem(item, checked)} label="Использовать" /></div>
+					<div className="knowledge-card__head"><div><strong>{item.fileName || `${item.title}.md`}</strong><Rating value={item.rating} readonly size="small" showValue ariaLabel={`Рейтинг ${item.title}`} />{item.approach && <span className="knowledge-card__approach">Подход: {item.approach.name}</span>}<div className="knowledge-card__metadata">{Object.entries(storedFilters(item)).filter((entry): entry is [string, string] => Boolean(entry[1])).map(([key, value]) => <span key={key}>{({ geo: 'ГЕО', celebrity: 'Селеба', offer: 'Оффер', news_source: 'Новостник' } as Record<string, string>)[key]}: {value}</span>)}</div><span>{item.sourceType === 'rated_content' ? 'Ответ агента' : item.sourceType === 'assistant_file' ? 'Файл из диалога' : item.sourceType === 'uploaded_file' ? 'Файл' : 'Добавлено вручную'} · {new Date(item.createdAt).toLocaleDateString('ru-RU')}</span>{extractionStatusLabel(item) && <span className="knowledge-card__extraction-warning">{extractionStatusLabel(item)}</span>}</div><Checkbox checked={item.isActive} disabled={pendingItemIds.has(item.id)} onChange={(checked) => void toggleItem(item, checked)} label="Использовать" /></div>
 					<p>{item.content || 'Текстовое содержимое не извлечено'}</p>
-					<div className="knowledge-card__actions"><button type="button" onClick={() => setDialog({ type: 'view', item })}>Открыть</button><button type="button" onClick={() => openEdit(item)}>Редактировать</button>{item.downloadUrl && <a href={item.downloadUrl} download>Скачать</a>}<button type="button" onClick={() => void changeRating(item, null)}>Убрать рейтинг</button><button className="knowledge-card__delete" type="button" onClick={() => setDialog({ type: 'delete', item })}>Удалить</button></div>
+					<div className="knowledge-card__actions"><button type="button" onClick={() => setDialog({ type: 'view', item })}>Открыть</button><button type="button" onClick={() => openEdit(item)}>Редактировать</button>{item.downloadUrl && <a href={item.downloadUrl} download={item.fileName}>Скачать .md</a>}{item.originalDownloadUrl && <a href={item.originalDownloadUrl} download={item.originalFilename ?? undefined}>Оригинал</a>}<button type="button" onClick={() => void changeRating(item, null)}>Убрать рейтинг</button><button className="knowledge-card__delete" type="button" onClick={() => setDialog({ type: 'delete', item })}>Удалить</button></div>
 				</article>)}
 				{!loading && nextCursor && <button className="knowledge-page__more" type="button" disabled={loadingMore} onClick={() => void loadMore()}>{loadingMore ? 'Загрузка…' : 'Показать ещё'}</button>}
 			</section>
 
-			{dialog?.type === 'add' && <ModalDialog title="Добавить данные" confirmLabel="Добавить" onClose={() => setDialog(null)} onConfirm={() => void saveDialog()}><div className="knowledge-form"><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Название" aria-label="Название" /><Suspense fallback={<div>Загрузка редактора…</div>}><MarkdownEditor value={content} onChange={setContent} /></Suspense><span>или загрузите файл</span><input type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />{approachField}<label>Рейтинг (необязательно)<Rating value={rating} onChange={setRating} ariaLabel="Рейтинг элемента" /></label><Checkbox checked={isActive} onChange={setIsActive} label="Использовать" /></div></ModalDialog>}
-			{dialog?.type === 'edit' && <ModalDialog title="Редактировать данные" confirmLabel="Сохранить" onClose={() => setDialog(null)} onConfirm={() => void saveDialog()}><div className="knowledge-form"><input value={title} onChange={(event) => setTitle(event.target.value)} aria-label="Название" /><Suspense fallback={<div>Загрузка редактора…</div>}><MarkdownEditor value={content} onChange={setContent} /></Suspense>{approachField}<label>Рейтинг<Rating value={rating} onChange={setRating} ariaLabel="Рейтинг элемента" /></label><Checkbox checked={isActive} onChange={setIsActive} label="Использовать" /></div></ModalDialog>}
-			{dialog?.type === 'view' && <ModalDialog title={dialog.item.title} confirmLabel="Закрыть" onClose={() => setDialog(null)} onConfirm={() => setDialog(null)}><Rating value={dialog.item.rating} readonly showValue />{dialog.item.approach && <p>Подход: {dialog.item.approach.name}</p>}<div className="knowledge-view"><Suspense fallback={<span>Загрузка предпросмотра…</span>}><MarkdownEditor value={dialog.item.content} onChange={() => undefined} readonly /></Suspense></div></ModalDialog>}
+			{dialog?.type === 'add' && <ModalDialog title="Добавить данные" confirmLabel={saving ? 'Добавление…' : 'Добавить'} confirmDisabled={saving} onClose={() => setDialog(null)} onConfirm={() => void saveDialog()}><div className="knowledge-form"><input value={title} onChange={(event) => setTitle(event.target.value)} placeholder="Название" aria-label="Название" /><Suspense fallback={<div>Загрузка редактора…</div>}><MarkdownEditor value={content} onChange={setContent} /></Suspense><span>или загрузите файл</span><input type="file" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />{filterFields}{approachField}<label>Рейтинг (необязательно)<Rating value={rating} onChange={setRating} ariaLabel="Рейтинг элемента" /></label><Checkbox checked={isActive} onChange={setIsActive} label="Использовать" /></div></ModalDialog>}
+			{dialog?.type === 'edit' && <ModalDialog title="Редактировать данные" confirmLabel={saving ? 'Сохранение…' : 'Сохранить'} confirmDisabled={saving} onClose={() => setDialog(null)} onConfirm={() => void saveDialog()}><div className="knowledge-form"><input value={title} onChange={(event) => setTitle(event.target.value)} aria-label="Название" /><Suspense fallback={<div>Загрузка редактора…</div>}><MarkdownEditor value={content} onChange={setContent} /></Suspense>{filterFields}{approachField}<label>Рейтинг<Rating value={rating} onChange={setRating} ariaLabel="Рейтинг элемента" /></label><Checkbox checked={isActive} onChange={setIsActive} label="Использовать" /></div></ModalDialog>}
+			{dialog?.type === 'view' && <ModalDialog title={dialog.item.fileName || `${dialog.item.title}.md`} confirmLabel="Закрыть" onClose={() => setDialog(null)} onConfirm={() => setDialog(null)}><Rating value={dialog.item.rating} readonly showValue />{dialog.item.approach && <p>Подход: {dialog.item.approach.name}</p>}<div className="knowledge-card__metadata knowledge-card__metadata--view">{Object.entries(storedFilters(dialog.item)).filter((entry): entry is [string, string] => Boolean(entry[1])).map(([key, value]) => <span key={key}>{key}: {value}</span>)}</div><div className="knowledge-view"><Suspense fallback={<span>Загрузка предпросмотра…</span>}><MarkdownEditor value={dialog.item.content} onChange={() => undefined} readonly /></Suspense></div></ModalDialog>}
 			{dialog?.type === 'delete' && <ModalDialog title="Удалить элемент?" confirmLabel="Удалить" danger onClose={() => setDialog(null)} onConfirm={() => void removeItem(dialog.item)}><p>«{dialog.item.title}» будет удалён из базы знаний.</p></ModalDialog>}
 		</main>
 		{sidebarOpen && <button className="chat-shell__backdrop" type="button" onClick={() => setSidebarOpen(false)} aria-label="Закрыть меню" />}

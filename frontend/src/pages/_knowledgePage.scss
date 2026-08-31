@@ -5,7 +5,8 @@
 .knowledge-page header p { color: var(--color-text-secondary); }
 .knowledge-page header button { border: 0; color: var(--color-text-secondary); background: transparent; cursor: pointer; }
 .knowledge-page .knowledge-page__add { padding: 10px 14px; border-radius: 10px; color: var(--color-on-accent); background: var(--color-accent); }
-.knowledge-page__filters { max-width: 1100px; margin: 0 auto 18px; display: grid; grid-template-columns: minmax(220px, 1fr) repeat(5, minmax(125px, auto)) auto; gap: 8px; }
+.knowledge-page__filters { max-width: 1100px; margin: 0 auto 18px; display: grid; grid-template-columns: repeat(auto-fit, minmax(150px, 1fr)); gap: 8px; }
+.knowledge-page__filters > input:first-child { grid-column: span 2; }
 .knowledge-page__filters input, .knowledge-page__filters select, .knowledge-form input:not(.checkbox__input), .knowledge-form select, .knowledge-form textarea { width: 100%; padding: 10px 11px; border: 1px solid var(--color-border); border-radius: 10px; color: var(--color-text-primary); background: var(--color-bg-elevated); }
 .knowledge-page__reset { padding: 9px 12px; border: 1px solid var(--color-border); border-radius: 10px; color: var(--color-text-secondary); background: var(--color-bg-elevated); cursor: pointer; }
 .knowledge-page__reset:disabled { opacity: .45; cursor: default; }
@@ -17,6 +18,9 @@
 .knowledge-card__head span { color: var(--color-text-secondary); font-size: 12px; }
 .knowledge-card__head .knowledge-card__approach { width: fit-content; margin: 5px 0 2px; padding: 3px 7px; border-radius: 999px; color: var(--color-accent); background: var(--color-accent-soft); }
 .knowledge-card__head .knowledge-card__extraction-warning { color: var(--color-warning, var(--color-error)); }
+.knowledge-card__metadata { display: flex; flex-wrap: wrap; gap: 4px; margin: 5px 0; }
+.knowledge-card__metadata span { width: fit-content; padding: 3px 7px; border-radius: 999px; color: var(--color-text-secondary); background: var(--color-bg-elevated); }
+.knowledge-card__metadata--view { margin-bottom: 10px; }
 .knowledge-card__head label { display: flex; align-items: center; gap: 6px; color: var(--color-text-secondary); font-size: 12px; }
 .knowledge-card > p { max-height: 72px; margin: 12px 0; overflow: hidden; color: var(--color-text-secondary); white-space: pre-wrap; }
 .knowledge-card__actions { display: flex; gap: 6px; align-items: center; }
@@ -28,6 +32,8 @@
 .knowledge-form > .checkbox { flex-direction: row; }
 .knowledge-form > span { color: var(--color-text-secondary); font-size: 12px; text-align: center; }
 .knowledge-form__approach { display: grid; gap: 7px; }
+.knowledge-form .knowledge-filter-fields { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+.knowledge-form .knowledge-filter-fields label { display: grid; gap: 5px; color: var(--color-text-secondary); font-size: 12px; }
 .knowledge-form__approach > label { display: grid; gap: 5px; color: var(--color-text-secondary); font-size: 12px; }
 .knowledge-form__new-approach { width: fit-content; border: 0; color: var(--color-accent); background: transparent; cursor: pointer; }
 .knowledge-form__approach-create { display: grid; grid-template-columns: 1fr auto auto; gap: 6px; }
@@ -43,4 +49,4 @@
 .markdown-editor textarea { min-height: 180px; resize: vertical; }
 .markdown-editor__preview { min-height: 120px; padding: 12px; border: 1px solid var(--color-border); border-radius: 10px; background: var(--color-bg-elevated); }
 @media (max-width: 1100px) { .knowledge-page__filters { grid-template-columns: 1fr 1fr; } }
-@media (max-width: 760px) { .knowledge-page > header { align-items: stretch; flex-direction: column; } .knowledge-page__filters { grid-template-columns: 1fr; } .knowledge-card__head { flex-direction: column; } .knowledge-page__mobile-menu { display: inline-grid; } }
+@media (max-width: 760px) { .knowledge-page > header { align-items: stretch; flex-direction: column; } .knowledge-page__filters, .knowledge-form .knowledge-filter-fields { grid-template-columns: 1fr; } .knowledge-page__filters > input:first-child { grid-column: auto; } .knowledge-card__head { flex-direction: column; } .knowledge-page__mobile-menu { display: inline-grid; } }
