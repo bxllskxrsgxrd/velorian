@@ -15,9 +15,24 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 		const box = svg.getBoundingClientRect();
 		const style = getComputedStyle(svg);
 		const buttonStyle = getComputedStyle(svg.closest('button')!);
-		return { width: box.width, height: box.height, display: style.display, opacity: style.opacity, stroke: style.stroke, buttonPadding: buttonStyle.padding, buttonBorderWidth: buttonStyle.borderWidth };
+		return {
+			width: box.width,
+			height: box.height,
+			display: style.display,
+			opacity: style.opacity,
+			stroke: style.stroke,
+			buttonPadding: buttonStyle.padding,
+			buttonBorderWidth: buttonStyle.borderWidth,
+		};
 	});
-	expect(starRendering).toMatchObject({ width: 18, height: 18, display: 'block', opacity: '1', buttonPadding: '0px', buttonBorderWidth: '0px' });
+	expect(starRendering).toMatchObject({
+		width: 18,
+		height: 18,
+		display: 'block',
+		opacity: '1',
+		buttonPadding: '0px',
+		buttonBorderWidth: '0px',
+	});
 	expect(starRendering.stroke).not.toBe('none');
 	await dialog.getByRole('button', { name: 'Поставить рейтинг 3 из 5' }).hover();
 	await expect(dialog.locator('.rating__star--active')).toHaveCount(3);
@@ -49,79 +64,81 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	await expect(page.getByRole('checkbox', { name: 'Использовать' })).not.toBeChecked();
 	await page.reload();
 
-await expect(
-	page.getByRole('checkbox', { name: 'Использовать' }),
-).not.toBeChecked();
+	await expect(page.getByRole('checkbox', { name: 'Использовать' })).not.toBeChecked();
 
-// Открываем dropdown с фильтрами
-await page.getByRole('button', { name: /Фильтры/ }).click();
-
-const filterRequest = page.waitForRequest((request) =>
-	request.url().includes('min_rating=4'),
-);
-
-await page.getByLabel('Рейтинг', { exact: true }).selectOption('4');
-
-await filterRequest;
-
-await page.getByLabel('Источник').selectOption('manual');
-
-await page
-	.getByLabel('Подход', { exact: true })
-	.selectOption({ label: 'UGC-разбор' });
-
-await page.getByLabel('Использование').selectOption('inactive');
-
-// Сортировка теперь отдельный dropdown, а не select
-await page.getByRole('button', { name: 'Сортировка' }).click();
-
-await page
-	.getByRole('button', { name: 'Рейтинг: высокий' })
-	.click();
-
-await page.getByLabel('Поиск по базе знаний').fill('оффер');
-
-await expect(page).toHaveURL(
-	/q=%D0%BE%D1%84%D1%84%D0%B5%D1%80/,
-);
-
-// После выбора сортировки dropdown фильтров закрыт,
-// поэтому открываем его снова для сброса
-await page.getByRole('button', { name: /Фильтры/ }).click();
-
-const reset = page.getByRole('button', { name: 'Сбросить' });
-
-await expect(reset).toBeEnabled();
-
-await reset.click();
-
-// Сброс удаляет только фильтры.
-// Поиск и сортировка должны сохраниться.
-await expect
-	.poll(() => {
-		const url = new URL(page.url());
-
-		return {
-			pathname: url.pathname,
-			search: url.searchParams.get('q'),
-			sort: url.searchParams.get('sort'),
-			source: url.searchParams.get('source'),
-			approach: url.searchParams.get('approach'),
-			active: url.searchParams.get('active'),
-			rating: url.searchParams.get('rating'),
-		};
-	})
-	.toEqual({
-		pathname: '/knowledge',
-		search: 'оффер',
-		sort: 'rating_desc',
-		source: null,
-		approach: null,
-		active: null,
-		rating: null,
+	// Открываем dropdown с фильтрами
+	const controls = page.getByRole('region', {
+		name: 'Управление базой знаний',
 	});
 
-await expect(reset).toBeDisabled();
+	await controls.getByRole('button', { name: /^Фильтры/ }).click();
+
+	const filtersDropdown = page.locator('.knowledge-page__dropdown--filters');
+
+	await expect(filtersDropdown).toBeVisible();
+
+	const filterRequest = page.waitForRequest((request) => request.url().includes('min_rating=4'));
+
+	await filtersDropdown.getByLabel('Рейтинг', { exact: true }).selectOption('4');
+
+	await filterRequest;
+
+	await filtersDropdown.getByLabel('Источник').selectOption('manual');
+
+	await filtersDropdown.getByLabel('Подход', { exact: true }).selectOption({ label: 'UGC-разбор' });
+
+	await filtersDropdown.getByLabel('Использование').selectOption('inactive');
+
+	// Сортировка теперь отдельный dropdown, а не select
+	await page.getByRole('button', { name: 'Сортировка' }).click();
+
+	await page.getByRole('button', { name: 'Рейтинг: высокий' }).click();
+
+	await page.getByLabel('Поиск по базе знаний').fill('оффер');
+
+	await expect(page).toHaveURL(/q=%D0%BE%D1%84%D1%84%D0%B5%D1%80/);
+
+	// После выбора сортировки dropdown фильтров закрыт,
+	// поэтому открываем его снова для сброса
+	await controls.getByRole('button', { name: /^Фильтры/ }).click();
+
+	await expect(filtersDropdown).toBeVisible();
+
+	const reset = filtersDropdown.getByRole('button', {
+		name: 'Сбросить',
+	});
+
+	await expect(reset).toBeEnabled();
+
+	await reset.click();
+
+	// Сброс удаляет только фильтры.
+	// Поиск и сортировка должны сохраниться.
+	await expect
+		.poll(() => {
+			const url = new URL(page.url());
+
+			return {
+				pathname: url.pathname,
+				search: url.searchParams.get('q'),
+				sort: url.searchParams.get('sort'),
+				source: url.searchParams.get('source'),
+				approach: url.searchParams.get('approach'),
+				active: url.searchParams.get('active'),
+				rating: url.searchParams.get('rating'),
+			};
+		})
+		.toEqual({
+			pathname: '/knowledge',
+			search: 'оффер',
+			sort: 'rating_desc',
+			source: null,
+			approach: null,
+			active: null,
+			rating: null,
+		});
+
+	await expect(reset).toBeDisabled();
 });
 
 test('agent can browse and search the current user knowledge through chat', async ({ page }) => {
@@ -140,7 +157,9 @@ test('agent can browse and search the current user knowledge through chat', asyn
 
 	await page.getByLabel('Открыть меню действий').click();
 	await page.getByRole('menuitemradio', { name: 'Поиск по базе знаний' }).click();
-	await page.getByRole('textbox', { name: 'Введите запрос' }).pressSequentially('Какой angle использовать для health Facebook?');
+	await page
+		.getByRole('textbox', { name: 'Введите запрос' })
+		.pressSequentially('Какой angle использовать для health Facebook?');
 	const send = page.getByRole('button', { name: 'Отправить сообщение' });
 	await expect(send).toBeEnabled();
 	await send.click();
