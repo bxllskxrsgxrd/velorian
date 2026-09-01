@@ -48,19 +48,80 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	await page.locator('label.checkbox').filter({ hasText: 'Использовать' }).click();
 	await expect(page.getByRole('checkbox', { name: 'Использовать' })).not.toBeChecked();
 	await page.reload();
-	await expect(page.getByRole('checkbox', { name: 'Использовать' })).not.toBeChecked();
-	const filterRequest = page.waitForRequest((request) => request.url().includes('min_rating=4'));
-	await page.getByLabel('Рейтинг', { exact: true }).selectOption('4');
-	await filterRequest;
-	await page.getByLabel('Источник').selectOption('manual');
-	await page.getByLabel('Подход', { exact: true }).selectOption({ label: 'UGC-разбор' });
-	await page.getByLabel('Сортировка').selectOption('rating_desc');
-	await page.getByLabel('Использование').selectOption('inactive');
-	await page.getByLabel('Поиск по базе знаний').fill('оффер');
-	await expect(page).toHaveURL(/q=%D0%BE%D1%84%D1%84%D0%B5%D1%80/);
-	await page.getByRole('button', { name: 'Сбросить' }).click();
-	await expect(page).toHaveURL(/\/knowledge$/);
-	await expect(page.getByRole('button', { name: 'Сбросить' })).toBeDisabled();
+
+await expect(
+	page.getByRole('checkbox', { name: 'Использовать' }),
+).not.toBeChecked();
+
+// Открываем dropdown с фильтрами
+await page.getByRole('button', { name: /Фильтры/ }).click();
+
+const filterRequest = page.waitForRequest((request) =>
+	request.url().includes('min_rating=4'),
+);
+
+await page.getByLabel('Рейтинг', { exact: true }).selectOption('4');
+
+await filterRequest;
+
+await page.getByLabel('Источник').selectOption('manual');
+
+await page
+	.getByLabel('Подход', { exact: true })
+	.selectOption({ label: 'UGC-разбор' });
+
+await page.getByLabel('Использование').selectOption('inactive');
+
+// Сортировка теперь отдельный dropdown, а не select
+await page.getByRole('button', { name: 'Сортировка' }).click();
+
+await page
+	.getByRole('button', { name: 'Рейтинг: высокий' })
+	.click();
+
+await page.getByLabel('Поиск по базе знаний').fill('оффер');
+
+await expect(page).toHaveURL(
+	/q=%D0%BE%D1%84%D1%84%D0%B5%D1%80/,
+);
+
+// После выбора сортировки dropdown фильтров закрыт,
+// поэтому открываем его снова для сброса
+await page.getByRole('button', { name: /Фильтры/ }).click();
+
+const reset = page.getByRole('button', { name: 'Сбросить' });
+
+await expect(reset).toBeEnabled();
+
+await reset.click();
+
+// Сброс удаляет только фильтры.
+// Поиск и сортировка должны сохраниться.
+await expect
+	.poll(() => {
+		const url = new URL(page.url());
+
+		return {
+			pathname: url.pathname,
+			search: url.searchParams.get('q'),
+			sort: url.searchParams.get('sort'),
+			source: url.searchParams.get('source'),
+			approach: url.searchParams.get('approach'),
+			active: url.searchParams.get('active'),
+			rating: url.searchParams.get('rating'),
+		};
+	})
+	.toEqual({
+		pathname: '/knowledge',
+		search: 'оффер',
+		sort: 'rating_desc',
+		source: null,
+		approach: null,
+		active: null,
+		rating: null,
+	});
+
+await expect(reset).toBeDisabled();
 });
 
 test('agent can browse and search the current user knowledge through chat', async ({ page }) => {
