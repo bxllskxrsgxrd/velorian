@@ -66,40 +66,101 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(page.getByRole('checkbox', { name: 'Использовать' })).not.toBeChecked();
 
-	// Открываем dropdown с фильтрами
 	const controls = page.getByRole('region', {
 		name: 'Управление базой знаний',
 	});
 
+	// Открываем фильтры
 	await controls.getByRole('button', { name: /^Фильтры/ }).click();
 
 	const filtersDropdown = page.locator('.knowledge-page__dropdown--filters');
 
 	await expect(filtersDropdown).toBeVisible();
 
-	const filterRequest = page.waitForRequest((request) => request.url().includes('min_rating=4'));
+	// Не используем getByLabel для select.
+	// Находим конкретный label, а внутри него select.
+	const ratingSelect = filtersDropdown.locator('label').filter({ hasText: 'Рейтинг' }).locator('select');
 
-	await filtersDropdown.getByLabel('Рейтинг', { exact: true }).selectOption('4');
+	const sourceSelect = filtersDropdown.locator('label').filter({ hasText: 'Источник' }).locator('select');
 
-	await filterRequest;
+	const approachSelect = filtersDropdown.locator('label').filter({ hasText: 'Подход' }).locator('select');
 
-	await filtersDropdown.getByLabel('Источник').selectOption('manual');
+	const activeSelect = filtersDropdown.locator('label').filter({ hasText: 'Использование' }).locator('select');
 
-	await filtersDropdown.getByLabel('Подход', { exact: true }).selectOption({ label: 'UGC-разбор' });
+	// Рейтинг
+	await Promise.all([
+		page.waitForRequest((request) => request.url().includes('min_rating=4')),
+		ratingSelect.selectOption('4'),
+	]);
 
-	await filtersDropdown.getByLabel('Использование').selectOption('inactive');
+	await expect(ratingSelect).toHaveValue('4');
 
-	// Сортировка теперь отдельный dropdown, а не select
-	await page.getByRole('button', { name: 'Сортировка' }).click();
+	// Источник
+	await sourceSelect.selectOption('manual');
 
-	await page.getByRole('button', { name: 'Рейтинг: высокий' }).click();
+	await expect(sourceSelect).toHaveValue('manual');
 
+	// Подход
+	await approachSelect.selectOption({
+		label: 'UGC-разбор',
+	});
+
+	await expect(approachSelect).not.toHaveValue('');
+
+	// Использование
+	await activeSelect.selectOption('inactive');
+
+	await expect(activeSelect).toHaveValue('inactive');
+
+	// Проверяем, что фильтры реально попали в URL
+	await expect
+		.poll(() => {
+			const url = new URL(page.url());
+
+			return {
+				rating: url.searchParams.get('rating'),
+				source: url.searchParams.get('source'),
+				approach: url.searchParams.get('approach'),
+				active: url.searchParams.get('active'),
+			};
+		})
+		.toEqual({
+			rating: '4',
+			source: 'manual',
+			approach: expect.any(String),
+			active: 'inactive',
+		});
+
+	// Открываем сортировку.
+	// Это автоматически заменит dropdown фильтров на dropdown сортировки.
+	await controls.getByRole('button', { name: 'Сортировка' }).click();
+
+	const sortDropdown = page.locator('.knowledge-page__dropdown--sort');
+
+	await expect(sortDropdown).toBeVisible();
+
+	await sortDropdown.getByRole('button', { name: 'Рейтинг: высокий' }).click();
+
+	await expect(sortDropdown).not.toBeVisible();
+
+	// Поиск
 	await page.getByLabel('Поиск по базе знаний').fill('оффер');
 
-	await expect(page).toHaveURL(/q=%D0%BE%D1%84%D1%84%D0%B5%D1%80/);
+	await expect
+		.poll(() => {
+			const url = new URL(page.url());
 
-	// После выбора сортировки dropdown фильтров закрыт,
-	// поэтому открываем его снова для сброса
+			return {
+				search: url.searchParams.get('q'),
+				sort: url.searchParams.get('sort'),
+			};
+		})
+		.toEqual({
+			search: 'оффер',
+			sort: 'rating_desc',
+		});
+
+	// Снова открываем фильтры для сброса
 	await controls.getByRole('button', { name: /^Фильтры/ }).click();
 
 	await expect(filtersDropdown).toBeVisible();
@@ -112,8 +173,8 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await reset.click();
 
-	// Сброс удаляет только фильтры.
-	// Поиск и сортировка должны сохраниться.
+	// Сбрасываются ТОЛЬКО фильтры.
+	// Поиск и сортировка остаются.
 	await expect
 		.poll(() => {
 			const url = new URL(page.url());
@@ -122,20 +183,29 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 				pathname: url.pathname,
 				search: url.searchParams.get('q'),
 				sort: url.searchParams.get('sort'),
+				rating: url.searchParams.get('rating'),
 				source: url.searchParams.get('source'),
 				approach: url.searchParams.get('approach'),
 				active: url.searchParams.get('active'),
-				rating: url.searchParams.get('rating'),
+				geo: url.searchParams.get('geo'),
+				celebrity: url.searchParams.get('celebrity'),
+				offer: url.searchParams.get('offer'),
+				newsSource: url.searchParams.get('news_source'),
 			};
 		})
 		.toEqual({
 			pathname: '/knowledge',
 			search: 'оффер',
 			sort: 'rating_desc',
+
+			rating: null,
 			source: null,
 			approach: null,
 			active: null,
-			rating: null,
+			geo: null,
+			celebrity: null,
+			offer: null,
+			newsSource: null,
 		});
 
 	await expect(reset).toBeDisabled();
