@@ -1,3 +1,43 @@
+@mixin knowledge-field-control {
+	width: 100%;
+	min-width: 0;
+	min-height: 42px;
+
+	padding: 8px 11px;
+
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-medium);
+	outline: none;
+
+	color: var(--color-text-primary);
+	background: var(--color-bg-elevated);
+
+	font: inherit;
+	transition:
+		border-color 0.15s ease,
+		box-shadow 0.15s ease;
+
+	&::placeholder {
+		color: var(--color-text-secondary);
+		opacity: 1;
+	}
+
+	&:hover:not(:disabled):not(:focus):not(:focus-visible) {
+		border-color: var(--color-text-secondary);
+	}
+
+	&:focus,
+	&:focus-visible {
+		border-color: var(--color-accent);
+		box-shadow: var(--focus-ring);
+	}
+
+	&:disabled {
+		cursor: not-allowed;
+		opacity: 0.6;
+	}
+}
+
 .knowledge-shell {
 	min-height: 100dvh;
 	display: flex;
@@ -67,6 +107,13 @@
 	border-radius: var(--radius-medium);
 
 	background: var(--color-bg-elevated);
+	transition:
+		border-color 0.15s ease,
+		box-shadow 0.15s ease;
+
+	&:hover {
+		border-color: var(--color-text-secondary);
+	}
 
 	&:focus-within {
 		border-color: var(--color-accent);
@@ -231,22 +278,7 @@
 .knowledge-form input:not(.checkbox__input),
 .knowledge-form select,
 .knowledge-form textarea {
-	width: 100%;
-
-	padding: 10px 11px;
-
-	border: 1px solid var(--color-border);
-	border-radius: 10px;
-	outline: none;
-
-	color: var(--color-text-primary);
-	background: var(--color-bg-elevated);
-}
-
-.knowledge-page__controls input:not(.knowledge-page__search-input):focus,
-.knowledge-page__controls select:focus {
-	border-color: var(--color-accent);
-	box-shadow: var(--focus-ring);
+	@include knowledge-field-control;
 }
 
 .knowledge-page__list {
