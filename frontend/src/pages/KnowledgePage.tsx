@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useMemo } from 'react';
+import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
 	createKnowledgeApproach,
@@ -24,6 +24,7 @@ import { useKnowledgeStore } from '../stores/knowledgeStore';
 import { useConversationsStore } from '../stores/conversationsStore';
 import { useUiStore } from '../stores/uiStore';
 import './_knowledgePage.scss';
+import { SearchIcon } from '../components/icons/AppIcons';
 
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor/MarkdownEditor'));
 
@@ -108,6 +109,28 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	const setSidebarOpen = useUiStore((state) => state.setSidebarOpen);
 	const { showToast } = useToast();
 
+	const [activeDropdown, setActiveDropdown] = useState<'filters' | 'sort' | null>(null);
+	const dropdownRef = useRef<HTMLDivElement>(null);
+
+	useEffect(() => {
+		function handleClickOutside(event: MouseEvent) {
+			if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) {
+				setActiveDropdown(null);
+			}
+		}
+		function handleEscape(event: KeyboardEvent) {
+			if (event.key === 'Escape') setActiveDropdown(null);
+		}
+		if (activeDropdown) {
+			document.addEventListener('mousedown', handleClickOutside);
+			document.addEventListener('keydown', handleEscape);
+		}
+		return () => {
+			document.removeEventListener('mousedown', handleClickOutside);
+			document.removeEventListener('keydown', handleEscape);
+		};
+	}, [activeDropdown]);
+
 	useEffect(() => {
 		setSearch(params.get('q') ?? '');
 		// URL is the source of truth only when the page is entered.
@@ -160,7 +183,22 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 			cancelled = true;
 			window.clearTimeout(timer);
 		};
-	}, [activeFilter, approachId, celebrity, geo, newsSource, offer, params, ratingFilter, setItems, setLoading, setNextCursor, showToast, sort, sourceType]);
+	}, [
+		activeFilter,
+		approachId,
+		celebrity,
+		geo,
+		newsSource,
+		offer,
+		params,
+		ratingFilter,
+		setItems,
+		setLoading,
+		setNextCursor,
+		showToast,
+		sort,
+		sourceType,
+	]);
 
 	const counts = useMemo(
 		() => ({ total: items.length, active: items.filter((item) => item.isActive).length }),
@@ -180,22 +218,25 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 		else next.delete('q');
 		setParams(next, { replace: true });
 	}
-	function resetFilters() {
-		setSearch('');
-		setParams({}, { replace: true });
+
+	function resetFiltersOnly() {
+		const next = new URLSearchParams(params);
+		['source', 'approach', 'geo', 'celebrity', 'offer', 'news_source', 'rating', 'active'].forEach((key) =>
+			next.delete(key),
+		);
+		setParams(next);
 	}
-	const hasActiveFilters = Boolean(
-		search.trim() ||
-		sourceType ||
-		approachId ||
-		geo ||
-		celebrity ||
-		offer ||
-		newsSource ||
-		activeFilter !== 'all' ||
-		ratingFilter !== 'all' ||
-		sort !== 'date_desc',
-	);
+
+	const activeFiltersCount = [
+		sourceType,
+		approachId,
+		geo,
+		celebrity,
+		offer,
+		newsSource,
+		ratingFilter !== 'all' ? ratingFilter : '',
+		activeFilter !== 'all' ? activeFilter : '',
+	].filter(Boolean).length;
 
 	async function addApproach() {
 		const name = newApproachName.trim();
@@ -395,92 +436,142 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 						Добавить данные
 					</button>
 				</header>
-				<section className="knowledge-page__filters" aria-label="Фильтры базы знаний">
-					<input
-						value={search}
-						onChange={(event) => handleSearchChange(event.target.value)}
-						placeholder="Поиск по названию, содержимому и имени файла"
-						aria-label="Поиск по базе знаний"
-					/>
-					<select
-						value={sourceType}
-						onChange={(event) => setFilter('source', event.target.value)}
-						aria-label="Источник"
-					>
-						<option value="">Все источники</option>
-						<option value="manual">Вручную</option>
-						<option value="uploaded_file">Файлы</option>
-						<option value="rated_content">Оценённые ответы</option>
-					</select>
-					<select
-						value={approachId}
-						onChange={(event) => setFilter('approach', event.target.value)}
-						aria-label="Подход"
-					>
-						<option value="">Все подходы</option>
-						{approaches.map((approach) => (
-							<option key={approach.id} value={approach.id}>
-								{approach.name}
-							</option>
-						))}
-					</select>
-					<input
-						value={geo}
-						onChange={(event) => setFilter('geo', event.target.value)}
-						placeholder="ГЕО"
-						aria-label="ГЕО"
-					/>
-					<input
-						value={celebrity}
-						onChange={(event) => setFilter('celebrity', event.target.value)}
-						placeholder="Селеба"
-						aria-label="Селеба"
-					/>
-					<input
-						value={offer}
-						onChange={(event) => setFilter('offer', event.target.value)}
-						placeholder="Оффер"
-						aria-label="Оффер"
-					/>
-					<input
-						value={newsSource}
-						onChange={(event) => setFilter('news_source', event.target.value)}
-						placeholder="Новостник"
-						aria-label="Новостник"
-					/>
-					<select
-						value={ratingFilter}
-						onChange={(event) => setFilter('rating', event.target.value, 'all')}
-						aria-label="Рейтинг"
-					>
-						<option value="all">Все рейтинги</option>
-						<option value="5">5 из 5</option>
-						<option value="4">4 и выше</option>
-						<option value="3">3 и выше</option>
-						<option value="unrated">Без рейтинга</option>
-					</select>
-					<select
-						value={sort}
-						onChange={(event) => setFilter('sort', event.target.value, 'date_desc')}
-						aria-label="Сортировка"
-					>
-						<option value="date_desc">Сначала новые</option>
-						<option value="date_asc">Сначала старые</option>
-						<option value="rating_desc">Рейтинг: высокий</option>
-						<option value="rating_asc">Рейтинг: низкий</option>
-					</select>
-					<select
-						value={activeFilter}
-						onChange={(event) => setFilter('active', event.target.value, 'all')}
-						aria-label="Использование"
-					>
-						<option value="all">Все состояния</option>
-						<option value="active">Используются агентом</option>
-						<option value="inactive">Отключены</option>
-					</select>
-					<button className="knowledge-page__reset" type="button" disabled={!hasActiveFilters} onClick={resetFilters}>
-						Сбросить
-					</button>
+				<section className="knowledge-page__controls" aria-label="Управление базой знаний" ref={dropdownRef}>
+					<div className="knowledge-page__search-row">
+						<div className="knowledge-page__search">
+							<SearchIcon className="knowledge-page__search-icon" />
+
+							<input
+								className="knowledge-page__search-input"
+								value={search}
+								onChange={(event) => handleSearchChange(event.target.value)}
+								placeholder="Поиск по названию, содержимому и имени файла"
+								aria-label="Поиск по базе знаний"
+							/>
+						</div>
+
+						<button
+							className={`knowledge-page__control-btn ${activeDropdown === 'filters' ? 'active' : ''}`}
+							type="button"
+							onClick={() => setActiveDropdown(activeDropdown === 'filters' ? null : 'filters')}
+						>
+							Фильтры {activeFiltersCount > 0 && <span>{activeFiltersCount}</span>}
+						</button>
+
+						<button
+							className={`knowledge-page__control-btn ${activeDropdown === 'sort' ? 'active' : ''}`}
+							type="button"
+							onClick={() => setActiveDropdown(activeDropdown === 'sort' ? null : 'sort')}
+						>
+							Сортировка
+						</button>
+					</div>
+
+					{activeDropdown === 'filters' && (
+						<div className="knowledge-page__dropdown knowledge-page__dropdown--filters">
+							<div className="knowledge-page__dropdown-grid">
+								<label>
+									Источник
+									<select value={sourceType} onChange={(event) => setFilter('source', event.target.value)}>
+										<option value="">Все источники</option>
+										<option value="manual">Вручную</option>
+										<option value="uploaded_file">Файлы</option>
+										<option value="rated_content">Оценённые ответы</option>
+									</select>
+								</label>
+								<label>
+									Подход
+									<select value={approachId} onChange={(event) => setFilter('approach', event.target.value)}>
+										<option value="">Все подходы</option>
+										{approaches.map((approach) => (
+											<option key={approach.id} value={approach.id}>
+												{approach.name}
+											</option>
+										))}
+									</select>
+								</label>
+								<label>
+									Рейтинг
+									<select value={ratingFilter} onChange={(event) => setFilter('rating', event.target.value, 'all')}>
+										<option value="all">Все рейтинги</option>
+										<option value="5">5 из 5</option>
+										<option value="4">4 и выше</option>
+										<option value="3">3 и выше</option>
+										<option value="unrated">Без рейтинга</option>
+									</select>
+								</label>
+								<label>
+									Использование
+									<select value={activeFilter} onChange={(event) => setFilter('active', event.target.value, 'all')}>
+										<option value="all">Все состояния</option>
+										<option value="active">Используются агентом</option>
+										<option value="inactive">Отключены</option>
+									</select>
+								</label>
+								<label>
+									ГЕО
+									<input value={geo} onChange={(event) => setFilter('geo', event.target.value)} placeholder="ГЕО" />
+								</label>
+								<label>
+									Селеба
+									<input
+										value={celebrity}
+										onChange={(event) => setFilter('celebrity', event.target.value)}
+										placeholder="Селеба"
+									/>
+								</label>
+								<label>
+									Оффер
+									<input
+										value={offer}
+										onChange={(event) => setFilter('offer', event.target.value)}
+										placeholder="Оффер"
+									/>
+								</label>
+								<label>
+									Новостник
+									<input
+										value={newsSource}
+										onChange={(event) => setFilter('news_source', event.target.value)}
+										placeholder="Новостник"
+									/>
+								</label>
+							</div>
+							<div className="knowledge-page__dropdown-actions">
+								<button
+									className="knowledge-page__reset-small"
+									type="button"
+									disabled={activeFiltersCount === 0}
+									onClick={resetFiltersOnly}
+								>
+									Сбросить
+								</button>
+							</div>
+						</div>
+					)}
+
+					{activeDropdown === 'sort' && (
+						<div className="knowledge-page__dropdown knowledge-page__dropdown--sort">
+							{[
+								{ label: 'Сначала новые', value: 'date_desc' },
+								{ label: 'Сначала старые', value: 'date_asc' },
+								{ label: 'Рейтинг: высокий', value: 'rating_desc' },
+								{ label: 'Рейтинг: низкий', value: 'rating_asc' },
+							].map((item) => (
+								<button
+									key={item.value}
+									className={`knowledge-page__sort-option ${sort === item.value ? 'active' : ''}`}
+									type="button"
+									onClick={() => {
+										setFilter('sort', item.value, 'date_desc');
+										setActiveDropdown(null);
+									}}
+								>
+									{item.label}
+								</button>
+							))}
+						</div>
+					)}
 				</section>
 				<section className="knowledge-page__list">
 					{loading && <p className="knowledge-page__empty">Загрузка…</p>}
