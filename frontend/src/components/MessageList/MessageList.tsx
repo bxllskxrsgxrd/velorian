@@ -2,9 +2,9 @@ import type { ChatAttachment, ChatMessage } from '../../types/chat';
 import { KNOWLEDGE_RATING_THRESHOLD } from '../../constants/limits';
 import { MessageBubble } from '../MessageBubble/MessageBubble';
 import './_messageList.scss';
+import { useChatStore } from '../../stores/chatStore';
 
 type MessageListProps = {
-	messages: ChatMessage[];
 	onOpenAttachment: (attachment: ChatAttachment) => void;
 	onRetry: (userMessageId: string) => void;
 	onEdit: (message: ChatMessage, content: string) => void;
@@ -65,7 +65,9 @@ function getRetryMessageIds(messages: ChatMessage[]) {
 	return result;
 }
 
-export function MessageList({ messages, onOpenAttachment, onRetry, onEdit, onActivateBranch, onRate, onRemoveRating, onSaveToKnowledge, onCreateFile, onAddAttachmentToKnowledge, canEdit = true }: MessageListProps) {
+
+export function MessageList({ onOpenAttachment, onRetry, onEdit, onActivateBranch, onRate, onRemoveRating, onSaveToKnowledge, onCreateFile, onAddAttachmentToKnowledge, canEdit = true }: MessageListProps) {
+	const messages = useChatStore((state) => state.messages);
 	const { displayed, branches } = buildDisplay(messages);
 	const retryMessageIds = getRetryMessageIds(displayed);
 	return (

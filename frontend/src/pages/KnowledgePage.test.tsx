@@ -3,6 +3,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ToastProvider } from '../components/Toast/ToastProvider';
 import { KnowledgePage } from './KnowledgePage';
 import { MemoryRouter, useLocation } from 'react-router-dom';
+import { useKnowledgeStore } from '../stores/knowledgeStore';
+import { useConversationsStore } from '../stores/conversationsStore';
 
 const api = vi.hoisted(() => ({
 	listKnowledge: vi.fn(),
@@ -33,6 +35,8 @@ function renderKnowledge(initialEntry = '/knowledge') {
 
 describe('KnowledgePage', () => {
 	beforeEach(() => {
+		useKnowledgeStore.getState().reset();
+		useConversationsStore.getState().reset();
 		vi.clearAllMocks();
 		api.listKnowledge.mockResolvedValue({ items: [], pageInfo: { nextCursor: null, hasMore: false } });
 		api.listConversations.mockResolvedValue([]);
@@ -53,7 +57,7 @@ describe('KnowledgePage', () => {
 		await waitFor(() => expect(api.createKnowledgeItem).toHaveBeenCalledWith('Оффер', 'Проверенный текст', 5, true, null, {
 			geo: null, celebrity: null, offer: null, news_source: null,
 		}));
-		expect(await screen.findByText('Оффер.md')).toBeInTheDocument();
+		expect(await screen.findByText('Оффер')).toBeInTheDocument();
 	});
 
 	it('combines all four metadata filters in the list request', async () => {

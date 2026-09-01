@@ -1,4 +1,4 @@
-import { lazy, Suspense, useState } from 'react';
+import { lazy, memo, Suspense } from 'react';
 import { CHAT_MESSAGE_STATUSES } from '../../constants/chatMessageStatuses';
 import { CHAT_ROLES } from '../../constants/chatRoles';
 import type { ChatAttachment, ChatMessage } from '../../types/chat';
@@ -10,6 +10,7 @@ import { MessageError } from './MessageError';
 import { MessageRating } from './MessageRating';
 import { UserMessageContent } from './UserMessageContent';
 import { getUserFacingError } from '../../errors/userErrorMessages';
+import { useMessageUiStore } from '../../stores/messageUiStore';
 
 const AssistantMessageContent = lazy(() => import('./AssistantMessageContent'));
 
@@ -26,10 +27,15 @@ type MessageBubbleProps = {
 	onAddAttachmentToKnowledge?: (attachment: ChatAttachment) => void;
 };
 
-export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, branch, onRate, onRemoveRating, onSaveToKnowledge, onCreateFile, onAddAttachmentToKnowledge }: MessageBubbleProps) {
-	const [isEditing, setIsEditing] = useState(false);
-	const [draft, setDraft] = useState(message.content);
-	const [fileState, setFileState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
+function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, branch, onRate, onRemoveRating, onSaveToKnowledge, onCreateFile, onAddAttachmentToKnowledge }: MessageBubbleProps) {
+	const isEditing = useMessageUiStore((state) => state.byMessageId[message.id]?.isEditing ?? false);
+	const draft = useMessageUiStore((state) => state.byMessageId[message.id]?.draft ?? message.content);
+	const fileState = useMessageUiStore((state) => state.byMessageId[message.id]?.fileState ?? 'idle');
+	const startEditing = useMessageUiStore((state) => state.startEditing);
+	const cancelEditing = useMessageUiStore((state) => state.cancelEditing);
+	const finishEditing = useMessageUiStore((state) => state.finishEditing);
+	const setDraft = useMessageUiStore((state) => state.setDraft);
+	const setFileState = useMessageUiStore((state) => state.setFileState);
 	const isUser = message.role === CHAT_ROLES.USER;
 
 	const isPending = !isUser && message.status === CHAT_MESSAGE_STATUSES.PENDING && !message.content;
@@ -109,8 +115,8 @@ export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, bran
 
 			{isUser && isEditing ? (
 				<div className="message__editor">
-					<textarea autoFocus value={draft} onChange={(event) => setDraft(event.target.value)} />
-					<div><button type="button" onClick={() => { setDraft(message.content); setIsEditing(false); }}>Отмена</button><button type="button" disabled={!draft.trim() || draft.trim() === message.content.trim()} onClick={() => { onEdit?.(draft.trim()); setIsEditing(false); }}>Отправить</button></div>
+					<textarea autoFocus value={draft} onChange={(event) => setDraft(message.id, event.target.value)} />
+					<div><button type="button" onClick={() => cancelEditing(message.id, message.content)}>Отмена</button><button type="button" disabled={!draft.trim() || draft.trim() === message.content.trim()} onClick={() => { onEdit?.(draft.trim()); finishEditing(message.id); }}>Отправить</button></div>
 				</div>
 			) : hasText && (
 				<div className={contentClassName}>
@@ -122,13 +128,13 @@ export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, bran
 				</div>
 			)}
 			{!isUser && !isPending && !isStreaming && !isCancelled && onRate && onRemoveRating && (
-				<MessageRating rating={message.rating} onRate={onRate} onRemove={onRemoveRating} onSaveToKnowledge={onSaveToKnowledge} />
+				<MessageRating messageId={message.id} rating={message.rating} onRate={onRate} onRemove={onRemoveRating} onSaveToKnowledge={onSaveToKnowledge} />
 			)}
 			{!isUser && !isPending && !isStreaming && !isCancelled && onCreateFile && hasText && (
 				<div className="message__actions message__actions--file">
 					<button type="button" disabled={fileState === 'loading' || fileState === 'success'} onClick={() => {
-						setFileState('loading');
-						void onCreateFile().then(() => setFileState('success')).catch(() => setFileState('error'));
+						setFileState(message.id, 'loading');
+						void onCreateFile().then(() => setFileState(message.id, 'success')).catch(() => setFileState(message.id, 'error'));
 					}}>{fileState === 'loading' ? 'Создание…' : fileState === 'success' ? 'Файл создан' : 'Создать файл'}</button>
 					{fileState === 'error' && <span role="status">Не удалось создать файл</span>}
 				</div>
@@ -136,7 +142,7 @@ export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, bran
 			{isUser && !isEditing && (onEdit || (branch && branch.total > 1)) && (
 				<div className="message__user-actions">
 					{branch && branch.total > 1 && <div className="message__branches"><button type="button" onClick={branch.onPrevious} disabled={!branch.onPrevious} aria-label="Предыдущая версия">‹</button><span>{branch.index + 1} / {branch.total}</span><button type="button" onClick={branch.onNext} disabled={!branch.onNext} aria-label="Следующая версия">›</button></div>}
-					{onEdit && <button type="button" onClick={() => { setDraft(message.content); setIsEditing(true); }} aria-label="Редактировать сообщение"><EditIcon size={15} /></button>}
+					{onEdit && <button type="button" onClick={() => startEditing(message.id, message.content)} aria-label="Редактировать сообщение"><EditIcon size={15} /></button>}
 				</div>
 			)}
 			{!isUser && !isPending && !isStreaming && isCancelled && onRetry && (
@@ -149,3 +155,18 @@ export function MessageBubble({ message, onOpenAttachment, onRetry, onEdit, bran
 		</div>
 	);
 }
+
+export const MessageBubble = memo(MessageBubbleComponent, (previous, next) =>
+	previous.message === next.message &&
+	previous.branch?.index === next.branch?.index &&
+	previous.branch?.total === next.branch?.total &&
+	Boolean(previous.branch?.onPrevious) === Boolean(next.branch?.onPrevious) &&
+	Boolean(previous.branch?.onNext) === Boolean(next.branch?.onNext) &&
+	Boolean(previous.onRetry) === Boolean(next.onRetry) &&
+	Boolean(previous.onEdit) === Boolean(next.onEdit) &&
+	Boolean(previous.onRate) === Boolean(next.onRate) &&
+	Boolean(previous.onRemoveRating) === Boolean(next.onRemoveRating) &&
+	Boolean(previous.onSaveToKnowledge) === Boolean(next.onSaveToKnowledge) &&
+	Boolean(previous.onCreateFile) === Boolean(next.onCreateFile) &&
+	Boolean(previous.onAddAttachmentToKnowledge) === Boolean(next.onAddAttachmentToKnowledge),
+);

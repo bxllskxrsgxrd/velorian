@@ -1,25 +1,23 @@
 import { fireEvent, render, screen, waitFor } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { USER_MESSAGE_INLINE_CHAR_LIMIT } from '../../constants/limits';
 import { PromptBar } from './PromptBar';
 import { promptMarker } from '../../constants/promptTools';
+import { usePromptStore } from '../../stores/promptStore';
+import { useFilesStore } from '../../stores/filesStore';
+import { useChatStore } from '../../stores/chatStore';
 
 const WEB_SEARCH_MARKER = promptMarker('web');
 
-function renderPromptBar(onSendMessage = vi.fn().mockResolvedValue(undefined), onFilesSelect = vi.fn()) {
+function renderPromptBar(onSendMessage = vi.fn().mockResolvedValue(undefined)) {
 	render(
 		<PromptBar
-			files={[]}
-			isGenerating={false}
 			onSendMessage={onSendMessage}
 			onStop={vi.fn()}
-			onRemoveFile={vi.fn()}
 			onOpenFile={vi.fn()}
-			onFilesSelect={onFilesSelect}
-			onClearFiles={vi.fn()}
 		/>,
 	);
-	return { onSendMessage, onFilesSelect };
+	return { onSendMessage };
 }
 
 function enableWebSearch() {
@@ -28,6 +26,12 @@ function enableWebSearch() {
 }
 
 describe('PromptBar web search', () => {
+	beforeEach(() => {
+		usePromptStore.getState().reset();
+		useFilesStore.getState().reset();
+		useChatStore.getState().resetConversation();
+	});
+
 	it('moves the textarea into the multiline layout when the prompt wraps to multiple lines', async () => {
 		renderPromptBar();
 		const textarea = screen.getByRole('textbox');
@@ -76,15 +80,13 @@ describe('PromptBar web search', () => {
 	});
 
 	it('turns a large Unicode paste into a text attachment without duplicating it', () => {
-		const onFilesSelect = vi.fn();
-		renderPromptBar(undefined, onFilesSelect);
+		renderPromptBar();
 		const largeText = `Привет\n${'данные '.repeat(USER_MESSAGE_INLINE_CHAR_LIMIT)}`;
 		const textarea = screen.getByRole('textbox');
 		fireEvent.paste(textarea, { clipboardData: { getData: () => largeText } });
 
 		expect(textarea).toHaveValue('');
-		expect(onFilesSelect).toHaveBeenCalledOnce();
-		const file = onFilesSelect.mock.calls[0][0][0] as File;
+		const [file] = useFilesStore.getState().files;
 		expect(file.name).toMatch(/^pasted-text-.*\.txt$/);
 		expect(file.type).toContain('text/plain');
 	});

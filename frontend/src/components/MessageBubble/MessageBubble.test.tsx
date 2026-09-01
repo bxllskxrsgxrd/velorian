@@ -1,8 +1,11 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MessageBubble } from './MessageBubble';
+import { useMessageUiStore } from '../../stores/messageUiStore';
 
 describe('MessageBubble actions', () => {
+	beforeEach(() => useMessageUiStore.getState().reset());
+
 	it('does not render message-level copy or speech buttons', () => {
 		render(
 			<MessageBubble

@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef } from 'react';
 import { ACCENT_THEMES, ACCENT_THEME_LABELS, type AccentTheme } from '../../theme/accentTheme';
 import type { AuthUser, ConversationSummary } from '../../types/chat';
 import {
@@ -18,58 +18,69 @@ import { VelorianIcon } from '../icons/VelorianIcon';
 import { ModalDialog } from '../ui/ModalDialog/ModalDialog';
 import './_chatSidebar.scss';
 import { SidebarButton } from '../ui/SidebarButton/SidebarButton';
+import { useSidebarStore } from '../../stores/sidebarStore';
+import { useConversationsStore } from '../../stores/conversationsStore';
+import { useUiStore } from '../../stores/uiStore';
 
 type ChatSidebarProps = {
 	user: AuthUser;
-	conversations: ConversationSummary[];
 	activeConversationId: string | null;
-	search: string;
-	accentTheme: AccentTheme;
-	isOpen: boolean;
-	isCollapsed: boolean;
-	onSearchChange: (value: string) => void;
 	onSelect: (id: string) => void;
 	onNew: () => void;
 	onDelete: (id: string) => void;
 	onRename: (conversation: ConversationSummary, title: string) => void;
-	onAccentChange: (theme: AccentTheme) => void;
 	onExport: (format: 'markdown' | 'json') => void;
 	onLogout: () => void;
 	onOpenKnowledge: () => void;
-	onClose: () => void;
-	onToggleCollapsed: () => void;
 	activeSection?: 'chat' | 'knowledge';
 };
 
-type DialogState = { type: 'rename' | 'delete'; conversation: ConversationSummary } | null;
-
 export function ChatSidebar(props: ChatSidebarProps) {
-	const [conversationMenuId, setConversationMenuId] = useState<string | null>(null);
-	const [accountOpen, setAccountOpen] = useState(false);
-	const [settingsOpen, setSettingsOpen] = useState(false);
-	const [dialog, setDialog] = useState<DialogState>(null);
-	const [draftTitle, setDraftTitle] = useState('');
+	const allConversations = useConversationsStore((state) => state.conversations);
+	const search = useConversationsStore((state) => state.search);
+	const setSearch = useConversationsStore((state) => state.setSearch);
+	const accentTheme = useUiStore((state) => state.accent);
+	const setAccent = useUiStore((state) => state.setAccent);
+	const isOpen = useUiStore((state) => state.isSidebarOpen);
+	const setSidebarOpen = useUiStore((state) => state.setSidebarOpen);
+	const isCollapsed = useUiStore((state) => state.isSidebarCollapsed);
+	const toggleCollapsed = useUiStore((state) => state.toggleSidebarCollapsed);
+	const conversationMenuId = useSidebarStore((state) => state.conversationMenuId);
+	const setConversationMenuId = useSidebarStore((state) => state.setConversationMenuId);
+	const accountOpen = useSidebarStore((state) => state.isAccountOpen);
+	const setAccountOpen = useSidebarStore((state) => state.setAccountOpen);
+	const settingsOpen = useSidebarStore((state) => state.isSettingsOpen);
+	const setSettingsOpen = useSidebarStore((state) => state.setSettingsOpen);
+	const dialog = useSidebarStore((state) => state.dialog);
+	const setDialog = useSidebarStore((state) => state.setDialog);
+	const draftTitle = useSidebarStore((state) => state.draftTitle);
+	const setDraftTitle = useSidebarStore((state) => state.setDraftTitle);
+	const openSidebarDialog = useSidebarStore((state) => state.openDialog);
+	const closeMenus = useSidebarStore((state) => state.closeMenus);
 	const sidebarRef = useRef<HTMLElement>(null);
 	const searchInputRef = useRef<HTMLInputElement>(null);
+	const conversations = useMemo(() => {
+		const query = search.trim().toLocaleLowerCase('ru');
+		return query
+			? allConversations.filter((item) => item.title.toLocaleLowerCase('ru').includes(query))
+			: allConversations;
+	}, [allConversations, search]);
 
 	useEffect(() => {
-		function closeMenus(event: MouseEvent) {
+		function handleOutsideClick(event: MouseEvent) {
 			if (!sidebarRef.current?.contains(event.target as Node)) {
-				setConversationMenuId(null);
-				setAccountOpen(false);
+				closeMenus();
 			}
 		}
-		document.addEventListener('mousedown', closeMenus);
-		return () => document.removeEventListener('mousedown', closeMenus);
-	}, []);
+		document.addEventListener('mousedown', handleOutsideClick);
+		return () => document.removeEventListener('mousedown', handleOutsideClick);
+	}, [closeMenus]);
 
 	function openDialog(type: 'rename' | 'delete', conversation: ConversationSummary) {
-		setConversationMenuId(null);
-		setDraftTitle(conversation.title);
-		setDialog({ type, conversation });
+		openSidebarDialog(type, conversation);
 	}
 
-	const currentChat = props.conversations.find((conversation) => conversation.id === props.activeConversationId);
+	const currentChat = allConversations.find((conversation) => conversation.id === props.activeConversationId);
 
 	useEffect(() => {
 		document.title = currentChat?.title ?? 'Velorian';
@@ -80,14 +91,14 @@ export function ChatSidebar(props: ChatSidebarProps) {
 	}, [currentChat?.title]);
 
 	function openCollapsedSearch() {
-		props.onToggleCollapsed();
+		toggleCollapsed();
 		requestAnimationFrame(() => searchInputRef.current?.focus());
 	}
 
 	const sidebarClass = [
 		'chat-sidebar',
-		props.isOpen && 'chat-sidebar--open',
-		props.isCollapsed && 'chat-sidebar--collapsed',
+		isOpen && 'chat-sidebar--open',
+		isCollapsed && 'chat-sidebar--collapsed',
 	]
 		.filter(Boolean)
 		.join(' ');
@@ -100,9 +111,9 @@ export function ChatSidebar(props: ChatSidebarProps) {
 						<button
 							className="chat-sidebar__mark"
 							type="button"
-							onClick={props.isCollapsed ? props.onToggleCollapsed : undefined}
-							tabIndex={props.isCollapsed ? 0 : -1}
-							aria-label={props.isCollapsed ? 'Развернуть боковую панель' : undefined}
+							onClick={isCollapsed ? toggleCollapsed : undefined}
+							tabIndex={isCollapsed ? 0 : -1}
+							aria-label={isCollapsed ? 'Развернуть боковую панель' : undefined}
 						>
 							<span className="chat-sidebar__logo">
 								<VelorianIcon />
@@ -116,15 +127,15 @@ export function ChatSidebar(props: ChatSidebarProps) {
 					<button
 						className="chat-sidebar__collapse"
 						type="button"
-						onClick={props.onToggleCollapsed}
-						aria-label={props.isCollapsed ? 'Развернуть боковую панель' : 'Свернуть боковую панель'}
+						onClick={toggleCollapsed}
+						aria-label={isCollapsed ? 'Развернуть боковую панель' : 'Свернуть боковую панель'}
 					>
 						<SidebarIcon />
 					</button>
 					<button
 						className="chat-sidebar__mobile-close"
 						type="button"
-						onClick={props.onClose}
+						onClick={() => setSidebarOpen(false)}
 						aria-label="Закрыть меню"
 					>
 						×
@@ -142,7 +153,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 				>
 					База знаний
 				</SidebarButton>
-				{props.isCollapsed && (
+				{isCollapsed && (
 					<SidebarButton
 						icon={<SearchIcon />}
 						onClick={openCollapsedSearch}
@@ -156,14 +167,14 @@ export function ChatSidebar(props: ChatSidebarProps) {
 					<SearchIcon />
 					<input
 						ref={searchInputRef}
-						value={props.search}
-						onChange={(event) => props.onSearchChange(event.target.value)}
+						value={search}
+						onChange={(event) => setSearch(event.target.value)}
 						placeholder="Поиск диалогов"
 					/>
 				</label>
 				<nav className="chat-sidebar__conversations" aria-label="История диалогов">
-					{props.conversations.length === 0 && <p className="chat-sidebar__empty">Диалогов пока нет</p>}
-					{props.conversations.map((conversation) => (
+					{conversations.length === 0 && <p className="chat-sidebar__empty">Диалогов пока нет</p>}
+					{conversations.map((conversation) => (
 						<div
 							className={
 								conversation.id === props.activeConversationId
@@ -222,8 +233,8 @@ export function ChatSidebar(props: ChatSidebarProps) {
 									<label>
 										<span>Акцент интерфейса</span>
 										<select
-											value={props.accentTheme}
-											onChange={(event) => props.onAccentChange(event.target.value as AccentTheme)}
+											value={accentTheme}
+											onChange={(event) => setAccent(event.target.value as AccentTheme)}
 										>
 											{ACCENT_THEMES.map((theme) => (
 												<option value={theme} key={theme}>

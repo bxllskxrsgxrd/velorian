@@ -1,7 +1,7 @@
-import React, { useEffect, useRef, useState } from 'react';
+import React, { useEffect, useRef } from 'react';
 import { USER_MESSAGE_INLINE_CHAR_LIMIT } from '../../constants/limits';
 import { PROMPT_TOOLS, promptMarker, stripPromptMarker } from '../../constants/promptTools';
-import type { ChatMessageError, SearchMode } from '../../types/chat';
+import type { SearchMode } from '../../types/chat';
 import { reportError } from '../../utils/reportError';
 import { createPastedTextFile } from '../../utils/pastedTextFile';
 import { MicrophoneIcon } from '../icons/AppIcons';
@@ -11,6 +11,9 @@ import { AutoResizeTextarea } from '../ui/AutoResizeTextarea/AutoResizeTextarea'
 import { IconButton } from '../ui/IconButton/IconButton';
 import './_promptBar.scss';
 import { AttachmentPreview } from './AttachmentPreview';
+import { usePromptStore } from '../../stores/promptStore';
+import { useFilesStore } from '../../stores/filesStore';
+import { useChatStore } from '../../stores/chatStore';
 
 type SpeechRecognitionEventLike = Event & {
 	results: ArrayLike<{ 0: { transcript: string } }>;
@@ -30,32 +33,32 @@ type SpeechRecognitionLike = {
 type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
 type PromptBarProps = {
-	files: File[];
-	fileError?: ChatMessageError | null;
-	isGenerating: boolean;
 	onSendMessage: (prompt: string, files: File[], searchMode: SearchMode) => Promise<void>;
 	onStop: () => void;
-	onRemoveFile: (index: number) => void;
 	onOpenFile: (file: File) => void;
-	onFilesSelect: (files: File[]) => void;
-	onClearFiles: () => void;
 };
 
 export function PromptBar({
-	files,
-	fileError,
-	isGenerating,
 	onSendMessage,
 	onStop,
-	onRemoveFile,
 	onOpenFile,
-	onFilesSelect,
-	onClearFiles,
 }: PromptBarProps) {
-	const [isMultiline, setIsMultiline] = useState(false);
-	const [value, setValue] = useState('');
-	const [searchMode, setSearchMode] = useState<SearchMode>('none');
-	const [isListening, setIsListening] = useState(false);
+	const files = useFilesStore((state) => state.files);
+	const fileError = useFilesStore((state) => state.fileError);
+	const onFilesSelect = useFilesStore((state) => state.addFiles);
+	const onRemoveFile = useFilesStore((state) => state.removeFile);
+	const onClearFiles = useFilesStore((state) => state.clearFiles);
+	const isGenerating = useChatStore((state) => state.isGenerating || state.isCreatingConversation);
+	const isMultiline = usePromptStore((state) => state.isMultiline);
+	const value = usePromptStore((state) => state.value);
+	const searchMode = usePromptStore((state) => state.searchMode);
+	const isListening = usePromptStore((state) => state.isListening);
+	const setIsMultiline = usePromptStore((state) => state.setMultiline);
+	const setValue = usePromptStore((state) => state.setValue);
+	const setSearchMode = usePromptStore((state) => state.setSearchMode);
+	const setIsListening = usePromptStore((state) => state.setListening);
+	const resetPrompt = usePromptStore((state) => state.reset);
+	const restorePrompt = usePromptStore((state) => state.restore);
 	const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 	const submissionRef = useRef(false);
 	const speechWindow = window as typeof window & {
@@ -126,12 +129,12 @@ export function PromptBar({
 		setValue('');
 		setSearchMode('none');
 		onClearFiles();
+		resetPrompt();
 		try {
 			await onSendMessage(prompt, submittedFiles, submittedSearchMode);
 		} catch (error) {
 			reportError('Не удалось отправить сообщение', error);
-			setSearchMode(submittedSearchMode);
-			setValue(`${promptMarker(submittedSearchMode)}${prompt}`);
+			restorePrompt(`${promptMarker(submittedSearchMode)}${prompt}`, submittedSearchMode);
 			onFilesSelect(submittedFiles);
 		} finally {
 			submissionRef.current = false;

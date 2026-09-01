@@ -1,4 +1,5 @@
-import { Children, isValidElement, useEffect, useRef, useState, type ReactNode } from 'react';
+import { Children, isValidElement, useEffect, useMemo, useRef, type ReactNode } from 'react';
+import { createStore, useStore } from 'zustand';
 import { Highlight, Prism, type PrismTheme } from 'prism-react-renderer';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -164,8 +165,17 @@ async function copyToClipboard(value: string) {
 	if (!copied) throw new Error('Clipboard API is unavailable');
 }
 
+function createCopyButtonStore() {
+	return createStore<{ copied: boolean; setCopied: (copied: boolean) => void }>((set) => ({
+		copied: false,
+		setCopied: (copied) => set({ copied }),
+	}));
+}
+
 function MarkdownCopyButton({ label, getValue }: { label: string; getValue: () => string }) {
-	const [copied, setCopied] = useState(false);
+	const store = useMemo(() => createCopyButtonStore(), []);
+	const copied = useStore(store, (state) => state.copied);
+	const setCopied = useStore(store, (state) => state.setCopied);
 	const timerRef = useRef<number | null>(null);
 	useEffect(() => () => { if (timerRef.current !== null) window.clearTimeout(timerRef.current); }, []);
 

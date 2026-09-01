@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
 	activateMessageBranch,
@@ -21,29 +21,31 @@ import { MessageList } from '../components/MessageList/MessageList';
 import { PromptBar } from '../components/PromptBar/PromptBar';
 import { RequestMap } from '../components/RequestMap/RequestMap';
 import { KnowledgeFilterFields } from '../components/KnowledgeFilterFields/KnowledgeFilterFields';
-import { EMPTY_KNOWLEDGE_FILTERS } from '../constants/knowledgeFilters';
 import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
 import { DropZone } from '../components/ui/DropZone/DropZone';
 import { CHAT_MESSAGE_STATUSES } from '../constants/chatMessageStatuses';
 import { CHAT_ROLES } from '../constants/chatRoles';
 import { useDragAndDrop } from '../hooks/useDragAndDrop';
-import { getStoredAccentTheme, setAccentTheme, type AccentTheme } from '../theme/accentTheme';
 import type {
 	AuthUser,
 	ChatAttachment,
 	ChatMessage,
 	ConversationSummary,
-	KnowledgeFilters,
 	PreviewFile,
 	SearchMode,
 } from '../types/chat';
 import { attachmentToPreviewFile, createChatAttachment, fileToPreviewFile } from '../utils/files';
 import { reportError } from '../utils/reportError';
 import './_chatPage.scss';
-import { useToast } from '../components/Toast/ToastContext';
+import { useToast } from '../hooks/useToast';
 import { getUserFacingError } from '../errors/userErrorMessages';
 
 import { ArrowDownIcon } from '../components/icons/AppIcons';
+import { useChatStore } from '../stores/chatStore';
+import { useConversationsStore } from '../stores/conversationsStore';
+import { useFilesStore } from '../stores/filesStore';
+import { useUiStore } from '../stores/uiStore';
+import { usePromptStore } from '../stores/promptStore';
 
 type ChatPageProps = {
 	user: AuthUser;
@@ -60,32 +62,38 @@ function downloadText(name: string, content: string, type: string) {
 	URL.revokeObjectURL(url);
 }
 
-function getStoredSidebarCollapsed() {
-	try {
-		return window.localStorage.getItem('velorian-sidebar-collapsed') === 'true';
-	} catch (error) {
-		reportError('Не удалось прочитать состояние боковой панели', error);
-		return false;
-	}
-}
-
 export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	const { showToast } = useToast();
 	const navigate = useNavigate();
 	const { conversationId: routeConversationId } = useParams<{ conversationId: string }>();
 	const isNewConversationRoute = routeConversationId === 'new';
-	const [conversations, setConversations] = useState<ConversationSummary[]>([]);
+	const conversations = useConversationsStore((state) => state.conversations);
+	const setConversations = useConversationsStore((state) => state.setConversations);
+	const touchConversation = useConversationsStore((state) => state.touchConversation);
 	const activeConversationId = isNewConversationRoute ? null : (routeConversationId ?? null);
-	const [messages, setMessages] = useState<ChatMessage[]>([]);
-	const [previewFile, setPreviewFile] = useState<PreviewFile | null>(null);
-	const [isGenerating, setIsGenerating] = useState(false);
-	const [isLoadingConversation, setIsLoadingConversation] = useState(false);
-	const [pageError, setPageError] = useState('');
-	const [conversationSearch, setConversationSearch] = useState('');
-	const [accent, setAccent] = useState<AccentTheme>(getStoredAccentTheme);
-	const [isSidebarOpen, setIsSidebarOpen] = useState(false);
-	const [isSidebarCollapsed, setIsSidebarCollapsed] = useState(getStoredSidebarCollapsed);
-	const [showScrollButton, setShowScrollButton] = useState(false);
+	const messages = useChatStore((state) => state.messages);
+	const setMessages = useChatStore((state) => state.setMessages);
+	const isGenerating = useChatStore((state) => state.isGenerating);
+	const setIsGenerating = useChatStore((state) => state.setGenerating);
+	const isLoadingConversation = useChatStore((state) => state.isLoadingConversation);
+	const setIsLoadingConversation = useChatStore((state) => state.setLoadingConversation);
+	const pageError = useChatStore((state) => state.pageError);
+	const setPageError = useChatStore((state) => state.setPageError);
+	const setIsCreatingConversation = useChatStore((state) => state.setCreatingConversation);
+	const knowledgeAttachment = useChatStore((state) => state.knowledgeAttachment);
+	const knowledgeFilters = useChatStore((state) => state.knowledgeFilters);
+	const knowledgeSaveState = useChatStore((state) => state.knowledgeSaveState);
+	const openKnowledgeAttachment = useChatStore((state) => state.openKnowledgeAttachment);
+	const closeKnowledgeAttachment = useChatStore((state) => state.closeKnowledgeAttachment);
+	const setKnowledgeFilters = useChatStore((state) => state.setKnowledgeFilters);
+	const setKnowledgeSaveState = useChatStore((state) => state.setKnowledgeSaveState);
+	const previewFile = useFilesStore((state) => state.previewFile);
+	const setPreviewFile = useFilesStore((state) => state.setPreviewFile);
+	const isSidebarOpen = useUiStore((state) => state.isSidebarOpen);
+	const setIsSidebarOpen = useUiStore((state) => state.setSidebarOpen);
+	const showScrollButton = useUiStore((state) => state.showScrollButton);
+	const setShowScrollButton = useUiStore((state) => state.setShowScrollButton);
+	const resetPromptInput = usePromptStore((state) => state.reset);
 	const chatPageRef = useRef<HTMLDivElement | null>(null);
 	const attachmentUrlsRef = useRef(new Set<string>());
 	const previewFileRef = useRef<PreviewFile | null>(null);
@@ -99,30 +107,15 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	const suppressInitialFallbackRef = useRef(false);
 	const conversationCreationRef = useRef<Promise<ConversationSummary> | null>(null);
 	const sendOperationRef = useRef<Promise<void> | null>(null);
-	const [isCreatingConversation, setIsCreatingConversation] = useState(false);
-	const [promptResetSequence, setPromptResetSequence] = useState(0);
-	const [knowledgeAttachment, setKnowledgeAttachment] = useState<ChatAttachment | null>(null);
-	const [knowledgeFilters, setKnowledgeFilters] = useState<KnowledgeFilters>({ ...EMPTY_KNOWLEDGE_FILTERS });
-	const [knowledgeSaveState, setKnowledgeSaveState] = useState<'idle' | 'loading' | 'success' | 'error'>('idle');
-
 	const {
 		isDragging,
-		files,
-		fileError,
-		addFiles,
 		handleDragOver,
 		handleDragLeave,
 		handleDrop,
-		removeFile,
 		clearFiles,
 	} = useDragAndDrop(activeConversationId);
 
 	const hasMessages = messages.length > 0;
-	const filteredConversations = useMemo(() => {
-		const query = conversationSearch.trim().toLocaleLowerCase('ru');
-		return query ? conversations.filter((item) => item.title.toLocaleLowerCase('ru').includes(query)) : conversations;
-	}, [conversationSearch, conversations]);
-
 	useEffect(() => {
 		let cancelled = false;
 		listConversations()
@@ -139,7 +132,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 		return () => {
 			cancelled = true;
 		};
-	}, [navigate, user.id]);
+	}, [navigate, setConversations, setPageError, user.id]);
 
 	useEffect(() => {
 		if (!activeConversationId) return;
@@ -174,7 +167,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 			.finally(() => {
 				if (sequence === loadSequenceRef.current) setIsLoadingConversation(false);
 			});
-	}, [activeConversationId]);
+	}, [activeConversationId, setIsLoadingConversation, setMessages, setPageError]);
 
 	useEffect(() => {
 		if (!hasMessages || !isNearBottomRef.current) return;
@@ -238,13 +231,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	}
 
 	function updateConversationSummary(id: string, title?: string) {
-		const now = new Date().toISOString();
-		setConversations((current) => {
-			const found = current.find((item) => item.id === id);
-			if (!found) return current;
-			const updated = { ...found, title: title ?? found.title, updatedAt: now };
-			return [updated, ...current.filter((item) => item.id !== id)];
-		});
+		touchConversation(id, title);
 	}
 
 	async function ensureConversation() {
@@ -554,9 +541,16 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	async function handleCreateFile(message: ChatMessage) {
 		try {
 			const { attachment, created } = await createMessageMarkdownFile(message.id);
-			setMessages((current) => current.map((entry) => entry.id === message.id
-				? { ...entry, attachments: [...(entry.attachments ?? []).filter((item) => item.id !== attachment.id), attachment] }
-				: entry));
+			setMessages((current) =>
+				current.map((entry) =>
+					entry.id === message.id
+						? {
+								...entry,
+								attachments: [...(entry.attachments ?? []).filter((item) => item.id !== attachment.id), attachment],
+							}
+						: entry,
+				),
+			);
 			showToast(created ? 'Markdown-файл создан' : 'Файл для этого ответа уже создан', created ? 'success' : 'info');
 		} catch (error) {
 			reportError('MESSAGE_MARKDOWN_FILE_FAILED', error, { messageId: message.id });
@@ -566,9 +560,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	}
 
 	function openKnowledgeAttachmentDialog(attachment: ChatAttachment) {
-		setKnowledgeAttachment(attachment);
-		setKnowledgeFilters({ ...EMPTY_KNOWLEDGE_FILTERS });
-		setKnowledgeSaveState('idle');
+		openKnowledgeAttachment(attachment);
 	}
 
 	async function handleSaveAttachmentToKnowledge() {
@@ -576,12 +568,19 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 		setKnowledgeSaveState('loading');
 		try {
 			const result = await saveAttachmentToKnowledge(knowledgeAttachment.id, knowledgeFilters);
-			setMessages((current) => current.map((message) => ({
-				...message,
-				attachments: message.attachments?.map((attachment) => attachment.id === knowledgeAttachment.id ? { ...attachment, knowledgeSaved: true } : attachment),
-			})));
+			setMessages((current) =>
+				current.map((message) => ({
+					...message,
+					attachments: message.attachments?.map((attachment) =>
+						attachment.id === knowledgeAttachment.id ? { ...attachment, knowledgeSaved: true } : attachment,
+					),
+				})),
+			);
 			setKnowledgeSaveState('success');
-			showToast(result.created ? 'Добавлено в базу знаний' : 'Файл уже находится в базе знаний', result.created ? 'success' : 'info');
+			showToast(
+				result.created ? 'Добавлено в базу знаний' : 'Файл уже находится в базе знаний',
+				result.created ? 'success' : 'info',
+			);
 		} catch (error) {
 			reportError('ATTACHMENT_KNOWLEDGE_SAVE_FAILED', error, { attachmentId: knowledgeAttachment.id });
 			setKnowledgeSaveState('error');
@@ -595,7 +594,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 		revokeLocalAttachmentUrls();
 		clearFiles();
 		setMessages([]);
-		setPromptResetSequence((current) => current + 1);
+		resetPromptInput();
 		setIsSidebarOpen(false);
 		navigate('/chat/new');
 	}
@@ -637,11 +636,6 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 		downloadText(`${safeName}.md`, `# ${active?.title ?? 'Диалог'}\n\n${markdown}`, 'text/markdown');
 	}
 
-	function handleAccentChange(theme: AccentTheme) {
-		setAccent(theme);
-		setAccentTheme(theme);
-	}
-
 	function reportActionError(error: unknown, fallback: string) {
 		reportError(fallback, error);
 		setPageError(error instanceof Error ? error.message : fallback);
@@ -651,14 +645,8 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 		<div className="chat-shell">
 			<ChatSidebar
 				user={user}
-				conversations={filteredConversations}
 				activeConversationId={activeConversationId}
-				search={conversationSearch}
-				accentTheme={accent}
-				isOpen={isSidebarOpen}
-				isCollapsed={isSidebarCollapsed}
 				activeSection="chat"
-				onSearchChange={setConversationSearch}
 				onSelect={(id) => {
 					requestControllerRef.current?.abort();
 					navigate(`/chat/${id}`);
@@ -675,22 +663,9 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 						reportActionError(error, 'Не удалось переименовать диалог'),
 					)
 				}
-				onAccentChange={handleAccentChange}
 				onExport={handleExport}
 				onLogout={() => void onLogout()}
 				onOpenKnowledge={onOpenKnowledge}
-				onClose={() => setIsSidebarOpen(false)}
-				onToggleCollapsed={() =>
-					setIsSidebarCollapsed((current) => {
-						const next = !current;
-						try {
-							window.localStorage.setItem('velorian-sidebar-collapsed', String(next));
-						} catch (error) {
-							reportError('Не удалось сохранить состояние боковой панели', error);
-						}
-						return next;
-					})
-				}
 			/>
 			<DropZone isDragging={isDragging} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
 				<div
@@ -717,7 +692,6 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 							<div className="chat-page__loading">Загрузка диалога…</div>
 						) : hasMessages ? (
 							<MessageList
-								messages={messages}
 								onOpenAttachment={openMessageAttachment}
 								onRetry={handleRetry}
 								onEdit={handleEditMessage}
@@ -751,21 +725,14 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 							</button>
 						)}
 						<PromptBar
-							key={`prompt-${promptResetSequence}`}
-							files={files}
-							fileError={fileError}
-							isGenerating={isGenerating || isCreatingConversation}
 							onSendMessage={handleSendMessage}
 							onStop={() => requestControllerRef.current?.abort()}
-							onRemoveFile={removeFile}
 							onOpenFile={openPromptFile}
-							onFilesSelect={addFiles}
-							onClearFiles={clearFiles}
 						/>
 					</div>
 				</div>
 			</DropZone>
-			<RequestMap messages={messages} />
+			<RequestMap />
 			{isSidebarOpen && (
 				<button
 					className="chat-shell__backdrop"
@@ -775,18 +742,34 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 				/>
 			)}
 			{previewFile && <FilePreviewModal file={previewFile} onClose={closePreview} />}
-			{knowledgeAttachment && <ModalDialog
-				title={`Добавить «${knowledgeAttachment.name}» в БД`}
-				confirmLabel={knowledgeSaveState === 'loading' ? 'Добавление…' : knowledgeSaveState === 'success' ? 'Добавлено' : 'Добавить в БД'}
-				confirmDisabled={knowledgeSaveState === 'loading' || knowledgeSaveState === 'success'}
-				closeDisabled={knowledgeSaveState === 'loading'}
-				onClose={() => setKnowledgeAttachment(null)}
-				onConfirm={() => void handleSaveAttachmentToKnowledge()}
-			><div className="chat-knowledge-form">
-				<p>Фильтры необязательны. Markdown будет сохранён без преобразования в HTML.</p>
-				<KnowledgeFilterFields value={knowledgeFilters} onChange={setKnowledgeFilters} disabled={knowledgeSaveState === 'loading' || knowledgeSaveState === 'success'} />
-				{knowledgeSaveState === 'error' && <p role="alert">Не удалось добавить файл в базу знаний. Можно повторить попытку.</p>}
-			</div></ModalDialog>}
+			{knowledgeAttachment && (
+				<ModalDialog
+					title={`Добавить «${knowledgeAttachment.name}» в БД`}
+					confirmLabel={
+						knowledgeSaveState === 'loading'
+							? 'Добавление…'
+							: knowledgeSaveState === 'success'
+								? 'Добавлено'
+								: 'Добавить в БД'
+					}
+					confirmDisabled={knowledgeSaveState === 'loading' || knowledgeSaveState === 'success'}
+					closeDisabled={knowledgeSaveState === 'loading'}
+					onClose={closeKnowledgeAttachment}
+					onConfirm={() => void handleSaveAttachmentToKnowledge()}
+				>
+					<div className="chat-knowledge-form">
+						<p>Фильтры необязательны. Markdown будет сохранён без преобразования в HTML</p>
+						<KnowledgeFilterFields
+							value={knowledgeFilters}
+							onChange={setKnowledgeFilters}
+							disabled={knowledgeSaveState === 'loading' || knowledgeSaveState === 'success'}
+						/>
+						{knowledgeSaveState === 'error' && (
+							<p role="alert">Не удалось добавить файл в базу знаний. Можно повторить попытку</p>
+						)}
+					</div>
+				</ModalDialog>
+			)}
 		</div>
 	);
 }

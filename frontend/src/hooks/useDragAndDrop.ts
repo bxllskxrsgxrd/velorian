@@ -1,12 +1,14 @@
-import React, { useState } from 'react';
-import { validateAndMergeFiles } from '../utils/fileValidation';
-import type { ChatMessageError } from '../types/chat';
-import { reportError } from '../utils/reportError';
+import React from 'react';
+import { useFilesStore } from '../stores/filesStore';
 
 export function useDragAndDrop(conversationId?: string | null) {
-	const [isDragging, setIsDragging] = useState(false);
-	const [files, setFiles] = useState<File[]>([]);
-	const [fileError, setFileError] = useState<ChatMessageError | null>(null);
+	const isDragging = useFilesStore((state) => state.isDragging);
+	const files = useFilesStore((state) => state.files);
+	const fileError = useFilesStore((state) => state.fileError);
+	const addStoreFiles = useFilesStore((state) => state.addFiles);
+	const removeFile = useFilesStore((state) => state.removeFile);
+	const clearFiles = useFilesStore((state) => state.clearFiles);
+	const setIsDragging = useFilesStore((state) => state.setDragging);
 
 	// функция проверяет перетягиваются файлы или нет
 	function isFilesDragging(e: React.DragEvent<HTMLElement>) {
@@ -14,16 +16,7 @@ export function useDragAndDrop(conversationId?: string | null) {
 	}
 
 	function addFiles(newFiles: File[]) {
-		if (newFiles.length === 0) return;
-		setFiles((currentFiles) => {
-			const result = validateAndMergeFiles(currentFiles, newFiles);
-			setFileError(result.error ?? null);
-			if (result.error) reportError(result.error.code, new Error(result.error.description), {
-				...result.diagnostics,
-				...(conversationId ? { conversationId } : {}),
-			});
-			return result.files;
-		});
+		addStoreFiles(newFiles, conversationId);
 	}
 
 	// функция переноса файла в дроп зону
@@ -67,18 +60,6 @@ export function useDragAndDrop(conversationId?: string | null) {
 
 		// функция обновления массива droppedFiles при добавлении новых
 		addFiles(droppedFiles);
-	}
-
-	// функция удаления файлов из массива под индексу
-	function removeFile(index: number) {
-		setFiles((prev) => prev.filter((_, i) => i !== index));
-		setFileError(null);
-	}
-
-	// функция полной очистки массива
-	function clearFiles() {
-		setFiles([]);
-		setFileError(null);
 	}
 
 	return { isDragging, files, fileError, addFiles, handleDragOver, handleDragLeave, handleDrop, removeFile, clearFiles };

@@ -1,4 +1,4 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import type { PreviewFile } from '../../types/chat';
 import { getFileCodeLanguage } from '../../utils/codeLanguage';
 import { isTextPreview } from '../../utils/files';
@@ -6,6 +6,7 @@ import { reportError } from '../../utils/reportError';
 import { DeleteAttachmentIcon } from '../icons/AppIcons';
 import { IconButton } from '../ui/IconButton/IconButton';
 import './_filePreviewModal.scss';
+import { useFilesStore } from '../../stores/filesStore';
 
 const HighlightedCode = lazy(() => import('../MessageBubble/AssistantMessageContent').then((module) => ({ default: module.HighlightedCode })));
 const MarkdownPreview = lazy(() => import('../MessageBubble/AssistantMessageContent'));
@@ -16,7 +17,8 @@ type FilePreviewModalProps = {
 };
 
 export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
-	const [textPreview, setTextPreview] = useState<{ url: string; content: string } | null>(null);
+	const textPreview = useFilesStore((state) => state.textPreview);
+	const setTextPreview = useFilesStore((state) => state.setTextPreview);
 
 	const isImage = file.type.startsWith('image/');
 	const isPdf = file.type === 'application/pdf';
@@ -53,7 +55,7 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 			});
 
 		return () => controller.abort();
-	}, [file.name, file.url, isText]);
+	}, [file.name, file.url, isText, setTextPreview]);
 
 	const renderFilePreview = () => {
 		if (isPdf) {

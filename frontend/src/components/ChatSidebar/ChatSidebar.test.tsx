@@ -1,39 +1,44 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { describe, expect, it, vi } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { ChatSidebar } from './ChatSidebar';
+import { useConversationsStore } from '../../stores/conversationsStore';
+import { useUiStore } from '../../stores/uiStore';
+import { useSidebarStore } from '../../stores/sidebarStore';
 
 const conversation = { id: 'chat-1', title: 'Короткий чат', createdAt: '', updatedAt: '' };
 
 function renderSidebar(isCollapsed = false) {
 	const onRename = vi.fn();
 	const onDelete = vi.fn();
-	const onToggleCollapsed = vi.fn();
+	if (useUiStore.getState().isSidebarCollapsed !== isCollapsed) {
+		useUiStore.getState().toggleSidebarCollapsed();
+	}
 	render(
 		<ChatSidebar
 			user={{ id: 'user', email: 'user@example.com' }}
-			conversations={[conversation]}
 			activeConversationId="chat-1"
-			search=""
-			accentTheme="pine"
-			isOpen
-			isCollapsed={isCollapsed}
-			onSearchChange={vi.fn()}
 			onSelect={vi.fn()}
 			onNew={vi.fn()}
 			onDelete={onDelete}
 			onRename={onRename}
-			onAccentChange={vi.fn()}
 			onExport={vi.fn()}
 			onLogout={vi.fn()}
 			onOpenKnowledge={vi.fn()}
-			onClose={vi.fn()}
-			onToggleCollapsed={onToggleCollapsed}
 		/>,
 	);
-	return { onRename, onDelete, onToggleCollapsed };
+	return { onRename, onDelete };
 }
 
 describe('ChatSidebar menus', () => {
+	beforeEach(() => {
+		useConversationsStore.getState().setConversations([conversation]);
+		useConversationsStore.getState().setSearch('');
+		useSidebarStore.getState().setConversationMenuId(null);
+		useSidebarStore.getState().setAccountOpen(false);
+		useSidebarStore.getState().setSettingsOpen(false);
+		useSidebarStore.getState().setDialog(null);
+	});
+
 	it('renames a chat through the custom dialog', () => {
 		const { onRename } = renderSidebar();
 		fireEvent.click(screen.getByRole('button', { name: /действия с чатом/i }));
@@ -53,8 +58,8 @@ describe('ChatSidebar menus', () => {
 	});
 
 	it('expands the collapsed sidebar from the search button', () => {
-		const { onToggleCollapsed } = renderSidebar(true);
+		renderSidebar(true);
 		fireEvent.click(screen.getByRole('button', { name: 'Развернуть панель и найти чат' }));
-		expect(onToggleCollapsed).toHaveBeenCalledOnce();
+		expect(useUiStore.getState().isSidebarCollapsed).toBe(false);
 	});
 });

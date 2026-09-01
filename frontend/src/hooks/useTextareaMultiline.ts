@@ -1,4 +1,5 @@
-import { useLayoutEffect, useRef, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef } from 'react';
+import { createStore, useStore } from 'zustand';
 
 type UseTextareaMultilineProps = {
 	value: string;
@@ -16,8 +17,17 @@ function updateScrollMask(textarea: HTMLTextAreaElement) {
 	);
 }
 
+function createTextareaUiStore() {
+	return createStore<{ isMultiline: boolean; setMultiline: (value: boolean) => void }>((set) => ({
+		isMultiline: false,
+		setMultiline: (isMultiline) => set({ isMultiline }),
+	}));
+}
+
 export function useTextareaMultiline({ value, maxHeight = 320 }: UseTextareaMultilineProps) {
-	const [isMultiline, setIsMultiline] = useState(false);
+	const store = useMemo(() => createTextareaUiStore(), []);
+	const isMultiline = useStore(store, (state) => state.isMultiline);
+	const setIsMultiline = useStore(store, (state) => state.setMultiline);
 	const textareaRef = useRef<HTMLTextAreaElement>(null);
 
 	useLayoutEffect(() => {
@@ -37,9 +47,9 @@ export function useTextareaMultiline({ value, maxHeight = 320 }: UseTextareaMult
 		textarea.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden';
 
 		const nextMultiline = value.includes('\n') || contentHeight > singleLineHeight + 1;
-		setIsMultiline((current) => (current === nextMultiline ? current : nextMultiline));
+		if (isMultiline !== nextMultiline) setIsMultiline(nextMultiline);
 		updateScrollMask(textarea);
-	}, [value, maxHeight]);
+	}, [isMultiline, maxHeight, setIsMultiline, value]);
 
 	useLayoutEffect(() => {
 		const textarea = textareaRef.current;

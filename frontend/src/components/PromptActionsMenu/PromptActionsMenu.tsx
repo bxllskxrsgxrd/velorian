@@ -1,4 +1,5 @@
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef } from 'react';
+import { createStore, useStore } from 'zustand';
 import { PlusIcon } from '../icons/AppIcons';
 import { IconButton } from '../ui/IconButton/IconButton';
 
@@ -14,15 +15,24 @@ type PromptActionsMenuProps = {
 	onSearchModeChange: (mode: SearchMode) => void;
 };
 
+function createPromptActionsUiStore() {
+	return createStore<{ open: boolean; setOpen: (value: boolean | ((current: boolean) => boolean)) => void }>((set) => ({
+		open: false,
+		setOpen: (value) => set((state) => ({ open: typeof value === 'function' ? value(state.open) : value })),
+	}));
+}
+
 export function PromptActionsMenu({ onFilesSelect, searchMode, onSearchModeChange }: PromptActionsMenuProps) {
-	const [open, setOpen] = useState(false);
+	const store = useMemo(() => createPromptActionsUiStore(), []);
+	const open = useStore(store, (state) => state.open);
+	const setOpen = useStore(store, (state) => state.setOpen);
 	const buttonRef = useRef<HTMLButtonElement>(null);
 	const rootRef = useRef<HTMLDivElement>(null);
 
-	function closeMenu() {
+	const closeMenu = useCallback(() => {
 		setOpen(false);
 		buttonRef.current?.blur();
-	}
+	}, [setOpen]);
 
 	function handleFilesSelect(files: File[]) {
 		onFilesSelect(files);
@@ -54,7 +64,7 @@ export function PromptActionsMenu({ onFilesSelect, searchMode, onSearchModeChang
 			window.removeEventListener('keydown', handleEsc);
 			document.removeEventListener('pointerdown', handleClick);
 		};
-	}, [open]);
+	}, [closeMenu, open]);
 
 	return (
 		<div ref={rootRef} className="prompt-actions">

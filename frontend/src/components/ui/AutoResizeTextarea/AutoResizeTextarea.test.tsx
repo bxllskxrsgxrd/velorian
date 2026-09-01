@@ -1,11 +1,21 @@
 import { fireEvent, render, screen } from '@testing-library/react';
-import { useState } from 'react';
+import { useMemo } from 'react';
+import { createStore, useStore } from 'zustand';
 import { describe, expect, it } from 'vitest';
 import { AutoResizeTextarea } from './AutoResizeTextarea';
 
 function Harness() {
-	const [value, setValue] = useState('две\nстроки');
+	const store = useMemo(() => createHarnessStore(), []);
+	const value = useStore(store, (state) => state.value);
+	const setValue = useStore(store, (state) => state.setValue);
 	return <AutoResizeTextarea value={value} onChange={(event) => setValue(event.target.value)} />;
+}
+
+function createHarnessStore() {
+	return createStore<{ value: string; setValue: (value: string) => void }>((set) => ({
+		value: 'две\nстроки',
+		setValue: (value) => set({ value }),
+	}));
 }
 
 describe('AutoResizeTextarea', () => {

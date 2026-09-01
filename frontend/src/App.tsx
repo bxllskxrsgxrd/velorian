@@ -1,17 +1,19 @@
-import { lazy, Suspense, useEffect, useState } from 'react';
+import { lazy, Suspense, useEffect } from 'react';
 import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-dom';
 import { getCurrentUser, getRuntimeConfig, logout } from './api/chatApi';
 import { AuthPage } from './components/AuthPage/AuthPage';
 import { ChatPage } from './pages/ChatPage';
-import type { AuthUser } from './types/chat';
 import { reportError } from './utils/reportError';
 import { configureAttachmentLimits } from './constants/attachmentLimits';
+import { useAuthStore } from './stores/authStore';
 
 const KnowledgePage = lazy(() => import('./pages/KnowledgePage'));
 
 function App() {
-	const [user, setUser] = useState<AuthUser | null>(null);
-	const [loading, setLoading] = useState(true);
+	const user = useAuthStore((state) => state.user);
+	const loading = useAuthStore((state) => state.isSessionLoading);
+	const setUser = useAuthStore((state) => state.setUser);
+	const setLoading = useAuthStore((state) => state.setSessionLoading);
 	const navigate = useNavigate();
 	const location = useLocation();
 
@@ -32,7 +34,7 @@ function App() {
 				setUser(null);
 			})
 			.finally(() => setLoading(false));
-	}, []);
+	}, [setLoading, setUser]);
 
 	if (loading) return <div className="app-loading">Загрузка Velorian…</div>;
 	if (!user) return <AuthPage onAuthenticated={setUser} />;

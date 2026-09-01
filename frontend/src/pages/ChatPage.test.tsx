@@ -5,6 +5,11 @@ import { ToastProvider } from '../components/Toast/ToastProvider';
 import { ApiError } from '../api/httpClient';
 import type { StreamEvent } from '../api/chatApi';
 import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { useChatStore } from '../stores/chatStore';
+import { usePromptStore } from '../stores/promptStore';
+import { useFilesStore } from '../stores/filesStore';
+import { useConversationsStore } from '../stores/conversationsStore';
+import { useMessageUiStore } from '../stores/messageUiStore';
 
 const api = vi.hoisted(() => ({
 	createConversation: vi.fn(),
@@ -32,6 +37,14 @@ function renderChatPage(initialEntry = `/chat/${conversation.id}`) {
 		</MemoryRouter>,
 	);
 }
+
+beforeEach(() => {
+	useChatStore.getState().resetConversation();
+	usePromptStore.getState().reset();
+	useFilesStore.getState().reset();
+	useConversationsStore.getState().reset();
+	useMessageUiStore.getState().reset();
+});
 
 describe('ChatPage retry', () => {
 	beforeEach(() => {

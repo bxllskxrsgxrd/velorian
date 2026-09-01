@@ -1,9 +1,9 @@
-import type { ChatMessage } from '../../types/chat';
 import './_requestMap.scss';
+import { useChatStore } from '../../stores/chatStore';
 
-type RequestMapProps = { messages: ChatMessage[] };
 
-export function RequestMap({ messages }: RequestMapProps) {
+export function RequestMap() {
+	const messages = useChatStore((state) => state.messages);
 	const requests = messages.filter((message) => message.role === 'user' && message.isActive !== false);
 	if (requests.length < 2) return null;
 

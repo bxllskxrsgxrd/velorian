@@ -1,4 +1,5 @@
-import { useState, type KeyboardEvent } from 'react';
+import { useMemo, type KeyboardEvent } from 'react';
+import { createStore, useStore } from 'zustand';
 import { StarIcon } from '../../icons/AppIcons';
 import './_rating.scss';
 
@@ -17,6 +18,13 @@ type RatingProps = {
 
 const SCORES = [1, 2, 3, 4, 5] as const;
 
+function createRatingUiStore() {
+	return createStore<{ hoverValue: number | null; setHoverValue: (value: number | null) => void }>((set) => ({
+		hoverValue: null,
+		setHoverValue: (hoverValue) => set({ hoverValue }),
+	}));
+}
+
 export function Rating({
 	value,
 	onChange,
@@ -28,7 +36,9 @@ export function Rating({
 	disabled = false,
 	className = '',
 }: RatingProps) {
-	const [hoverValue, setHoverValue] = useState<number | null>(null);
+	const store = useMemo(() => createRatingUiStore(), []);
+	const hoverValue = useStore(store, (state) => state.hoverValue);
+	const setHoverValue = useStore(store, (state) => state.setHoverValue);
 	const savedValue = value ?? 0;
 	const displayedValue = hoverValue ?? savedValue;
 	const accessibleLabel = ariaLabel ?? label ?? 'Рейтинг';

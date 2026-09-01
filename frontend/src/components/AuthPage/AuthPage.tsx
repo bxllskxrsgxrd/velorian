@@ -1,7 +1,8 @@
-import { useState, type FormEvent } from 'react';
+import type { FormEvent } from 'react';
 import { authenticate } from '../../api/chatApi';
 import type { AuthUser } from '../../types/chat';
 import { reportError } from '../../utils/reportError';
+import { useAuthStore } from '../../stores/authStore';
 import './_authPage.scss';
 
 type AuthPageProps = {
@@ -9,11 +10,16 @@ type AuthPageProps = {
 };
 
 export function AuthPage({ onAuthenticated }: AuthPageProps) {
-	const [mode, setMode] = useState<'login' | 'register'>('login');
-	const [email, setEmail] = useState('');
-	const [password, setPassword] = useState('');
-	const [error, setError] = useState('');
-	const [loading, setLoading] = useState(false);
+	const mode = useAuthStore((state) => state.mode);
+	const email = useAuthStore((state) => state.email);
+	const password = useAuthStore((state) => state.password);
+	const error = useAuthStore((state) => state.error);
+	const loading = useAuthStore((state) => state.isSubmitting);
+	const setEmail = useAuthStore((state) => state.setEmail);
+	const setPassword = useAuthStore((state) => state.setPassword);
+	const setError = useAuthStore((state) => state.setError);
+	const setLoading = useAuthStore((state) => state.setSubmitting);
+	const toggleMode = useAuthStore((state) => state.toggleMode);
 
 	async function handleSubmit(event: FormEvent) {
 		event.preventDefault();
@@ -56,7 +62,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
 				<button className="auth-card__submit" disabled={loading} type="submit">
 					{loading ? 'Подождите…' : mode === 'login' ? 'Войти' : 'Зарегистрироваться'}
 				</button>
-				<button className="auth-card__switch" type="button" onClick={() => setMode((current) => (current === 'login' ? 'register' : 'login'))}>
+				<button className="auth-card__switch" type="button" onClick={toggleMode}>
 					{mode === 'login' ? 'Нет аккаунта? Создать' : 'Уже есть аккаунт? Войти'}
 				</button>
 			</form>
