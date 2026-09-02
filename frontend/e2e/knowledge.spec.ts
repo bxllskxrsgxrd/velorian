@@ -45,46 +45,47 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await dialog.getByRole('button', { name: 'Добавить' }).click();
 
-await expect(page.getByText('Проверенный оффер', { exact: true })).toBeVisible();
+	await expect(page.getByText('Проверенный оффер', { exact: true })).toBeVisible();
 
-await expect(page.getByRole('img', { name: /Рейтинг Проверенный оффер: 3 из 5/ })).toBeVisible();
+	await expect(page.getByRole('img', { name: /Рейтинг Проверенный оффер: 3 из 5/ })).toBeVisible();
 
-await expect(page.getByText('3/5')).toBeVisible();
+	await expect(page.getByText('3/5')).toBeVisible();
 
-await expect(page.getByText('Подход: UGC-разбор')).toBeVisible();
+	await expect(page.getByText('Подход: UGC-разбор')).toBeVisible();
 
-await expect(page.getByRole('checkbox', { name: 'Использовать' })).toBeChecked();
+	await expect(page.getByRole('checkbox', { name: 'Использовать' })).toBeChecked();
 
-// Массовый выбор
-const selectCheckbox = page.getByRole('checkbox', {
-  name: 'Выбрать Проверенный оффер',
-});
+	const selectCheckbox = page.getByRole('checkbox', {
+		name: 'Выбрать Проверенный оффер',
+	});
 
-await expect(selectCheckbox).not.toBeChecked();
+	const selectCheckboxLabel = page.locator('label.checkbox').filter({ hasText: 'Выбрать Проверенный оффер' });
 
-await selectCheckbox.check();
+	await expect(selectCheckbox).not.toBeChecked();
 
-await expect(selectCheckbox).toBeChecked();
+	await selectCheckboxLabel.click();
 
-const bulkBar = page.getByRole('region', {
-  name: 'Действия с выбранными элементами',
-});
+	await expect(selectCheckbox).toBeChecked();
 
-await expect(bulkBar).toBeVisible();
+	const bulkBar = page.getByRole('region', {
+		name: 'Действия с выбранными элементами',
+	});
 
-await expect(bulkBar.getByText('Выбрано: 1')).toBeVisible();
+	await expect(bulkBar).toBeVisible();
 
-await expect(
-  bulkBar.getByRole('button', {
-    name: 'Выбрать все 1',
-  }),
-).toBeDisabled();
+	await expect(bulkBar.getByText('Выбрано: 1')).toBeVisible();
 
-await bulkBar.getByRole('button', { name: 'Снять выбор' }).click();
+	await expect(
+		bulkBar.getByRole('button', {
+			name: 'Выбрать все 1',
+		}),
+	).toBeDisabled();
 
-await expect(selectCheckbox).not.toBeChecked();
+	await bulkBar.getByRole('button', { name: 'Снять выбор' }).click();
 
-await expect(bulkBar).not.toBeVisible();
+	await expect(selectCheckbox).not.toBeChecked();
+
+	await expect(bulkBar).not.toBeVisible();
 
 	await page.reload();
 	await expect(page.getByRole('img', { name: /Рейтинг Проверенный оффер: 3 из 5/ })).toBeVisible();
