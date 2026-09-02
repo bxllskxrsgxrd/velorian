@@ -829,7 +829,7 @@ def test_assistant_response_markdown_file_is_exact_idempotent_and_downloadable(a
 def test_generated_markdown_file_to_knowledge_filters_and_retrieval(authenticated_client, monkeypatch):
 	import app.main as main_module
 
-	markdown = "## XP Investimentos\n\nТекст рекламного материала с **Markdown**."
+	markdown = "## Pixum AI\n\nТекст рекламного материала с **Markdown**."
 	completions = RecordingCompletions()
 	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(markdown)))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Фильтры"}).json()["conversation"]["id"]
@@ -837,8 +837,8 @@ def test_generated_markdown_file_to_knowledge_filters_and_retrieval(authenticate
 	message_id = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"][-1]["id"]
 	attachment = authenticated_client.post(f"/api/messages/{message_id}/markdown-file", json={}).json()["attachment"]
 	filters = {
-		"geo": "Бразилия", "celebrity": "Alexandre Benchimol",
-		"offer": "XP Investimentos", "news_source": "G1",
+		"geo": "UK", "celebrity": "Alex",
+		"offer": "Pixum AI", "news_source": "BBC",
 	}
 	saved = authenticated_client.post(f"/api/knowledge/attachments/{attachment['id']}", json={"filters": filters})
 	assert saved.status_code == 200
@@ -847,7 +847,7 @@ def test_generated_markdown_file_to_knowledge_filters_and_retrieval(authenticate
 	assert item["sourceType"] == "assistant_file"
 	assert item["content"] == markdown
 	assert item["mimeType"] == "text/markdown"
-	assert item["fileName"] == "XP Investimentos.md"
+	assert item["fileName"] == "Pixum AI.md"
 	assert item["filters"] == filters
 	assert authenticated_client.get(item["downloadUrl"]).content.decode() == markdown
 
@@ -857,32 +857,32 @@ def test_generated_markdown_file_to_knowledge_filters_and_retrieval(authenticate
 	assert duplicate.json()["item"]["id"] == item["id"]
 
 	authenticated_client.post("/api/knowledge", json={
-		"title": "Другой оффер", "content": "Не должен попасть", "filters": {"geo": "Бразилия", "offer": "Другой"},
+		"title": "Другой оффер", "content": "Не должен попасть", "filters": {"geo": "UK", "offer": "Другой"},
 	})
 	for params in (
-		{"geo": "Бразилия"},
-		{"celebrity": "Alexandre Benchimol"},
-		{"offer": "XP Investimentos"},
-		{"news_source": "G1"},
-		{"geo": "Бразилия", "offer": "XP Investimentos"},
+		{"geo": "UK"},
+		{"celebrity": "Alex"},
+		{"offer": "Pixum AI"},
+		{"news_source": "BBC"},
+		{"geo": "UK", "offer": "Pixum AI"},
 		filters,
 	):
 		result = authenticated_client.get("/api/knowledge", params=params)
 		assert result.status_code == 200
 		assert item["id"] in [entry["id"] for entry in result.json()["items"]]
-		if "offer" in params and params["offer"] == "XP Investimentos":
+		if "offer" in params and params["offer"] == "Pixum AI":
 			assert [entry["id"] for entry in result.json()["items"]] == [item["id"]]
 
 	# Explicit metadata narrows candidates, while normal lexical retrieval still ranks inside that scope.
 	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
 	authenticated_client.post(
 		f"/api/conversations/{conversation_id}/stream",
-		data={"prompt": "Найди тексты для Бразилии по XP Investimentos", "search_mode": "none"},
+		data={"prompt": "Найди тексты для Бразилии по Pixum AI", "search_mode": "none"},
 	)
 	context = completions.calls[-1]["messages"][-1]["content"]
-	assert "Filter: ГЕО = Бразилия" in context
-	assert "Filter: Оффер = XP Investimentos" in context
-	assert "Source: XP Investimentos.md" in context
+	assert "Filter: ГЕО = UK" in context
+	assert "Filter: Оффер = Pixum AI" in context
+	assert "Source: Pixum AI.md" in context
 	assert "Другой оффер" not in context
 
 

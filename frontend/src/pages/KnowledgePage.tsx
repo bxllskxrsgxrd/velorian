@@ -645,86 +645,88 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 								className={`knowledge-card ${selectedItemIds.has(item.id) ? 'knowledge-card--selected' : ''}`}
 								key={item.id}
 							>
-								<div className="knowledge-card__head">
-									<div>
-										<div className="knowledge-card__title-row">
-											<Checkbox
-												checked={selectedItemIds.has(item.id)}
-												onChange={(checked) => toggleSelectedItem(item.id, checked)}
-												label={`Выбрать ${item.title}`}
-												className="knowledge-card__select"
-											/>
-											<strong>{`${item.title}`}</strong>
-										</div>
-										<Rating value={item.rating} readonly size="small" showValue ariaLabel={`Рейтинг ${item.title}`} />
-										{item.approach && <span className="knowledge-card__approach">Подход: {item.approach.name}</span>}
-										<div className="knowledge-card__metadata">
-											{Object.entries(storedFilters(item))
-												.filter((entry): entry is [string, string] => Boolean(entry[1]))
-												.map(([key, value]) => (
-													<span key={key}>
-														{
-															(
-																{ geo: 'ГЕО', celebrity: 'Селеба', offer: 'Оффер', news_source: 'Новостник' } as Record<
-																	string,
-																	string
-																>
-															)[key]
-														}
-														: {value}
-													</span>
-												))}
-										</div>
-										<span>
-											{item.sourceType === 'rated_content'
-												? 'Ответ агента'
-												: item.sourceType === 'assistant_file'
-													? 'Файл из диалога'
-													: item.sourceType === 'uploaded_file'
-														? 'Файл'
-														: 'Добавлено вручную'}{' '}
-											· {new Date(item.createdAt).toLocaleDateString('ru-RU')}
-										</span>
-										{extractionStatusLabel(item) && (
-											<span className="knowledge-card__extraction-warning">{extractionStatusLabel(item)}</span>
-										)}
-									</div>
+								<div className="knowledge-card__select-column">
 									<Checkbox
-										checked={item.isActive}
-										disabled={pendingItemIds.has(item.id)}
-										onChange={(checked) => void toggleItem(item, checked)}
-										label="Использовать"
-										className="knowledge-card__active-toggle"
+										checked={selectedItemIds.has(item.id)}
+										onChange={(checked) => toggleSelectedItem(item.id, checked)}
+										label={`Выбрать ${item.title}`}
+										className="knowledge-card__select"
 									/>
 								</div>
-								<p>{item.content || 'Текстовое содержимое не извлечено'}</p>
-								<div className="knowledge-card__actions">
-									<button type="button" onClick={() => setDialog({ type: 'view', item })}>
-										Открыть
-									</button>
-									<button type="button" onClick={() => openEdit(item)}>
-										Редактировать
-									</button>
-									{item.downloadUrl && (
-										<a href={item.downloadUrl} download={item.fileName}>
-											Скачать .md
-										</a>
-									)}
-									{item.originalDownloadUrl && (
-										<a href={item.originalDownloadUrl} download={item.originalFilename ?? undefined}>
-											Скачать оригинал
-										</a>
-									)}
-									<button type="button" onClick={() => void changeRating(item, null)}>
-										Убрать рейтинг
-									</button>
-									<button
-										className="knowledge-card__delete"
-										type="button"
-										onClick={() => setDialog({ type: 'delete', item })}
-									>
-										Удалить
-									</button>
+								<div className="knowledge-card__content">
+									<div className="knowledge-card__head">
+										<div>
+											<strong>{`${item.title}`}</strong>
+											<Rating value={item.rating} readonly size="small" showValue ariaLabel={`Рейтинг ${item.title}`} />
+											{item.approach && <span className="knowledge-card__approach">Подход: {item.approach.name}</span>}
+											<div className="knowledge-card__metadata">
+												{Object.entries(storedFilters(item))
+													.filter((entry): entry is [string, string] => Boolean(entry[1]))
+													.map(([key, value]) => (
+														<span key={key}>
+															{
+																(
+																	{ geo: 'ГЕО', celebrity: 'Селеба', offer: 'Оффер', news_source: 'Новостник' } as Record<
+																		string,
+																		string
+																	>
+																)[key]
+															}
+															: {value}
+														</span>
+													))}
+											</div>
+											<span>
+												{item.sourceType === 'rated_content'
+													? 'Ответ агента'
+													: item.sourceType === 'assistant_file'
+														? 'Файл из диалога'
+														: item.sourceType === 'uploaded_file'
+															? 'Файл'
+															: 'Добавлено вручную'}{' '}
+												· {new Date(item.createdAt).toLocaleDateString('ru-RU')}
+											</span>
+											{extractionStatusLabel(item) && (
+												<span className="knowledge-card__extraction-warning">{extractionStatusLabel(item)}</span>
+											)}
+										</div>
+										<Checkbox
+											checked={item.isActive}
+											disabled={pendingItemIds.has(item.id)}
+											onChange={(checked) => void toggleItem(item, checked)}
+											label="Использовать"
+											className="knowledge-card__active-toggle"
+										/>
+									</div>
+									<p>{item.content || 'Текстовое содержимое не извлечено'}</p>
+									<div className="knowledge-card__actions">
+										<button type="button" onClick={() => setDialog({ type: 'view', item })}>
+											Открыть
+										</button>
+										<button type="button" onClick={() => openEdit(item)}>
+											Редактировать
+										</button>
+										{item.downloadUrl && (
+											<a href={item.downloadUrl} download={item.fileName}>
+												Скачать .md
+											</a>
+										)}
+										{item.originalDownloadUrl && (
+											<a href={item.originalDownloadUrl} download={item.originalFilename ?? undefined}>
+												Скачать оригинал
+											</a>
+										)}
+										<button type="button" onClick={() => void changeRating(item, null)}>
+											Убрать рейтинг
+										</button>
+										<button
+											className="knowledge-card__delete"
+											type="button"
+											onClick={() => setDialog({ type: 'delete', item })}
+										>
+											Удалить
+										</button>
+									</div>
 								</div>
 							</article>
 						))}

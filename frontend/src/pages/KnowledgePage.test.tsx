@@ -96,11 +96,11 @@ describe('KnowledgePage', () => {
 	});
 
 	it('combines all four metadata filters in the list request', async () => {
-		renderKnowledge('/knowledge?geo=Бразилия&celebrity=Alexandre%20Benchimol&offer=XP%20Investimentos&news_source=G1');
+		renderKnowledge('/knowledge?geo=UK&celebrity=Alex&offer=Pixum%20AI&news_source=BBC');
 		await waitFor(() =>
 			expect(api.listKnowledge).toHaveBeenCalledWith(
 				expect.objectContaining({
-					filters: { geo: 'Бразилия', celebrity: 'Alexandre Benchimol', offer: 'XP Investimentos', news_source: 'G1' },
+					filters: { geo: 'UK', celebrity: 'Alex', offer: 'Pixum AI', news_source: 'BBC' },
 				}),
 			),
 		);
