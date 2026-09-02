@@ -877,7 +877,7 @@ def test_generated_markdown_file_to_knowledge_filters_and_retrieval(authenticate
 	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
 	authenticated_client.post(
 		f"/api/conversations/{conversation_id}/stream",
-		data={"prompt": "Найди тексты для Бразилии по Pixum AI", "search_mode": "none"},
+		data={"prompt": "Найди тексты для UK по Pixum AI", "search_mode": "none"},
 	)
 	context = completions.calls[-1]["messages"][-1]["content"]
 	assert "Filter: ГЕО = UK" in context
