@@ -1,4 +1,4 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useLayoutEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
 	activateMessageBranch,
@@ -53,6 +53,8 @@ type ChatPageProps = {
 	onOpenKnowledge: () => void;
 };
 
+const EMPTY_MESSAGES: ChatMessage[] = [];
+
 function downloadText(name: string, content: string, type: string) {
 	const url = URL.createObjectURL(new Blob([content], { type }));
 	const link = document.createElement('a');
@@ -71,12 +73,20 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	const setConversations = useConversationsStore((state) => state.setConversations);
 	const touchConversation = useConversationsStore((state) => state.touchConversation);
 	const activeConversationId = isNewConversationRoute ? null : (routeConversationId ?? null);
-	const messages = useChatStore((state) => state.messages);
-	const setMessages = useChatStore((state) => state.setMessages);
-	const isGenerating = useChatStore((state) => state.isGenerating);
-	const setIsGenerating = useChatStore((state) => state.setGenerating);
+	const messages = useChatStore((state) =>
+		activeConversationId ? (state.messagesByConversation[activeConversationId] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES,
+	);
+	const isGenerating = useChatStore((state) =>
+		activeConversationId ? Boolean(state.generationByConversation[activeConversationId]) : false,
+	);
+	const setConversationMessages = useChatStore((state) => state.setConversationMessages);
+	const setActiveConversation = useChatStore((state) => state.setActiveConversation);
+	const setConversationGeneration = useChatStore((state) => state.setConversationGeneration);
+	const clearConversationGeneration = useChatStore((state) => state.clearConversationGeneration);
+	const removeConversationState = useChatStore((state) => state.removeConversationState);
 	const isLoadingConversation = useChatStore((state) => state.isLoadingConversation);
 	const setIsLoadingConversation = useChatStore((state) => state.setLoadingConversation);
+	const isCreatingConversation = useChatStore((state) => state.isCreatingConversation);
 	const pageError = useChatStore((state) => state.pageError);
 	const setPageError = useChatStore((state) => state.setPageError);
 	const setIsCreatingConversation = useChatStore((state) => state.setCreatingConversation);
@@ -97,16 +107,15 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	const chatPageRef = useRef<HTMLDivElement | null>(null);
 	const attachmentUrlsRef = useRef(new Set<string>());
 	const previewFileRef = useRef<PreviewFile | null>(null);
-	const requestControllerRef = useRef<AbortController | null>(null);
+	const requestControllersRef = useRef(new Map<string, AbortController>());
 	const isNearBottomRef = useRef(true);
 	const loadSequenceRef = useRef(0);
-	const skipNextLoadRef = useRef(false);
 	const ratingSequenceRef = useRef(new Map<string, number>());
 	const localRetryPayloadsRef = useRef(new Map<string, { prompt: string; files: File[]; searchMode: SearchMode }>());
 	const initialRouteConversationIdRef = useRef(isNewConversationRoute ? 'new' : routeConversationId);
 	const suppressInitialFallbackRef = useRef(false);
 	const conversationCreationRef = useRef<Promise<ConversationSummary> | null>(null);
-	const sendOperationRef = useRef<Promise<void> | null>(null);
+	const sendOperationsRef = useRef(new Map<string, Promise<void>>());
 	const {
 		isDragging,
 		handleDragOver,
@@ -116,6 +125,10 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	} = useDragAndDrop(activeConversationId);
 
 	const hasMessages = messages.length > 0;
+	useLayoutEffect(() => {
+		setActiveConversation(activeConversationId);
+	}, [activeConversationId, setActiveConversation]);
+
 	useEffect(() => {
 		let cancelled = false;
 		listConversations()
@@ -136,25 +149,24 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 
 	useEffect(() => {
 		if (!activeConversationId) return;
-		if (skipNextLoadRef.current) {
-			skipNextLoadRef.current = false;
+		const sequence = ++loadSequenceRef.current;
+		if (activeConversationId in useChatStore.getState().messagesByConversation) {
+			setPageError('');
+			setIsLoadingConversation(false);
 			return;
 		}
-		const sequence = ++loadSequenceRef.current;
 		setPageError('');
 		setIsLoadingConversation(true);
 		getConversation(activeConversationId)
 			.then((conversation) => {
 				if (sequence === loadSequenceRef.current) {
-					attachmentUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
-					attachmentUrlsRef.current.clear();
-					setMessages(conversation.messages);
+					setConversationMessages(activeConversationId, conversation.messages);
 				}
 			})
 			.catch((error: unknown) => {
 				reportError('Не удалось открыть диалог', error, { conversationId: activeConversationId });
 				if (sequence === loadSequenceRef.current) {
-					setMessages([]);
+					setConversationMessages(activeConversationId, []);
 					setPageError(
 						error instanceof ApiError && error.status === 404
 							? 'Чат не найден'
@@ -167,7 +179,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 			.finally(() => {
 				if (sequence === loadSequenceRef.current) setIsLoadingConversation(false);
 			});
-	}, [activeConversationId, setIsLoadingConversation, setMessages, setPageError]);
+	}, [activeConversationId, setConversationMessages, setIsLoadingConversation, setPageError]);
 
 	useEffect(() => {
 		if (!hasMessages || !isNearBottomRef.current) return;
@@ -182,8 +194,9 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 
 	useEffect(() => {
 		const attachmentUrls = attachmentUrlsRef.current;
+		const requestControllers = requestControllersRef.current;
 		return () => {
-			requestControllerRef.current?.abort();
+			requestControllers.forEach((controller) => controller.abort());
 			attachmentUrls.forEach((url) => URL.revokeObjectURL(url));
 			if (previewFileRef.current?.revokeOnClose) URL.revokeObjectURL(previewFileRef.current.url);
 		};
@@ -205,11 +218,6 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 
 	function revokePreviewFile(file: PreviewFile | null) {
 		if (file?.revokeOnClose) URL.revokeObjectURL(file.url);
-	}
-
-	function revokeLocalAttachmentUrls() {
-		attachmentUrlsRef.current.forEach((url) => URL.revokeObjectURL(url));
-		attachmentUrlsRef.current.clear();
 	}
 
 	function setNextPreview(next: PreviewFile) {
@@ -240,9 +248,8 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 			setIsCreatingConversation(true);
 			conversationCreationRef.current = createConversation().then((created) => {
 				loadSequenceRef.current += 1;
-				skipNextLoadRef.current = true;
 				setConversations((current) => [created, ...current.filter((item) => item.id !== created.id)]);
-				setMessages([]);
+				setConversationMessages(created.id, []);
 				navigate(`/chat/${created.id}`, { replace: true });
 				return created;
 			});
@@ -263,22 +270,28 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 		searchMode: SearchMode = 'none',
 		editMessageId?: string,
 	) {
-		if (isGenerating) return;
+		if (requestControllersRef.current.has(conversationId)) return;
 		setPageError('');
-		setIsGenerating(true);
 		isNearBottomRef.current = true;
+		const sourceMessages = useChatStore.getState().messagesByConversation[conversationId] ?? EMPTY_MESSAGES;
 
 		const retrySourceMessage = retryMessageId
-			? messages.find((message) => message.id === retryMessageId && message.role === CHAT_ROLES.USER)
+			? sourceMessages.find((message) => message.id === retryMessageId && message.role === CHAT_ROLES.USER)
 			: undefined;
 		const editSourceMessage = editMessageId
-			? messages.find((message) => message.id === editMessageId && message.role === CHAT_ROLES.USER)
+			? sourceMessages.find((message) => message.id === editMessageId && message.role === CHAT_ROLES.USER)
 			: undefined;
 		const tempUserId = crypto.randomUUID();
 		const tempAttachments = currentFiles.map(createChatAttachment);
 		tempAttachments.forEach((attachment) => attachmentUrlsRef.current.add(attachment.url));
 		const tempAssistantId = crypto.randomUUID();
 		let currentAssistantId: string = tempAssistantId;
+		const controller = new AbortController();
+		requestControllersRef.current.set(conversationId, controller);
+		setConversationGeneration(conversationId, {
+			status: CHAT_MESSAGE_STATUSES.STREAMING,
+			assistantMessageId: tempAssistantId,
+		});
 		let receivedMeta = false;
 		let pendingDelta = '';
 		let deltaFrame: number | null = null;
@@ -287,7 +300,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 			const content = pendingDelta;
 			pendingDelta = '';
 			deltaFrame = null;
-			setMessages((current) =>
+			setConversationMessages(conversationId, (current) =>
 				current.map((message) =>
 					message.id === currentAssistantId
 						? { ...message, content: message.content + content, status: CHAT_MESSAGE_STATUSES.STREAMING }
@@ -313,7 +326,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 			status: CHAT_MESSAGE_STATUSES.PENDING,
 			replyToId: tempUserId,
 		});
-		setMessages((current) => [
+		setConversationMessages(conversationId, (current) => [
 			...current.map((message) =>
 				editSourceMessage &&
 				message.role === CHAT_ROLES.USER &&
@@ -324,8 +337,6 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 			...optimistic,
 		]);
 
-		const controller = new AbortController();
-		requestControllerRef.current = controller;
 		try {
 			await streamChat({
 				conversationId,
@@ -340,11 +351,15 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 						receivedMeta = true;
 						localRetryPayloadsRef.current.delete(tempUserId);
 						currentAssistantId = event.assistantMessageId;
+						setConversationGeneration(conversationId, {
+							status: CHAT_MESSAGE_STATUSES.STREAMING,
+							assistantMessageId: event.assistantMessageId,
+						});
 						tempAttachments.forEach((attachment) => {
 							URL.revokeObjectURL(attachment.url);
 							attachmentUrlsRef.current.delete(attachment.url);
 						});
-						setMessages((current) =>
+						setConversationMessages(conversationId, (current) =>
 							current.map((message) => {
 								if (message.id === tempUserId) return event.userMessage;
 								if (message.id === tempAssistantId)
@@ -364,7 +379,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 					} else if (event.type === 'done') {
 						if (deltaFrame !== null) cancelAnimationFrame(deltaFrame);
 						flushDelta();
-						setMessages((current) =>
+						setConversationMessages(conversationId, (current) =>
 							current.map((message) =>
 								message.id === currentAssistantId
 									? (event.message ?? { ...message, status: CHAT_MESSAGE_STATUSES.DONE })
@@ -372,7 +387,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 							),
 						);
 					} else {
-						setMessages((current) =>
+						setConversationMessages(conversationId, (current) =>
 							current.map((message) =>
 								message.id === currentAssistantId
 									? {
@@ -394,6 +409,21 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 			if (!wasStopped) reportError('Ошибка генерации ответа', error, { conversationId });
 			const messageText = wasStopped ? 'Генерация остановлена' : '';
 			if (!receivedMeta) {
+				if (wasStopped) {
+					setConversationMessages(conversationId, (current) =>
+						current.map((message) =>
+							message.id === tempAssistantId
+								? {
+									...message,
+									content: message.content || messageText,
+									error: undefined,
+									status: CHAT_MESSAGE_STATUSES.CANCELLED,
+								}
+								: message,
+						),
+					);
+					return;
+				}
 				const normalizedError =
 					error instanceof ApiError
 						? getUserFacingError(error.code, error.status, error.requestId)
@@ -403,7 +433,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 					files: [...currentFiles],
 					searchMode,
 				});
-				setMessages((current) =>
+				setConversationMessages(conversationId, (current) =>
 					current.map((message) =>
 						message.id === tempAssistantId
 							? {
@@ -421,7 +451,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 				error instanceof ApiError
 					? getUserFacingError(error.code, error.status, error.requestId)
 					: getUserFacingError('UNKNOWN_ERROR');
-			setMessages((current) =>
+			setConversationMessages(conversationId, (current) =>
 				current.map((message) =>
 					message.id === currentAssistantId || message.id === tempAssistantId
 						? {
@@ -435,8 +465,10 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 			);
 		} finally {
 			if (deltaFrame !== null) cancelAnimationFrame(deltaFrame);
-			if (requestControllerRef.current === controller) requestControllerRef.current = null;
-			setIsGenerating(false);
+			if (requestControllersRef.current.get(conversationId) === controller) {
+				requestControllersRef.current.delete(conversationId);
+				clearConversationGeneration(conversationId);
+			}
 			listConversations()
 				.then(setConversations)
 				.catch((error: unknown) => reportError('Не удалось обновить историю диалогов', error));
@@ -444,21 +476,22 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	}
 
 	async function handleSendMessage(prompt: string, currentFiles: File[], searchMode: SearchMode) {
-		if (sendOperationRef.current) return sendOperationRef.current;
-		const operation = (async () => {
-			try {
-				const conversationId = await ensureConversation();
-				await runStream(conversationId, prompt, currentFiles, undefined, searchMode);
-			} catch (error) {
-				showToast(error instanceof Error ? error.message : 'Не удалось создать чат', 'error');
-				throw error;
-			}
-		})();
-		sendOperationRef.current = operation;
 		try {
-			await operation;
-		} finally {
-			if (sendOperationRef.current === operation) sendOperationRef.current = null;
+			const conversationId = await ensureConversation();
+			const pendingOperation = sendOperationsRef.current.get(conversationId);
+			if (pendingOperation) return pendingOperation;
+			const operation = runStream(conversationId, prompt, currentFiles, undefined, searchMode);
+			sendOperationsRef.current.set(conversationId, operation);
+			try {
+				await operation;
+			} finally {
+				if (sendOperationsRef.current.get(conversationId) === operation) {
+					sendOperationsRef.current.delete(conversationId);
+				}
+			}
+		} catch (error) {
+			showToast(error instanceof Error ? error.message : 'Не удалось создать чат', 'error');
+			throw error;
 		}
 	}
 
@@ -477,9 +510,11 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	}
 
 	async function handleActivateBranch(messageId: string) {
+		if (!activeConversationId) return;
+		const conversationId = activeConversationId;
 		const active = await activateMessageBranch(messageId);
 		const groupId = active.branchGroupId || active.id;
-		setMessages((current) =>
+		setConversationMessages(conversationId, (current) =>
 			current.map((message) =>
 				message.role === CHAT_ROLES.USER && (message.branchGroupId || message.id) === groupId
 					? { ...message, isActive: message.id === messageId }
@@ -489,6 +524,8 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	}
 
 	async function handleRateMessage(message: ChatMessage, score: number, comment?: string) {
+		if (!activeConversationId) return;
+		const conversationId = activeConversationId;
 		const sequence = (ratingSequenceRef.current.get(message.id) ?? 0) + 1;
 		ratingSequenceRef.current.set(message.id, sequence);
 		const previous = message.rating;
@@ -499,16 +536,18 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 			createdAt: previous?.createdAt ?? new Date().toISOString(),
 			updatedAt: new Date().toISOString(),
 		};
-		setMessages((current) =>
+		setConversationMessages(conversationId, (current) =>
 			current.map((entry) => (entry.id === message.id ? { ...entry, rating: optimistic } : entry)),
 		);
 		try {
 			const rating = await setMessageRating(message.id, score, comment);
 			if (ratingSequenceRef.current.get(message.id) === sequence)
-				setMessages((current) => current.map((entry) => (entry.id === message.id ? { ...entry, rating } : entry)));
+				setConversationMessages(conversationId, (current) =>
+					current.map((entry) => (entry.id === message.id ? { ...entry, rating } : entry)),
+				);
 		} catch (error) {
 			if (ratingSequenceRef.current.get(message.id) === sequence) {
-				setMessages((current) =>
+				setConversationMessages(conversationId, (current) =>
 					current.map((entry) => (entry.id === message.id ? { ...entry, rating: previous } : entry)),
 				);
 				showToast(error instanceof Error ? error.message : 'Не удалось сохранить оценку', 'error');
@@ -517,12 +556,16 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	}
 
 	async function handleRemoveRating(message: ChatMessage) {
+		if (!activeConversationId) return;
+		const conversationId = activeConversationId;
 		const previous = message.rating;
-		setMessages((current) => current.map((entry) => (entry.id === message.id ? { ...entry, rating: null } : entry)));
+		setConversationMessages(conversationId, (current) =>
+			current.map((entry) => (entry.id === message.id ? { ...entry, rating: null } : entry)),
+		);
 		try {
 			await removeMessageRating(message.id);
 		} catch (error) {
-			setMessages((current) =>
+			setConversationMessages(conversationId, (current) =>
 				current.map((entry) => (entry.id === message.id ? { ...entry, rating: previous } : entry)),
 			);
 			showToast(error instanceof Error ? error.message : 'Не удалось удалить оценку', 'error');
@@ -539,9 +582,11 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	}
 
 	async function handleCreateFile(message: ChatMessage) {
+		if (!activeConversationId) return;
+		const conversationId = activeConversationId;
 		try {
 			const { attachment, created } = await createMessageMarkdownFile(message.id);
-			setMessages((current) =>
+			setConversationMessages(conversationId, (current) =>
 				current.map((entry) =>
 					entry.id === message.id
 						? {
@@ -564,15 +609,17 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	}
 
 	async function handleSaveAttachmentToKnowledge() {
-		if (!knowledgeAttachment || knowledgeSaveState === 'loading' || knowledgeSaveState === 'success') return;
+		if (!activeConversationId || !knowledgeAttachment || knowledgeSaveState === 'loading' || knowledgeSaveState === 'success') return;
+		const conversationId = activeConversationId;
+		const attachmentId = knowledgeAttachment.id;
 		setKnowledgeSaveState('loading');
 		try {
-			const result = await saveAttachmentToKnowledge(knowledgeAttachment.id, knowledgeFilters);
-			setMessages((current) =>
+			const result = await saveAttachmentToKnowledge(attachmentId, knowledgeFilters);
+			setConversationMessages(conversationId, (current) =>
 				current.map((message) => ({
 					...message,
 					attachments: message.attachments?.map((attachment) =>
-						attachment.id === knowledgeAttachment.id ? { ...attachment, knowledgeSaved: true } : attachment,
+						attachment.id === attachmentId ? { ...attachment, knowledgeSaved: true } : attachment,
 					),
 				})),
 			);
@@ -582,7 +629,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 				result.created ? 'success' : 'info',
 			);
 		} catch (error) {
-			reportError('ATTACHMENT_KNOWLEDGE_SAVE_FAILED', error, { attachmentId: knowledgeAttachment.id });
+			reportError('ATTACHMENT_KNOWLEDGE_SAVE_FAILED', error, { attachmentId });
 			setKnowledgeSaveState('error');
 			showToast(error instanceof Error ? error.message : 'Не удалось добавить файл в базу знаний', 'error');
 		}
@@ -590,29 +637,23 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 
 	function handleNewConversation() {
 		suppressInitialFallbackRef.current = true;
-		if (isGenerating) requestControllerRef.current?.abort();
-		revokeLocalAttachmentUrls();
 		clearFiles();
-		setMessages([]);
 		resetPromptInput();
 		setIsSidebarOpen(false);
 		navigate('/chat/new');
 	}
 
 	async function handleDeleteConversation(id: string) {
-		if (isGenerating && activeConversationId === id) {
+		if (useChatStore.getState().generationByConversation[id]) {
 			setPageError('Сначала остановите генерацию ответа');
 			return;
 		}
 		await deleteConversation(id);
 		const remaining = conversations.filter((item) => item.id !== id);
 		setConversations(remaining);
+		removeConversationState(id);
 		if (activeConversationId === id) {
 			navigate(remaining[0] ? `/chat/${remaining[0].id}` : '/', { replace: true });
-			if (!remaining[0]) {
-				revokeLocalAttachmentUrls();
-				setMessages([]);
-			}
 		}
 	}
 
@@ -648,7 +689,6 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 				activeConversationId={activeConversationId}
 				activeSection="chat"
 				onSelect={(id) => {
-					requestControllerRef.current?.abort();
 					navigate(`/chat/${id}`);
 					setIsSidebarOpen(false);
 				}}
@@ -726,8 +766,12 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 						)}
 						<PromptBar
 							onSendMessage={handleSendMessage}
-							onStop={() => requestControllerRef.current?.abort()}
+							onStop={() => {
+								if (activeConversationId) requestControllersRef.current.get(activeConversationId)?.abort();
+							}}
 							onOpenFile={openPromptFile}
+							isGenerating={isGenerating || isCreatingConversation}
+							submissionKey={activeConversationId ?? 'new'}
 						/>
 					</div>
 				</div>

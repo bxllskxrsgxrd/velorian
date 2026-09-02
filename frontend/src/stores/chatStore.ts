@@ -5,9 +5,16 @@ import { resolveStateValue, type StateValue } from './storeTypes';
 
 export type KnowledgeSaveState = 'idle' | 'loading' | 'success' | 'error';
 
+export type ChatGenerationState = {
+	status: 'streaming';
+	assistantMessageId: string;
+};
+
 type ChatStore = {
+	messagesByConversation: Record<string, ChatMessage[]>;
+	generationByConversation: Record<string, ChatGenerationState>;
+	activeConversationId: string | null;
 	messages: ChatMessage[];
-	isGenerating: boolean;
 	isLoadingConversation: boolean;
 	isCreatingConversation: boolean;
 	pageError: string;
@@ -15,8 +22,12 @@ type ChatStore = {
 	knowledgeAttachment: ChatAttachment | null;
 	knowledgeFilters: KnowledgeFilters;
 	knowledgeSaveState: KnowledgeSaveState;
+	setConversationMessages: (conversationId: string, value: StateValue<ChatMessage[]>) => void;
+	setActiveConversation: (conversationId: string | null) => void;
 	setMessages: (value: StateValue<ChatMessage[]>) => void;
-	setGenerating: (value: boolean) => void;
+	setConversationGeneration: (conversationId: string, value: ChatGenerationState) => void;
+	clearConversationGeneration: (conversationId: string) => void;
+	removeConversationState: (conversationId: string) => void;
 	setLoadingConversation: (value: boolean) => void;
 	setCreatingConversation: (value: boolean) => void;
 	setPageError: (value: string) => void;
@@ -29,8 +40,10 @@ type ChatStore = {
 };
 
 export const useChatStore = create<ChatStore>((set) => ({
+	messagesByConversation: {},
+	generationByConversation: {},
+	activeConversationId: null,
 	messages: [],
-	isGenerating: false,
 	isLoadingConversation: false,
 	isCreatingConversation: false,
 	pageError: '',
@@ -38,8 +51,52 @@ export const useChatStore = create<ChatStore>((set) => ({
 	knowledgeAttachment: null,
 	knowledgeFilters: { ...EMPTY_KNOWLEDGE_FILTERS },
 	knowledgeSaveState: 'idle',
-	setMessages: (value) => set((state) => ({ messages: resolveStateValue(value, state.messages) })),
-	setGenerating: (isGenerating) => set({ isGenerating }),
+	setConversationMessages: (conversationId, value) =>
+		set((state) => {
+			const messages = resolveStateValue(value, state.messagesByConversation[conversationId] ?? []);
+			return {
+				messagesByConversation: { ...state.messagesByConversation, [conversationId]: messages },
+				...(state.activeConversationId === conversationId ? { messages } : {}),
+			};
+		}),
+	setActiveConversation: (activeConversationId) =>
+		set((state) => ({
+			activeConversationId,
+			messages: activeConversationId ? (state.messagesByConversation[activeConversationId] ?? []) : [],
+		})),
+	setMessages: (value) =>
+		set((state) => {
+			const messages = resolveStateValue(value, state.messages);
+			return {
+				messages,
+				...(state.activeConversationId
+					? {
+							messagesByConversation: {
+								...state.messagesByConversation,
+								[state.activeConversationId]: messages,
+							},
+						}
+					: {}),
+			};
+		}),
+	setConversationGeneration: (conversationId, value) =>
+		set((state) => ({
+			generationByConversation: { ...state.generationByConversation, [conversationId]: value },
+		})),
+	clearConversationGeneration: (conversationId) =>
+		set((state) => {
+			const generationByConversation = { ...state.generationByConversation };
+			delete generationByConversation[conversationId];
+			return { generationByConversation };
+		}),
+	removeConversationState: (conversationId) =>
+		set((state) => {
+			const messagesByConversation = { ...state.messagesByConversation };
+			const generationByConversation = { ...state.generationByConversation };
+			delete messagesByConversation[conversationId];
+			delete generationByConversation[conversationId];
+			return { messagesByConversation, generationByConversation };
+		}),
 	setLoadingConversation: (isLoadingConversation) => set({ isLoadingConversation }),
 	setCreatingConversation: (isCreatingConversation) => set({ isCreatingConversation }),
 	setPageError: (pageError) => set({ pageError }),
@@ -55,8 +112,10 @@ export const useChatStore = create<ChatStore>((set) => ({
 	setKnowledgeSaveState: (knowledgeSaveState) => set({ knowledgeSaveState }),
 	resetConversation: () =>
 		set({
+			messagesByConversation: {},
+			generationByConversation: {},
+			activeConversationId: null,
 			messages: [],
-			isGenerating: false,
 			isLoadingConversation: false,
 			isCreatingConversation: false,
 			pageError: '',

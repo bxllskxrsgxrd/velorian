@@ -13,7 +13,6 @@ import './_promptBar.scss';
 import { AttachmentPreview } from './AttachmentPreview';
 import { usePromptStore } from '../../stores/promptStore';
 import { useFilesStore } from '../../stores/filesStore';
-import { useChatStore } from '../../stores/chatStore';
 
 type SpeechRecognitionEventLike = Event & {
 	results: ArrayLike<{ 0: { transcript: string } }>;
@@ -36,19 +35,22 @@ type PromptBarProps = {
 	onSendMessage: (prompt: string, files: File[], searchMode: SearchMode) => Promise<void>;
 	onStop: () => void;
 	onOpenFile: (file: File) => void;
+	isGenerating?: boolean;
+	submissionKey?: string;
 };
 
 export function PromptBar({
 	onSendMessage,
 	onStop,
 	onOpenFile,
+	isGenerating = false,
+	submissionKey = 'default',
 }: PromptBarProps) {
 	const files = useFilesStore((state) => state.files);
 	const fileError = useFilesStore((state) => state.fileError);
 	const onFilesSelect = useFilesStore((state) => state.addFiles);
 	const onRemoveFile = useFilesStore((state) => state.removeFile);
 	const onClearFiles = useFilesStore((state) => state.clearFiles);
-	const isGenerating = useChatStore((state) => state.isGenerating || state.isCreatingConversation);
 	const isMultiline = usePromptStore((state) => state.isMultiline);
 	const value = usePromptStore((state) => state.value);
 	const searchMode = usePromptStore((state) => state.searchMode);
@@ -60,7 +62,7 @@ export function PromptBar({
 	const resetPrompt = usePromptStore((state) => state.reset);
 	const restorePrompt = usePromptStore((state) => state.restore);
 	const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
-	const submissionRef = useRef(false);
+	const submissionsRef = useRef(new Set<string>());
 	const speechWindow = window as typeof window & {
 		SpeechRecognition?: SpeechRecognitionConstructor;
 		webkitSpeechRecognition?: SpeechRecognitionConstructor;
@@ -121,8 +123,8 @@ export function PromptBar({
 
 	async function handleSubmit(event: React.SyntheticEvent<HTMLFormElement>) {
 		event.preventDefault();
-		if (isSendDisabled || submissionRef.current) return;
-		submissionRef.current = true;
+		if (isSendDisabled || submissionsRef.current.has(submissionKey)) return;
+		submissionsRef.current.add(submissionKey);
 		const prompt = stripPromptMarker(value, searchMode).trim();
 		const submittedFiles = [...files];
 		const submittedSearchMode = searchMode;
@@ -137,7 +139,7 @@ export function PromptBar({
 			restorePrompt(`${promptMarker(submittedSearchMode)}${prompt}`, submittedSearchMode);
 			onFilesSelect(submittedFiles);
 		} finally {
-			submissionRef.current = false;
+			submissionsRef.current.delete(submissionKey);
 		}
 	}
 

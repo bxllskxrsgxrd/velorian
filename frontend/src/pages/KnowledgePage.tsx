@@ -13,6 +13,7 @@ import {
 	uploadKnowledgeFile,
 } from '../api/chatApi';
 import { ChatSidebar } from '../components/ChatSidebar/ChatSidebar';
+import { useDebounce } from '../hooks/useDebounce';
 import { useToast } from '../hooks/useToast';
 import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
 import { Rating } from '../components/ui/Rating/Rating';
@@ -54,6 +55,7 @@ function storedFilters(item: KnowledgeItem): KnowledgeFilters {
 export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: () => Promise<void> }) {
 	const navigate = useNavigate();
 	const [params, setParams] = useSearchParams();
+	const debouncedSearch = useDebounce(params.get('q') ?? '', 250);
 	const items = useKnowledgeStore((state) => state.items);
 	const setItems = useKnowledgeStore((state) => state.setItems);
 	const nextCursor = useKnowledgeStore((state) => state.nextCursor);
@@ -151,46 +153,43 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 
 	useEffect(() => {
 		let cancelled = false;
-		const timer = window.setTimeout(() => {
-			setLoading(true);
-			listKnowledge({
-				search: params.get('q') || undefined,
-				sourceType: sourceType || undefined,
-				approachId: approachId || undefined,
-				filters: { geo, celebrity, offer, news_source: newsSource },
-				isActive: activeFilter === 'all' ? undefined : activeFilter === 'active',
-				minRating: ratingFilter === 'all' || ratingFilter === 'unrated' ? undefined : Number(ratingFilter),
-				unrated: ratingFilter === 'unrated',
-				sort,
-				limit: 20,
+		setLoading(true);
+		listKnowledge({
+			search: debouncedSearch || undefined,
+			sourceType: sourceType || undefined,
+			approachId: approachId || undefined,
+			filters: { geo, celebrity, offer, news_source: newsSource },
+			isActive: activeFilter === 'all' ? undefined : activeFilter === 'active',
+			minRating: ratingFilter === 'all' || ratingFilter === 'unrated' ? undefined : Number(ratingFilter),
+			unrated: ratingFilter === 'unrated',
+			sort,
+			limit: 20,
+		})
+			.then((result) => {
+				if (!cancelled) {
+					setItems(result.items);
+					setNextCursor(result.pageInfo.nextCursor);
+				}
 			})
-				.then((result) => {
-					if (!cancelled) {
-						setItems(result.items);
-						setNextCursor(result.pageInfo.nextCursor);
-					}
-				})
-				.catch((error: unknown) => {
-					reportError('KNOWLEDGE_LIST_FAILED', error);
-					if (!cancelled)
-						showToast(error instanceof Error ? error.message : 'Не удалось загрузить базу знаний', 'error');
-				})
-				.finally(() => {
-					if (!cancelled) setLoading(false);
-				});
-		}, 250);
+			.catch((error: unknown) => {
+				reportError('KNOWLEDGE_LIST_FAILED', error);
+				if (!cancelled)
+					showToast(error instanceof Error ? error.message : 'Не удалось загрузить базу знаний', 'error');
+			})
+			.finally(() => {
+				if (!cancelled) setLoading(false);
+			});
 		return () => {
 			cancelled = true;
-			window.clearTimeout(timer);
 		};
 	}, [
 		activeFilter,
 		approachId,
 		celebrity,
+		debouncedSearch,
 		geo,
 		newsSource,
 		offer,
-		params,
 		ratingFilter,
 		setItems,
 		setLoading,

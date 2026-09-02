@@ -299,7 +299,8 @@ export async function streamChat(options: StreamChatOptions): Promise<void> {
 	try {
 		await runChatStream(options);
 	} catch (error) {
-		if (!(error instanceof ApiError && error.code === 'REQUEST_ABORTED')) {
+		const wasAborted = options.signal.aborted || (error instanceof ApiError && error.code === 'REQUEST_ABORTED');
+		if (!wasAborted) {
 			reportError('Потоковый запрос к AI', error, {
 				code: error instanceof ApiError ? error.code : undefined,
 				status: error instanceof ApiError ? error.status : undefined,

@@ -21,6 +21,7 @@ import { SidebarButton } from '../ui/SidebarButton/SidebarButton';
 import { useSidebarStore } from '../../stores/sidebarStore';
 import { useConversationsStore } from '../../stores/conversationsStore';
 import { useUiStore } from '../../stores/uiStore';
+import { useDebounce } from '../../hooks/useDebounce';
 
 type ChatSidebarProps = {
 	user: AuthUser;
@@ -59,12 +60,13 @@ export function ChatSidebar(props: ChatSidebarProps) {
 	const closeMenus = useSidebarStore((state) => state.closeMenus);
 	const sidebarRef = useRef<HTMLElement>(null);
 	const searchInputRef = useRef<HTMLInputElement>(null);
+	const debouncedSearch = useDebounce(search, 250);
 	const conversations = useMemo(() => {
-		const query = search.trim().toLocaleLowerCase('ru');
+		const query = debouncedSearch.trim().toLocaleLowerCase('ru');
 		return query
 			? allConversations.filter((item) => item.title.toLocaleLowerCase('ru').includes(query))
 			: allConversations;
-	}, [allConversations, search]);
+	}, [allConversations, debouncedSearch]);
 
 	useEffect(() => {
 		function handleOutsideClick(event: MouseEvent) {
