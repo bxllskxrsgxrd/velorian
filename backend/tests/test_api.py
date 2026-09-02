@@ -886,6 +886,42 @@ def test_generated_markdown_file_to_knowledge_filters_and_retrieval(authenticate
 	assert "Другой оффер" not in context
 
 
+def test_metadata_filters_are_partial_case_insensitive_and_space_normalized(authenticated_client):
+	from app.database import SessionLocal
+	from app.knowledge_retrieval import KnowledgeSearchOptions, knowledge_retrieval_service
+
+	item = authenticated_client.post("/api/knowledge", json={
+		"title": "Metadata partial match",
+		"content": "Материал с метаданными",
+		"filters": {
+			"geo": "South America",
+			"celebrity": "Leonardo DiCaprio",
+			"offer": "Summer Special",
+			"news_source": "Facebook",
+		},
+	}).json()["item"]
+	for params in (
+		{"geo": "  south   america  "},
+		{"celebrity": "dicaprio"},
+		{"offer": "SUMMER"},
+		{"news_source": "facebook"},
+	):
+		result = authenticated_client.get("/api/knowledge", params=params)
+		assert result.status_code == 200
+		assert item["id"] in {entry["id"] for entry in result.json()["items"]}
+
+	user_id = authenticated_client.get("/api/auth/me").json()["user"]["id"]
+	with SessionLocal() as db:
+		search_result = knowledge_retrieval_service.search(
+			db, user_id, KnowledgeSearchOptions(query="", celebrity="  dicaprio  "),
+		)
+		list_result = knowledge_retrieval_service.list(
+			db, user_id, KnowledgeSearchOptions(query="", news_source="FACE"),
+		)
+	assert item["id"] in {entry.id for entry in search_result.items}
+	assert item["id"] in {entry.id for entry in list_result.items}
+
+
 def test_knowledge_filters_optional_update_clear_and_legacy_record(authenticated_client):
 	legacy = authenticated_client.post("/api/knowledge", json={"title": "Старая запись", "content": "## Без фильтров"}).json()["item"]
 	assert legacy["filters"] == {"geo": None, "celebrity": None, "offer": None, "news_source": None}

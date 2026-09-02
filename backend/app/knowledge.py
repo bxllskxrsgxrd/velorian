@@ -261,7 +261,8 @@ def list_knowledge_items(
 		statement = statement.where(KnowledgeItem.approach_id == approach_id)
 	for key, value in {"geo": geo, "celebrity": celebrity, "offer": offer, "news_source": news_source}.items():
 		if value and value.strip():
-			statement = statement.where(KnowledgeItem.item_metadata[key].as_string() == " ".join(value.split()))
+			normalized_value = " ".join(value.split())
+			statement = statement.where(KnowledgeItem.item_metadata[key].as_string().ilike(f"%{normalized_value}%"))
 	if is_active is not None:
 		statement = statement.where(KnowledgeItem.is_active == is_active)
 	if unrated:

@@ -194,7 +194,8 @@ class TextKnowledgeRetriever(KnowledgeRetriever):
 		if options.approach_id:
 			conditions.append(KnowledgeItem.approach_id == options.approach_id)
 		for key, value in options.metadata_filters.items():
-			conditions.append(KnowledgeItem.item_metadata[key].as_string() == value)
+			normalized_value = " ".join(value.split())
+			conditions.append(KnowledgeItem.item_metadata[key].as_string().ilike(f"%{normalized_value}%"))
 		items = list(db.scalars(select(KnowledgeItem).where(*conditions).order_by(KnowledgeItem.updated_at.desc()).limit(300)))
 		if not items:
 			reason = "no_active_items_for_approach" if options.approach_id else "no_active_items_for_filters" if options.metadata_filters else "no_active_items"
@@ -271,7 +272,8 @@ class KnowledgeRetrievalService:
 		if options.approach_id:
 			conditions.append(KnowledgeItem.approach_id == options.approach_id)
 		for key, value in options.metadata_filters.items():
-			conditions.append(KnowledgeItem.item_metadata[key].as_string() == value)
+			normalized_value = " ".join(value.split())
+			conditions.append(KnowledgeItem.item_metadata[key].as_string().ilike(f"%{normalized_value}%"))
 		items = list(db.scalars(select(KnowledgeItem).where(*conditions).order_by(KnowledgeItem.updated_at.desc()).limit(options.limit)))
 		if not items:
 			reason = "no_active_items_for_approach" if options.approach_id else "no_active_items_for_filters" if options.metadata_filters else "no_active_items"
