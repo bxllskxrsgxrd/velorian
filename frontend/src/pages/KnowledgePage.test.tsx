@@ -92,7 +92,7 @@ describe('KnowledgePage', () => {
 				news_source: null,
 			}),
 		);
-		expect(await screen.findByText('Оффер')).toBeInTheDocument();
+		expect(await screen.findByText('Оффер', { exact: true })).toBeInTheDocument();
 	});
 
 	it('combines all four metadata filters in the list request', async () => {

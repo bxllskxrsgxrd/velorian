@@ -42,12 +42,50 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	await dialog.getByLabel('Название нового подхода').fill('UGC-разбор');
 	await dialog.getByRole('button', { name: 'Создать', exact: true }).click();
 	await dialog.getByRole('button', { name: 'Поставить рейтинг 3 из 5' }).click();
+
 	await dialog.getByRole('button', { name: 'Добавить' }).click();
-	await expect(page.getByText('Проверенный оффер')).toBeVisible();
-	await expect(page.getByRole('img', { name: /Рейтинг Проверенный оффер: 3 из 5/ })).toBeVisible();
-	await expect(page.getByText('3/5')).toBeVisible();
-	await expect(page.getByText('Подход: UGC-разбор')).toBeVisible();
-	await expect(page.getByRole('checkbox', { name: 'Использовать' })).toBeChecked();
+
+await expect(page.getByText('Проверенный оффер', { exact: true })).toBeVisible();
+
+await expect(page.getByRole('img', { name: /Рейтинг Проверенный оффер: 3 из 5/ })).toBeVisible();
+
+await expect(page.getByText('3/5')).toBeVisible();
+
+await expect(page.getByText('Подход: UGC-разбор')).toBeVisible();
+
+await expect(page.getByRole('checkbox', { name: 'Использовать' })).toBeChecked();
+
+// Массовый выбор
+const selectCheckbox = page.getByRole('checkbox', {
+  name: 'Выбрать Проверенный оффер',
+});
+
+await expect(selectCheckbox).not.toBeChecked();
+
+await selectCheckbox.check();
+
+await expect(selectCheckbox).toBeChecked();
+
+const bulkBar = page.getByRole('region', {
+  name: 'Действия с выбранными элементами',
+});
+
+await expect(bulkBar).toBeVisible();
+
+await expect(bulkBar.getByText('Выбрано: 1')).toBeVisible();
+
+await expect(
+  bulkBar.getByRole('button', {
+    name: 'Выбрать все 1',
+  }),
+).toBeDisabled();
+
+await bulkBar.getByRole('button', { name: 'Снять выбор' }).click();
+
+await expect(selectCheckbox).not.toBeChecked();
+
+await expect(bulkBar).not.toBeVisible();
+
 	await page.reload();
 	await expect(page.getByRole('img', { name: /Рейтинг Проверенный оффер: 3 из 5/ })).toBeVisible();
 	await page.getByRole('button', { name: 'Редактировать' }).click();
