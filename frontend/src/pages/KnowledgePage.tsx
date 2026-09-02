@@ -25,7 +25,7 @@ import { useKnowledgeStore } from '../stores/knowledgeStore';
 import { useConversationsStore } from '../stores/conversationsStore';
 import { useUiStore } from '../stores/uiStore';
 import './_knowledgePage.scss';
-import { SearchIcon } from '../components/icons/AppIcons';
+import { SearchIcon, TrashIcon } from '../components/icons/AppIcons';
 
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor/MarkdownEditor'));
 
@@ -112,7 +112,11 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	const { showToast } = useToast();
 
 	const [activeDropdown, setActiveDropdown] = useState<'filters' | 'sort' | null>(null);
+	const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(() => new Set());
+	const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+	const [bulkDeleting, setBulkDeleting] = useState(false);
 	const dropdownRef = useRef<HTMLDivElement>(null);
+	const selectedItems = useMemo(() => items.filter((item) => selectedItemIds.has(item.id)), [items, selectedItemIds]);
 
 	useEffect(() => {
 		function handleClickOutside(event: MouseEvent) {
@@ -168,13 +172,13 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 			.then((result) => {
 				if (!cancelled) {
 					setItems(result.items);
+					setSelectedItemIds(new Set());
 					setNextCursor(result.pageInfo.nextCursor);
 				}
 			})
 			.catch((error: unknown) => {
 				reportError('KNOWLEDGE_LIST_FAILED', error);
-				if (!cancelled)
-					showToast(error instanceof Error ? error.message : 'Не удалось загрузить базу знаний', 'error');
+				if (!cancelled) showToast(error instanceof Error ? error.message : 'Не удалось загрузить базу знаний', 'error');
 			})
 			.finally(() => {
 				if (!cancelled) setLoading(false);
@@ -321,11 +325,48 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 		try {
 			await deleteKnowledgeItem(item.id);
 			setItems((current) => current.filter((entry) => entry.id !== item.id));
+			setSelectedItemIds((current) => {
+				const next = new Set(current);
+				next.delete(item.id);
+				return next;
+			});
 			setDialog(null);
 			showToast('Элемент удалён', 'success');
 		} catch (error) {
 			showToast(error instanceof Error ? error.message : 'Не удалось удалить элемент', 'error');
 		}
+	}
+
+	function toggleSelectedItem(itemId: string, selected: boolean) {
+		setSelectedItemIds((current) => {
+			const next = new Set(current);
+			if (selected) next.add(itemId);
+			else next.delete(itemId);
+			return next;
+		});
+	}
+
+	async function removeSelectedItems() {
+		if (selectedItems.length === 0 || bulkDeleting) return;
+		setBulkDeleting(true);
+		const results = await Promise.allSettled(selectedItems.map((item) => deleteKnowledgeItem(item.id)));
+		const deletedIds = new Set<string>();
+		results.forEach((result, index) => {
+			if (result.status === 'fulfilled') deletedIds.add(selectedItems[index].id);
+		});
+		if (deletedIds.size > 0) {
+			setItems((current) => current.filter((item) => !deletedIds.has(item.id)));
+			setSelectedItemIds((current) => new Set([...current].filter((id) => !deletedIds.has(id))));
+		}
+		const failedCount = results.length - deletedIds.size;
+		showToast(
+			failedCount > 0
+				? `Удалено: ${deletedIds.size}. Не удалось удалить: ${failedCount}`
+				: `Удалено элементов: ${deletedIds.size}`,
+			failedCount > 0 ? 'error' : 'success',
+		);
+		setBulkDeleting(false);
+		setBulkDeleteOpen(false);
 	}
 
 	async function loadMore() {
@@ -452,6 +493,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 						<button
 							className={`knowledge-page__control-btn ${activeDropdown === 'filters' ? 'active' : ''}`}
 							type="button"
+							aria-expanded={activeDropdown === 'filters'}
 							onClick={() => setActiveDropdown(activeDropdown === 'filters' ? null : 'filters')}
 						>
 							Фильтры {activeFiltersCount > 0 && <span>{activeFiltersCount}</span>}
@@ -460,6 +502,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 						<button
 							className={`knowledge-page__control-btn ${activeDropdown === 'sort' ? 'active' : ''}`}
 							type="button"
+							aria-expanded={activeDropdown === 'sort'}
 							onClick={() => setActiveDropdown(activeDropdown === 'sort' ? null : 'sort')}
 						>
 							Сортировка
@@ -572,15 +615,47 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 						</div>
 					)}
 				</section>
+				<div className="knowledge-page__bulk-slot">
+					{selectedItems.length > 0 && (
+						<div className="knowledge-page__bulk-bar" role="region" aria-label="Действия с выбранными элементами">
+							<strong>Выбрано: {selectedItems.length}</strong>
+							<button
+								type="button"
+								disabled={selectedItems.length === items.length}
+								onClick={() => setSelectedItemIds(new Set(items.map((item) => item.id)))}
+							>
+								Выбрать все {items.length}
+							</button>
+							<button type="button" onClick={() => setSelectedItemIds(new Set())}>
+								Снять выбор
+							</button>
+							<button className="knowledge-page__bulk-delete" type="button" onClick={() => setBulkDeleteOpen(true)}>
+								<TrashIcon />
+								Удалить {selectedItems.length}
+							</button>
+						</div>
+					)}
+				</div>
 				<section className="knowledge-page__list">
 					{loading && <p className="knowledge-page__empty">Загрузка…</p>}
 					{!loading && items.length === 0 && <p className="knowledge-page__empty">Сохранённых данных пока нет</p>}
 					{!loading &&
 						items.map((item) => (
-							<article className="knowledge-card" key={item.id}>
+							<article
+								className={`knowledge-card ${selectedItemIds.has(item.id) ? 'knowledge-card--selected' : ''}`}
+								key={item.id}
+							>
 								<div className="knowledge-card__head">
 									<div>
-										<strong>{`${item.title}`}</strong>
+										<div className="knowledge-card__title-row">
+											<Checkbox
+												checked={selectedItemIds.has(item.id)}
+												onChange={(checked) => toggleSelectedItem(item.id, checked)}
+												label={`Выбрать ${item.title}`}
+												className="knowledge-card__select"
+											/>
+											<strong>{`${item.title}`}</strong>
+										</div>
 										<Rating value={item.rating} readonly size="small" showValue ariaLabel={`Рейтинг ${item.title}`} />
 										{item.approach && <span className="knowledge-card__approach">Подход: {item.approach.name}</span>}
 										<div className="knowledge-card__metadata">
@@ -619,6 +694,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 										disabled={pendingItemIds.has(item.id)}
 										onChange={(checked) => void toggleItem(item, checked)}
 										label="Использовать"
+										className="knowledge-card__active-toggle"
 									/>
 								</div>
 								<p>{item.content || 'Текстовое содержимое не извлечено'}</p>
@@ -753,6 +829,18 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 						onConfirm={() => void removeItem(dialog.item)}
 					>
 						<p>«{dialog.item.title}» будет удалён из базы знаний</p>
+					</ModalDialog>
+				)}
+				{bulkDeleteOpen && (
+					<ModalDialog
+						title="Удалить выбранные элементы?"
+						confirmLabel={bulkDeleting ? 'Удаление…' : `Удалить ${selectedItems.length}`}
+						confirmDisabled={bulkDeleting}
+						danger
+						onClose={() => setBulkDeleteOpen(false)}
+						onConfirm={() => void removeSelectedItems()}
+					>
+						<p>Выбранные элементы будут удалены из базы знаний: {selectedItems.length}</p>
 					</ModalDialog>
 				)}
 			</main>
