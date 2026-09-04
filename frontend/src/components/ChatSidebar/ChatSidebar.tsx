@@ -23,6 +23,7 @@ import {
 	SidebarIcon,
 	TrashIcon,
 	UserIcon,
+	InfoIcon,
 } from '../icons/AppIcons';
 import { VelorianIcon } from '../icons/VelorianIcon';
 import { ModalDialog } from '../ui/ModalDialog/ModalDialog';
@@ -34,6 +35,48 @@ import { useUiStore } from '../../stores/uiStore';
 import { useDebounce } from '../../hooks/useDebounce';
 import { useKnowledgeStore } from '../../stores/knowledgeStore';
 import { reportError } from '../../utils/reportError';
+import { useToast } from '../../hooks/useToast';
+
+const DAY_MS = 24 * 60 * 60 * 1000;
+
+type TrashConfirmation =
+	| { type: 'chat'; id: string; title: string }
+	| { type: 'knowledge'; id: string; title: string }
+	| { type: 'empty-chats'; count: number }
+	| { type: 'empty-knowledge'; count: number }
+	| null;
+
+function daysLabel(value: number) {
+	const mod10 = value % 10;
+	const mod100 = value % 100;
+	if (mod10 === 1 && mod100 !== 11) return 'день';
+	if (mod10 >= 2 && mod10 <= 4 && (mod100 < 12 || mod100 > 14)) return 'дня';
+	return 'дней';
+}
+
+function trashDateLabel(deletedAt?: string | null) {
+	if (!deletedAt) return 'Дата удаления неизвестна';
+	const isoTimestamp = deletedAt.includes('T') ? deletedAt : deletedAt.replace(' ', 'T');
+	const utcTimestamp = /(?:z|[+-]\d{2}:?\d{2})$/i.test(isoTimestamp) ? isoTimestamp : `${isoTimestamp}Z`;
+	const deleted = new Date(utcTimestamp);
+	if (Number.isNaN(deleted.getTime())) return 'Дата удаления неизвестна';
+	const now = new Date();
+	const isToday =
+		deleted.getFullYear() === now.getFullYear() &&
+		deleted.getMonth() === now.getMonth() &&
+		deleted.getDate() === now.getDate();
+	const date = isToday
+		? 'сегодня'
+		: new Intl.DateTimeFormat('ru-RU', { day: '2-digit', month: '2-digit', year: 'numeric' }).format(deleted);
+	const time = new Intl.DateTimeFormat('ru-RU', {
+		hour: '2-digit',
+		minute: '2-digit',
+		hour12: false,
+	}).format(deleted);
+	const deleteAt = deleted.getTime() + 30 * DAY_MS;
+	const remainingDays = Math.max(0, Math.floor((deleteAt - now.getTime()) / DAY_MS));
+	return `Удалён ${date}, ${time} · осталось ${remainingDays} ${daysLabel(remainingDays)}`;
+}
 
 type ChatSidebarProps = {
 	user: AuthUser;
@@ -49,6 +92,7 @@ type ChatSidebarProps = {
 };
 
 export function ChatSidebar(props: ChatSidebarProps) {
+	const { showToast } = useToast();
 	const allConversations = useConversationsStore((state) => state.conversations);
 	const deletedConversations = useConversationsStore((state) => state.deletedConversations);
 	const setDeletedConversations = useConversationsStore((state) => state.setDeletedConversations);
@@ -85,6 +129,8 @@ export function ChatSidebar(props: ChatSidebarProps) {
 	const [trashLoading, setTrashLoading] = useState(false);
 	const [trashBusyId, setTrashBusyId] = useState<string | null>(null);
 	const [trashError, setTrashError] = useState<string | null>(null);
+	const [trashMenuId, setTrashMenuId] = useState<string | null>(null);
+	const [trashConfirmation, setTrashConfirmation] = useState<TrashConfirmation>(null);
 	const debouncedSearch = useDebounce(search, 250);
 	const conversations = useMemo(() => {
 		const query = debouncedSearch.trim().toLocaleLowerCase('ru');
@@ -102,6 +148,20 @@ export function ChatSidebar(props: ChatSidebarProps) {
 		document.addEventListener('mousedown', handleOutsideClick);
 		return () => document.removeEventListener('mousedown', handleOutsideClick);
 	}, [closeMenus]);
+
+	useEffect(() => {
+		if (!trashOpen) return;
+		function handleEscape(event: KeyboardEvent) {
+			if (event.key !== 'Escape') return;
+			if (trashConfirmation) setTrashConfirmation(null);
+			else {
+				setTrashOpen(false);
+				setTrashMenuId(null);
+			}
+		}
+		document.addEventListener('keydown', handleEscape);
+		return () => document.removeEventListener('keydown', handleEscape);
+	}, [trashConfirmation, trashOpen]);
 
 	function openDialog(type: 'rename' | 'delete', conversation: ConversationSummary) {
 		openSidebarDialog(type, conversation);
@@ -128,6 +188,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 		setTrashOpen(true);
 		setTrashLoading(true);
 		setTrashError(null);
+		setTrashMenuId(null);
 		const [chatsResult, knowledgeResult] = await Promise.allSettled([
 			listDeletedConversations(),
 			listDeletedKnowledgeItems(),
@@ -135,7 +196,12 @@ export function ChatSidebar(props: ChatSidebarProps) {
 		if (chatsResult.status === 'fulfilled') setDeletedConversations(chatsResult.value);
 		if (knowledgeResult.status === 'fulfilled') setDeletedKnowledgeItems(knowledgeResult.value);
 		if (chatsResult.status === 'rejected' || knowledgeResult.status === 'rejected') {
-			const error = chatsResult.status === 'rejected' ? chatsResult.reason : knowledgeResult.status === 'rejected' ? knowledgeResult.reason : null;
+			const error =
+				chatsResult.status === 'rejected'
+					? chatsResult.reason
+					: knowledgeResult.status === 'rejected'
+						? knowledgeResult.reason
+						: null;
 			reportError('UNIFIED_TRASH_LOAD_FAILED', error);
 			setTrashError(error instanceof Error ? error.message : 'Не удалось полностью загрузить корзину');
 		}
@@ -149,6 +215,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 			const restored = await restoreConversation(conversationId);
 			removeDeletedConversation(conversationId);
 			upsertConversation(restored);
+			showToast('Чат восстановлен', 'success');
 		} catch (error) {
 			reportError('CONVERSATION_RESTORE_FAILED', error, { conversationId });
 			setTrashError(error instanceof Error ? error.message : 'Не удалось восстановить чат');
@@ -192,6 +259,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 			const restored = await restoreKnowledgeItem(itemId);
 			removeDeletedKnowledgeItem(itemId);
 			upsertKnowledgeItem(restored);
+			showToast('Запись базы знаний восстановлена', 'success');
 		} catch (error) {
 			reportError('KNOWLEDGE_RESTORE_FAILED', error, { itemId });
 			setTrashError(error instanceof Error ? error.message : 'Не удалось восстановить запись');
@@ -228,13 +296,33 @@ export function ChatSidebar(props: ChatSidebarProps) {
 		}
 	}
 
-	const sidebarClass = [
-		'chat-sidebar',
-		isOpen && 'chat-sidebar--open',
-		isCollapsed && 'chat-sidebar--collapsed',
-	]
+	function closeTrash() {
+		setTrashOpen(false);
+		setTrashMenuId(null);
+		setTrashConfirmation(null);
+	}
+
+	async function confirmTrashAction() {
+		if (!trashConfirmation) return;
+		if (trashConfirmation.type === 'chat') {
+			await handlePermanentChatDelete(trashConfirmation.id);
+		} else if (trashConfirmation.type === 'knowledge') {
+			await handlePermanentKnowledgeDelete(trashConfirmation.id);
+		} else if (trashConfirmation.type === 'empty-chats') {
+			await handleEmptyChatTrash();
+		} else {
+			await handleEmptyKnowledgeTrash();
+		}
+		setTrashMenuId(null);
+		setTrashConfirmation(null);
+	}
+
+	const sidebarClass = ['chat-sidebar', isOpen && 'chat-sidebar--open', isCollapsed && 'chat-sidebar--collapsed']
 		.filter(Boolean)
 		.join(' ');
+	const activeTrashItems = trashTab === 'chats' ? deletedConversations : deletedKnowledgeItems;
+	const trashConfirmationIsEmpty =
+		trashConfirmation?.type === 'empty-chats' || trashConfirmation?.type === 'empty-knowledge';
 
 	return (
 		<>
@@ -365,10 +453,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 								<div className="chat-sidebar__settings-panel">
 									<label>
 										<span>Акцент интерфейса</span>
-										<select
-											value={accentTheme}
-											onChange={(event) => setAccent(event.target.value as AccentTheme)}
-										>
+										<select value={accentTheme} onChange={(event) => setAccent(event.target.value as AccentTheme)}>
 											{ACCENT_THEMES.map((theme) => (
 												<option value={theme} key={theme}>
 													{ACCENT_THEME_LABELS[theme]}
@@ -453,101 +538,163 @@ export function ChatSidebar(props: ChatSidebarProps) {
 						setDialog(null);
 					}}
 				>
-					<p>Чат «{dialog.conversation.title}» будет перемещён в корзину.</p>
+					<p>Чат «{dialog.conversation.title}» будет перемещён в корзину</p>
 				</ModalDialog>
 			)}
 			{trashOpen && (
-				<ModalDialog
-					title="Корзина"
-					confirmLabel="Закрыть"
-					onClose={() => setTrashOpen(false)}
-					onConfirm={() => setTrashOpen(false)}
-				>
+				<ModalDialog title="Корзина" confirmLabel="Закрыть" onClose={closeTrash} onConfirm={closeTrash}>
 					<div className="chat-sidebar__trash">
+						<button
+							className="chat-sidebar__trash-close"
+							type="button"
+							aria-label="Закрыть корзину"
+							onClick={closeTrash}
+						>
+							×
+						</button>
 						<div className="chat-sidebar__trash-tabs" role="tablist" aria-label="Раздел корзины">
 							<button
-								className={trashTab === 'chats' ? 'chat-sidebar__trash-tab chat-sidebar__trash-tab--active' : 'chat-sidebar__trash-tab'}
+								className={
+									trashTab === 'chats'
+										? 'chat-sidebar__trash-tab chat-sidebar__trash-tab--active'
+										: 'chat-sidebar__trash-tab'
+								}
 								type="button"
 								role="tab"
 								aria-selected={trashTab === 'chats'}
-								onClick={() => setTrashTab('chats')}
+								onClick={() => {
+									setTrashTab('chats');
+									setTrashMenuId(null);
+								}}
 							>
-								Корзина чатов ({deletedConversations.length})
+								Чаты ({deletedConversations.length})
 							</button>
 							<button
-								className={trashTab === 'knowledge' ? 'chat-sidebar__trash-tab chat-sidebar__trash-tab--active' : 'chat-sidebar__trash-tab'}
+								className={
+									trashTab === 'knowledge'
+										? 'chat-sidebar__trash-tab chat-sidebar__trash-tab--active'
+										: 'chat-sidebar__trash-tab'
+								}
 								type="button"
 								role="tab"
 								aria-selected={trashTab === 'knowledge'}
-								onClick={() => setTrashTab('knowledge')}
+								onClick={() => {
+									setTrashTab('knowledge');
+									setTrashMenuId(null);
+								}}
 							>
-								Корзина БД ({deletedKnowledgeItems.length})
+								База знаний ({deletedKnowledgeItems.length})
 							</button>
 						</div>
-						<p className="chat-sidebar__trash-note">Удаление навсегда выполняется через 30 суток после перемещения в корзину.</p>
-						{trashError && <p className="chat-sidebar__trash-error">{trashError}</p>}
-						{trashLoading ? (
-							<p className="chat-sidebar__trash-empty">Загрузка…</p>
-						) : trashTab === 'chats' ? (
-							<div className="chat-sidebar__trash-pane" role="tabpanel">
-								<div className="chat-sidebar__trash-toolbar">
-									<button
-										className="chat-sidebar__trash-danger"
-										type="button"
-										disabled={deletedConversations.length === 0 || trashBusyId !== null}
-										onClick={() => void handleEmptyChatTrash()}
-									>
-										<TrashIcon /> Очистить корзину
-									</button>
-								</div>
-								{deletedConversations.length === 0 ? <p className="chat-sidebar__trash-empty">Удалённых чатов нет</p> : (
-									<ul className="chat-sidebar__trash-list">
-										{deletedConversations.map((conversation) => (
-											<li key={conversation.id}>
+						<div className="chat-sidebar__info">
+							<InfoIcon />
+								<p className="chat-sidebar__trash-note">Объекты автоматически удаляются через 30 дней</p>
+						</div>
+
+						<div className="chat-sidebar__trash-error-slot" aria-live="polite">
+							{trashError && <p className="chat-sidebar__trash-error">{trashError}</p>}
+						</div>
+						<div className="chat-sidebar__trash-toolbar">
+							<span>Удалённых объектов: {activeTrashItems.length}</span>
+							<button
+								className="chat-sidebar__trash-clear"
+								type="button"
+								disabled={activeTrashItems.length === 0 || trashBusyId !== null}
+								onClick={() =>
+									setTrashConfirmation(
+										trashTab === 'chats'
+											? { type: 'empty-chats', count: deletedConversations.length }
+											: { type: 'empty-knowledge', count: deletedKnowledgeItems.length },
+									)
+								}
+							>
+								Очистить
+							</button>
+						</div>
+						<div className="chat-sidebar__trash-list-viewport" role="tabpanel">
+							{trashLoading ? (
+								<p className="chat-sidebar__trash-empty">Загрузка…</p>
+							) : activeTrashItems.length === 0 ? (
+								<p className="chat-sidebar__trash-empty">Корзина пуста</p>
+							) : (
+								<ul className="chat-sidebar__trash-list">
+									{activeTrashItems.map((item) => {
+										const menuId = `${trashTab}:${item.id}`;
+
+										return (
+											<li key={menuId}>
 												<div className="chat-sidebar__trash-copy">
-													<strong>{conversation.title}</strong>
-													{conversation.deletedAt && <small>Удалён {new Date(conversation.deletedAt).toLocaleString('ru-RU')}</small>}
+													<strong title={item.title}>{item.title}</strong>
+													<small>{trashDateLabel(item.deletedAt)}</small>
 												</div>
 												<div className="chat-sidebar__trash-actions">
-													<button type="button" disabled={trashBusyId !== null} onClick={() => void handleRestoreChat(conversation.id)}>Восстановить</button>
-													<button className="chat-sidebar__trash-danger" type="button" disabled={trashBusyId !== null} onClick={() => void handlePermanentChatDelete(conversation.id)}><TrashIcon /> Удалить навсегда</button>
+													<button
+														className="chat-sidebar__trash-restore"
+														type="button"
+														disabled={trashBusyId !== null}
+														onClick={() =>
+															void (trashTab === 'chats' ? handleRestoreChat(item.id) : handleRestoreKnowledge(item.id))
+														}
+													>
+														Восстановить
+													</button>
+													<div className="chat-sidebar__trash-more-wrap">
+														<button
+															className="chat-sidebar__trash-more"
+															type="button"
+															aria-label={`Действия с объектом «${item.title}»`}
+															aria-expanded={trashMenuId === menuId}
+															disabled={trashBusyId !== null}
+															onClick={() => setTrashMenuId((current) => (current === menuId ? null : menuId))}
+														>
+															⋯
+														</button>
+														{trashMenuId === menuId && (
+															<div className="chat-sidebar__trash-item-menu">
+																<button
+																	className="chat-sidebar__trash-danger"
+																	type="button"
+																	onClick={() => {
+																		setTrashMenuId(null);
+																		setTrashConfirmation(
+																			trashTab === 'chats'
+																				? { type: 'chat', id: item.id, title: item.title }
+																				: { type: 'knowledge', id: item.id, title: item.title },
+																		);
+																	}}
+																>
+																	<TrashIcon />
+																	Удалить навсегда
+																</button>
+															</div>
+														)}
+													</div>
 												</div>
 											</li>
-										))}
-									</ul>
-								)}
-							</div>
-						) : (
-							<div className="chat-sidebar__trash-pane" role="tabpanel">
-								<div className="chat-sidebar__trash-toolbar">
-									<button
-										className="chat-sidebar__trash-danger"
-										type="button"
-										disabled={deletedKnowledgeItems.length === 0 || trashBusyId !== null}
-										onClick={() => void handleEmptyKnowledgeTrash()}
-									>
-										<TrashIcon /> Очистить корзину
-									</button>
-								</div>
-								{deletedKnowledgeItems.length === 0 ? <p className="chat-sidebar__trash-empty">Удалённых записей нет</p> : (
-									<ul className="chat-sidebar__trash-list">
-										{deletedKnowledgeItems.map((item) => (
-											<li key={item.id}>
-												<div className="chat-sidebar__trash-copy">
-													<strong>{item.title}</strong>
-													{item.deletedAt && <small>Удалена {new Date(item.deletedAt).toLocaleString('ru-RU')}</small>}
-												</div>
-												<div className="chat-sidebar__trash-actions">
-													<button type="button" disabled={trashBusyId !== null} onClick={() => void handleRestoreKnowledge(item.id)}>Восстановить</button>
-													<button className="chat-sidebar__trash-danger" type="button" disabled={trashBusyId !== null} onClick={() => void handlePermanentKnowledgeDelete(item.id)}><TrashIcon /> Удалить навсегда</button>
-												</div>
-											</li>
-										))}
-									</ul>
-								)}
-							</div>
-						)}
+										);
+									})}
+								</ul>
+							)}
+						</div>
 					</div>
+				</ModalDialog>
+			)}
+
+			{trashConfirmation && (
+				<ModalDialog
+					title={trashConfirmationIsEmpty ? 'Очистить корзину?' : 'Удалить навсегда?'}
+					confirmLabel={trashBusyId ? 'Удаление…' : trashConfirmationIsEmpty ? 'Очистить' : 'Удалить навсегда'}
+					confirmDisabled={trashBusyId !== null}
+					closeDisabled={trashBusyId !== null}
+					danger
+					onClose={() => setTrashConfirmation(null)}
+					onConfirm={() => void confirmTrashAction()}
+				>
+					<p>
+						{'count' in trashConfirmation
+							? `Все ${trashConfirmation.count} удалённых объектов будут удалены без возможности восстановления`
+							: `«${trashConfirmation.title}» будет удалён без возможности восстановления`}
+					</p>
 				</ModalDialog>
 			)}
 		</>

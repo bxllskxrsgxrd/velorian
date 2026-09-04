@@ -516,11 +516,17 @@
 	color: var(--color-error);
 	background: transparent;
 }
-.knowledge-card__actions .knowledge-card__delete:hover {
-	border-color: var(--color-error);
-	color: var(--color-error);
-	background: color-mix(in srgb, var(--color-error) 12%, transparent);
-}
+// .knowledge-card__actions .knowledge-card__delete:hover {
+// 	border-color: var(--color-error);
+// 	color: var(--color-error);
+// 	background: color-mix(in srgb, var(--color-error) 12%, transparent);
+// }
+
+.knowledge-card__actions .knowledge-card__delete:hover:not(:disabled) {
+		border-color: var(--color-error) !important;
+		color: var(--color-error) !important;
+		background: color-mix(in srgb, var(--color-error) 12%, transparent) !important;
+	}
 
 .knowledge-form__parameters {
 	display: grid;
