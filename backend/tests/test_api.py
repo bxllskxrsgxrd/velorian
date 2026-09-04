@@ -93,6 +93,113 @@ def test_conversation_crud(authenticated_client):
 	assert authenticated_client.delete(f"/api/conversations/{conversation_id}").status_code == 204
 
 
+def test_unified_chat_and_knowledge_trash(authenticated_client):
+	chat = authenticated_client.post("/api/conversations", json={"title": "В корзину"}).json()["conversation"]
+	knowledge = authenticated_client.post(
+		"/api/knowledge", json={"title": "Запись в корзину", "content": "Уникальный удалённый материал"},
+	).json()["item"]
+
+	assert authenticated_client.delete(f"/api/conversations/{chat['id']}").status_code == 204
+	assert authenticated_client.delete(f"/api/knowledge/{knowledge['id']}").status_code == 204
+	assert chat["id"] not in {item["id"] for item in authenticated_client.get("/api/conversations").json()["conversations"]}
+	assert knowledge["id"] not in {item["id"] for item in authenticated_client.get("/api/knowledge").json()["items"]}
+	assert authenticated_client.get(f"/api/conversations/{chat['id']}").status_code == 404
+	assert authenticated_client.get(f"/api/knowledge/{knowledge['id']}").status_code == 404
+	assert chat["id"] in {item["id"] for item in authenticated_client.get("/api/conversations/trash").json()["conversations"]}
+	assert knowledge["id"] in {item["id"] for item in authenticated_client.get("/api/knowledge/trash").json()["items"]}
+	from app.database import SessionLocal
+	from app.knowledge_retrieval import KnowledgeSearchOptions, knowledge_retrieval_service
+	user_id = authenticated_client.get("/api/auth/me").json()["user"]["id"]
+	with SessionLocal() as db:
+		retrieval = knowledge_retrieval_service.search(
+			db, user_id, KnowledgeSearchOptions(query="Уникальный удалённый материал"),
+		)
+	assert knowledge["id"] not in {item.id for item in retrieval.items}
+
+	restored_chat = authenticated_client.post(f"/api/conversations/trash/{chat['id']}/restore")
+	restored_knowledge = authenticated_client.post(f"/api/knowledge/trash/{knowledge['id']}/restore")
+	assert restored_chat.status_code == restored_knowledge.status_code == 200
+	assert restored_chat.json()["conversation"]["deletedAt"] is None
+	assert restored_knowledge.json()["item"]["deletedAt"] is None
+
+	assert authenticated_client.delete(f"/api/conversations/{chat['id']}").status_code == 204
+	assert authenticated_client.delete(f"/api/knowledge/{knowledge['id']}").status_code == 204
+	assert authenticated_client.delete(f"/api/conversations/trash/{chat['id']}").status_code == 204
+	assert authenticated_client.delete(f"/api/knowledge/trash/{knowledge['id']}").status_code == 204
+	assert authenticated_client.get("/api/conversations/trash").json()["conversations"] == []
+	assert authenticated_client.get("/api/knowledge/trash").json()["items"] == []
+
+	second_chat_id = authenticated_client.post("/api/conversations", json={"title": "Очистить"}).json()["conversation"]["id"]
+	second_knowledge_id = authenticated_client.post(
+		"/api/knowledge", json={"title": "Очистить", "content": "Очистить корзину"},
+	).json()["item"]["id"]
+	authenticated_client.delete(f"/api/conversations/{second_chat_id}")
+	authenticated_client.delete(f"/api/knowledge/{second_knowledge_id}")
+	assert authenticated_client.delete("/api/conversations/trash").status_code == 204
+	assert authenticated_client.delete("/api/knowledge/trash").status_code == 204
+	assert authenticated_client.get("/api/conversations/trash").json()["conversations"] == []
+	assert authenticated_client.get("/api/knowledge/trash").json()["items"] == []
+
+
+def test_trash_cleanup_uses_exact_thirty_day_timestamp(authenticated_client):
+	import asyncio
+	from datetime import timedelta
+
+	import app.main as main_module
+	from app.database import SessionLocal
+	from app.knowledge import purge_expired_knowledge_items
+	from app.models import Conversation, KnowledgeItem, utc_now
+
+	chat_id = authenticated_client.post("/api/conversations", json={"title": "Точный срок"}).json()["conversation"]["id"]
+	knowledge_id = authenticated_client.post(
+		"/api/knowledge", json={"title": "Точный срок", "content": "Не раньше тридцати суток"},
+	).json()["item"]["id"]
+	reference_now = utc_now()
+	with SessionLocal() as db:
+		chat = db.get(Conversation, chat_id)
+		knowledge = db.get(KnowledgeItem, knowledge_id)
+		chat.deleted_at = reference_now - timedelta(days=30) + timedelta(seconds=1)
+		knowledge.deleted_at = reference_now - timedelta(days=30) + timedelta(seconds=1)
+		db.commit()
+		asyncio.run(main_module.purge_expired_conversations(db, reference_now))
+		asyncio.run(purge_expired_knowledge_items(db, reference_now))
+		assert db.get(Conversation, chat_id) is not None
+		assert db.get(KnowledgeItem, knowledge_id) is not None
+
+		chat.deleted_at = reference_now - timedelta(days=30)
+		knowledge.deleted_at = reference_now - timedelta(days=30)
+		db.commit()
+		asyncio.run(main_module.purge_expired_conversations(db, reference_now))
+		asyncio.run(purge_expired_knowledge_items(db, reference_now))
+		assert db.get(Conversation, chat_id) is None
+		assert db.get(KnowledgeItem, knowledge_id) is None
+
+
+def test_permanent_chat_delete_preserves_saved_knowledge_file(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	monkeypatch.setattr(main_module, "client", FakeGroq())
+	chat_id = authenticated_client.post("/api/conversations", json={"title": "Источник Knowledge"}).json()["conversation"]["id"]
+	authenticated_client.post(
+		f"/api/conversations/{chat_id}/stream",
+		data={"prompt": "Сохрани файл"},
+		files={"files": ("source.txt", b"independent knowledge file", "text/plain")},
+	)
+	conversation = authenticated_client.get(f"/api/conversations/{chat_id}").json()["conversation"]
+	attachment = next(message["attachments"][0] for message in conversation["messages"] if message["attachments"])
+	knowledge = authenticated_client.post(
+		f"/api/knowledge/attachments/{attachment['id']}", json={"filters": {}},
+	).json()["item"]
+
+	assert authenticated_client.delete(f"/api/conversations/{chat_id}").status_code == 204
+	assert authenticated_client.delete(f"/api/conversations/trash/{chat_id}").status_code == 204
+	preserved = authenticated_client.get(f"/api/knowledge/{knowledge['id']}")
+	assert preserved.status_code == 200
+	assert preserved.json()["item"]["sourceMessageId"] is None
+	assert preserved.json()["item"]["sourceFileId"] is None
+	assert authenticated_client.get(f"/api/knowledge/{knowledge['id']}/file?original=true").content == b"independent knowledge file"
+
+
 def test_public_config_exposes_canonical_attachment_limits(client):
 	from app.config import settings
 
@@ -489,6 +596,7 @@ def test_knowledge_schema_has_non_destructive_constraints_and_indexes():
 	assert columns["rating"]["nullable"] is True
 	assert columns["approach_id"]["nullable"] is True
 	assert columns["is_active"]["nullable"] is False
+	assert columns["deleted_at"]["nullable"] is True
 	index_names = {index["name"] for index in inspector.get_indexes("knowledge_items")}
 	assert {
 		"ix_knowledge_user_active",
@@ -498,13 +606,18 @@ def test_knowledge_schema_has_non_destructive_constraints_and_indexes():
 		"ix_knowledge_user_updated",
 		"ix_knowledge_items_approach_id",
 		"ix_knowledge_user_active_approach",
+		"ix_knowledge_items_deleted_at",
 	}.issubset(index_names)
 	foreign_keys = {fk["constrained_columns"][0]: fk for fk in inspector.get_foreign_keys("knowledge_items")}
 	assert foreign_keys["user_id"]["options"]["ondelete"] == "CASCADE"
 	assert foreign_keys["source_message_id"]["options"]["ondelete"] == "SET NULL"
+	assert foreign_keys["source_file_id"]["options"]["ondelete"] == "SET NULL"
 	assert foreign_keys["approach_id"]["options"]["ondelete"] == "SET NULL"
 	approach_indexes = {index["name"] for index in inspector.get_indexes("knowledge_approaches")}
 	assert {"ix_knowledge_approaches_user_id", "ix_knowledge_approach_user_name"}.issubset(approach_indexes)
+	conversation_columns = {column["name"]: column for column in inspector.get_columns("conversations")}
+	assert conversation_columns["deleted_at"]["nullable"] is True
+	assert "ix_conversations_deleted_at" in {index["name"] for index in inspector.get_indexes("conversations")}
 
 
 def test_knowledge_file_delete_failure_preserves_database_item(authenticated_client, monkeypatch):
@@ -523,11 +636,14 @@ def test_knowledge_file_delete_failure_preserves_database_item(authenticated_cli
 		async def delete(self, key):
 			raise OSError("simulated storage failure")
 
+	assert authenticated_client.delete(f"/api/knowledge/{created['id']}").status_code == 204
 	monkeypatch.setattr(knowledge_module, "get_file_storage", lambda: FailingDeleteStorage())
-	response = authenticated_client.delete(f"/api/knowledge/{created['id']}")
+	response = authenticated_client.delete(f"/api/knowledge/trash/{created['id']}")
 	assert response.status_code == 503
 	assert response.json()["error"]["code"] == "KNOWLEDGE_FILE_DELETE_FAILED"
-	assert authenticated_client.get(f"/api/knowledge/{created['id']}").status_code == 200
+	assert created["id"] in {
+		item["id"] for item in authenticated_client.get("/api/knowledge/trash").json()["items"]
+	}
 
 
 def test_knowledge_search_is_opt_in_and_owner_scoped(client, monkeypatch):

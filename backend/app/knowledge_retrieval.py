@@ -100,7 +100,10 @@ def _query_contains_metadata_value(query: str, value: str) -> bool:
 
 def _resolve_metadata_filters(db: Session, user_id: str, normalized_query: str) -> dict[str, str]:
 	values: dict[str, set[str]] = {key: set() for key in FILTER_KEYS}
-	for metadata in db.scalars(select(KnowledgeItem.item_metadata).where(KnowledgeItem.user_id == user_id)):
+	for metadata in db.scalars(select(KnowledgeItem.item_metadata).where(
+		KnowledgeItem.user_id == user_id,
+		KnowledgeItem.deleted_at.is_(None),
+	)):
 		if not isinstance(metadata, dict):
 			continue
 		for key in FILTER_KEYS:
@@ -186,11 +189,19 @@ class TextKnowledgeRetriever(KnowledgeRetriever):
 	"""Owner-scoped lexical retriever with metadata filters applied before ranking."""
 
 	def search(self, db: Session, user_id: str, options: KnowledgeSearchOptions) -> KnowledgeRetrievalResult:
-		owned_count = db.scalar(select(func.count()).select_from(KnowledgeItem).where(KnowledgeItem.user_id == user_id)) or 0
-		active_count = db.scalar(select(func.count()).select_from(KnowledgeItem).where(KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True))) or 0
+		owned_count = db.scalar(select(func.count()).select_from(KnowledgeItem).where(
+			KnowledgeItem.user_id == user_id, KnowledgeItem.deleted_at.is_(None),
+		)) or 0
+		active_count = db.scalar(select(func.count()).select_from(KnowledgeItem).where(
+			KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True), KnowledgeItem.deleted_at.is_(None),
+		)) or 0
 		if options.approach_exists is False:
 			return _empty_result("search", options, owned_count, active_count, 0, "approach_not_found")
-		conditions = [KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True)]
+		conditions = [
+			KnowledgeItem.user_id == user_id,
+			KnowledgeItem.is_active.is_(True),
+			KnowledgeItem.deleted_at.is_(None),
+		]
 		if options.approach_id:
 			conditions.append(KnowledgeItem.approach_id == options.approach_id)
 		for key, value in options.metadata_filters.items():
@@ -264,11 +275,19 @@ class KnowledgeRetrievalService:
 		return self.retriever.search(db, user_id, options)
 
 	def list(self, db: Session, user_id: str, options: KnowledgeSearchOptions) -> KnowledgeRetrievalResult:
-		owned_count = db.scalar(select(func.count()).select_from(KnowledgeItem).where(KnowledgeItem.user_id == user_id)) or 0
-		active_count = db.scalar(select(func.count()).select_from(KnowledgeItem).where(KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True))) or 0
+		owned_count = db.scalar(select(func.count()).select_from(KnowledgeItem).where(
+			KnowledgeItem.user_id == user_id, KnowledgeItem.deleted_at.is_(None),
+		)) or 0
+		active_count = db.scalar(select(func.count()).select_from(KnowledgeItem).where(
+			KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True), KnowledgeItem.deleted_at.is_(None),
+		)) or 0
 		if options.approach_exists is False:
 			return _empty_result("list", options, owned_count, active_count, 0, "approach_not_found")
-		conditions = [KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True)]
+		conditions = [
+			KnowledgeItem.user_id == user_id,
+			KnowledgeItem.is_active.is_(True),
+			KnowledgeItem.deleted_at.is_(None),
+		]
 		if options.approach_id:
 			conditions.append(KnowledgeItem.approach_id == options.approach_id)
 		for key, value in options.metadata_filters.items():
@@ -288,7 +307,12 @@ class KnowledgeRetrievalService:
 		)
 
 	def get(self, db: Session, user_id: str, item_id: str) -> KnowledgeItem | None:
-		return db.scalar(select(KnowledgeItem).where(KnowledgeItem.id == item_id, KnowledgeItem.user_id == user_id, KnowledgeItem.is_active.is_(True)))
+		return db.scalar(select(KnowledgeItem).where(
+			KnowledgeItem.id == item_id,
+			KnowledgeItem.user_id == user_id,
+			KnowledgeItem.is_active.is_(True),
+			KnowledgeItem.deleted_at.is_(None),
+		))
 
 
 def log_knowledge_retrieval(result: KnowledgeRetrievalResult, *, user_id: str, query: str, search_mode: str, context_attached: bool) -> None:

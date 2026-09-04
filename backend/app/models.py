@@ -37,6 +37,7 @@ class Conversation(Base):
 	title: Mapped[str] = mapped_column(String(160), default="Новый чат")
 	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+	deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
 	user: Mapped[User] = relationship(back_populates="conversations")
 	messages: Mapped[list["Message"]] = relationship(back_populates="conversation", cascade="all, delete-orphan")
@@ -168,6 +169,7 @@ class KnowledgeItem(Base):
 	item_metadata: Mapped[dict] = mapped_column("metadata", JSON, default=dict)
 	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+	deleted_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True, index=True)
 
 	user: Mapped[User] = relationship(back_populates="knowledge_items")
 	approach: Mapped[KnowledgeApproach | None] = relationship(back_populates="knowledge_items", lazy="joined")

@@ -12,6 +12,8 @@ const api = vi.hoisted(() => ({
 	uploadKnowledgeFile: vi.fn(),
 	updateKnowledgeItem: vi.fn(),
 	deleteKnowledgeItem: vi.fn(),
+	emptyConversationTrash: vi.fn(), emptyKnowledgeTrash: vi.fn(), listDeletedConversations: vi.fn(), listDeletedKnowledgeItems: vi.fn(),
+	permanentlyDeleteConversation: vi.fn(), permanentlyDeleteKnowledgeItem: vi.fn(), restoreConversation: vi.fn(), restoreKnowledgeItem: vi.fn(),
 	listKnowledgeApproaches: vi.fn(),
 	createKnowledgeApproach: vi.fn(),
 	listConversations: vi.fn(),

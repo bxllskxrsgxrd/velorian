@@ -14,6 +14,8 @@ import { useMessageUiStore } from '../stores/messageUiStore';
 const api = vi.hoisted(() => ({
 	createConversation: vi.fn(),
 	deleteConversation: vi.fn(),
+	emptyConversationTrash: vi.fn(), emptyKnowledgeTrash: vi.fn(), listDeletedConversations: vi.fn(), listDeletedKnowledgeItems: vi.fn(),
+	permanentlyDeleteConversation: vi.fn(), permanentlyDeleteKnowledgeItem: vi.fn(), restoreConversation: vi.fn(), restoreKnowledgeItem: vi.fn(),
 	getConversation: vi.fn(),
 	listConversations: vi.fn(),
 	renameConversation: vi.fn(),
@@ -140,5 +142,43 @@ describe('ChatPage lazy conversation creation', () => {
 		await waitFor(() => expect(prompt).toHaveValue('Не теряй этот текст'));
 		expect(api.streamChat).not.toHaveBeenCalled();
 		expect(api.createConversation).toHaveBeenCalledTimes(1);
+	});
+});
+
+describe('ChatPage conversation deletion', () => {
+	it('aborts only the stream owned by the deleted conversation', async () => {
+		vi.clearAllMocks();
+		const secondConversation = { ...conversation, id: 'conversation-2', title: 'Второй чат' };
+		api.listConversations.mockResolvedValue([conversation, secondConversation]);
+		api.getConversation.mockImplementation(async (id: string) => ({
+			...(id === conversation.id ? conversation : secondConversation),
+			messages: [],
+		}));
+		const signals = new Map<string, AbortSignal>();
+		api.streamChat.mockImplementation(({ conversationId, signal }: { conversationId: string; signal: AbortSignal }) => {
+			signals.set(conversationId, signal);
+			return new Promise<void>(() => undefined);
+		});
+		api.deleteConversation.mockResolvedValue(undefined);
+		renderChatPage();
+
+		const firstPrompt = await screen.findByRole('textbox', { name: /введите запрос/i });
+		fireEvent.change(firstPrompt, { target: { value: 'Запрос в первый чат' } });
+		fireEvent.click(screen.getByRole('button', { name: 'Отправить сообщение' }));
+		await waitFor(() => expect(signals.has(conversation.id)).toBe(true));
+
+		fireEvent.click(screen.getByRole('button', { name: 'Второй чат' }));
+		const secondPrompt = await screen.findByRole('textbox', { name: /введите запрос/i });
+		fireEvent.change(secondPrompt, { target: { value: 'Запрос во второй чат' } });
+		fireEvent.click(screen.getByRole('button', { name: 'Отправить сообщение' }));
+		await waitFor(() => expect(signals.has(secondConversation.id)).toBe(true));
+
+		fireEvent.click(screen.getByRole('button', { name: `Действия с чатом «${conversation.title}»` }));
+		fireEvent.click(screen.getByRole('button', { name: 'Удалить' }));
+		fireEvent.click(screen.getByRole('button', { name: 'Удалить' }));
+
+		await waitFor(() => expect(api.deleteConversation).toHaveBeenCalledWith(conversation.id));
+		expect(signals.get(conversation.id)?.aborted).toBe(true);
+		expect(signals.get(secondConversation.id)?.aborted).toBe(false);
 	});
 });

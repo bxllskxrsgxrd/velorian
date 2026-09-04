@@ -644,10 +644,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	}
 
 	async function handleDeleteConversation(id: string) {
-		if (useChatStore.getState().generationByConversation[id]) {
-			setPageError('Сначала остановите генерацию ответа');
-			return;
-		}
+		requestControllersRef.current.get(id)?.abort();
 		await deleteConversation(id);
 		const remaining = conversations.filter((item) => item.id !== id);
 		setConversations(remaining);

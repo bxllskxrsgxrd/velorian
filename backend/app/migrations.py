@@ -97,6 +97,17 @@ def _add_knowledge_approaches(connection: Connection) -> None:
 				))
 
 
+def _add_trash_timestamps(connection: Connection) -> None:
+	column_type = "DATETIME" if connection.dialect.name == "sqlite" else "TIMESTAMP WITH TIME ZONE"
+	for table_name in ("conversations", "knowledge_items"):
+		columns = {column["name"] for column in inspect(connection).get_columns(table_name)}
+		if "deleted_at" not in columns:
+			connection.execute(text(f"ALTER TABLE {table_name} ADD COLUMN deleted_at {column_type}"))
+		connection.execute(text(
+			f"CREATE INDEX IF NOT EXISTS ix_{table_name}_deleted_at ON {table_name} (deleted_at)"
+		))
+
+
 MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260825_01_ratings_and_knowledge", _create_ratings_and_knowledge),
 	("20260825_02_storage_keys", _add_storage_keys),
@@ -105,6 +116,7 @@ MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260826_03_knowledge_sources_and_indexes", _add_knowledge_sources_and_indexes),
 	("20260826_04_knowledge_created_index", _add_knowledge_created_index),
 	("20260827_01_knowledge_approaches", _add_knowledge_approaches),
+	("20260904_01_unified_trash", _add_trash_timestamps),
 )
 
 

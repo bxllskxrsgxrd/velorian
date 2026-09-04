@@ -5,7 +5,8 @@ import mimetypes
 import re
 import time
 from collections.abc import AsyncIterator
-from contextlib import asynccontextmanager
+from contextlib import asynccontextmanager, suppress
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
 from urllib.parse import quote
@@ -24,13 +25,19 @@ from sqlalchemy.orm import Session, selectinload
 from .auth import COOKIE_NAME, create_session_token, get_current_user, hash_password, normalize_email, verify_password
 from .config import settings
 from .csrf import CSRF_COOKIE_NAME, issue_csrf_token, verify_csrf
-from .database import engine, get_db, init_database
+from .database import SessionLocal, engine, get_db, init_database
 from .errors import AppError
 from .file_processing import ExtractedFile, extract_text, image_to_data_url, is_image_file, validate_file_name
-from .knowledge import ensure_default_approaches, list_knowledge, retrieve_knowledge, router as knowledge_router
+from .knowledge import (
+	ensure_default_approaches,
+	list_knowledge,
+	purge_expired_knowledge_items,
+	retrieve_knowledge,
+	router as knowledge_router,
+)
 from .knowledge_retrieval import KnowledgeRetrievalResult, log_knowledge_retrieval, resolve_knowledge_query
 from .markdown_files import markdown_file_name, markdown_title, unique_markdown_file_name
-from .models import Attachment, Conversation, DocumentChunk, Message, User, utc_now
+from .models import Attachment, Conversation, DocumentChunk, KnowledgeItem, Message, User, utc_now
 from .rag import chunk_text, estimate_tokens, retrieve_chunks
 from .rate_limit import rate_limiter
 from .ratings import router as ratings_router
@@ -39,6 +46,8 @@ from .storage import build_storage_key, get_file_storage
 
 logger = logging.getLogger("velorian")
 client = AsyncGroq(api_key=settings.groq_api_key, timeout=90.0) if settings.groq_api_key else None
+TRASH_RETENTION = timedelta(days=30)
+TRASH_CLEANUP_INTERVAL_SECONDS = 60
 
 REQUESTS_TOTAL = Counter("velorian_http_requests_total", "HTTP requests", ["method", "route", "status"])
 REQUEST_DURATION = Histogram("velorian_http_request_duration_seconds", "HTTP request duration", ["method", "route"])
@@ -124,14 +133,23 @@ def _conversation_payload(conversation: Conversation, include_messages: bool = F
 		"title": conversation.title,
 		"createdAt": conversation.created_at.isoformat(),
 		"updatedAt": conversation.updated_at.isoformat(),
+		"deletedAt": conversation.deleted_at.isoformat() if conversation.deleted_at else None,
 	}
 	if include_messages:
 		payload["messages"] = [_message_payload(message) for message in conversation.messages]
 	return payload
 
 
-def _owned_conversation(db: Session, conversation_id: str, user_id: str, with_messages: bool = False) -> Conversation:
+def _owned_conversation(
+	db: Session,
+	conversation_id: str,
+	user_id: str,
+	with_messages: bool = False,
+	include_deleted: bool = False,
+) -> Conversation:
 	statement = select(Conversation).where(Conversation.id == conversation_id, Conversation.user_id == user_id)
+	if not include_deleted:
+		statement = statement.where(Conversation.deleted_at.is_(None))
 	if with_messages:
 		statement = statement.options(
 			selectinload(Conversation.messages).selectinload(Message.attachments),
@@ -368,6 +386,97 @@ async def _copy_message_attachments(db: Session, user_id: str, source: Message, 
 		))
 
 
+async def permanently_delete_conversation(db: Session, conversation: Conversation) -> None:
+	attachments = list(db.scalars(
+		select(Attachment).where(Attachment.conversation_id == conversation.id)
+	))
+	attachments_by_id = {attachment.id: attachment for attachment in attachments}
+	message_ids = list(db.scalars(
+		select(Message.id).where(Message.conversation_id == conversation.id)
+	))
+	knowledge_conditions = []
+	if attachments_by_id:
+		knowledge_conditions.append(KnowledgeItem.source_file_id.in_(list(attachments_by_id)))
+	if message_ids:
+		knowledge_conditions.append(KnowledgeItem.source_message_id.in_(message_ids))
+	knowledge_items = list(db.scalars(
+		select(KnowledgeItem).where(or_(*knowledge_conditions))
+	)) if knowledge_conditions else []
+	storage = get_file_storage()
+	copied_knowledge_keys: list[str] = []
+	try:
+		for item in knowledge_items:
+			source_attachment = attachments_by_id.get(item.source_file_id or "")
+			if source_attachment is not None and not item.storage_key and not item.storage_path:
+				try:
+					content = (
+						await storage.get(source_attachment.storage_key)
+						if source_attachment.storage_key
+						else await asyncio.to_thread(Path(source_attachment.storage_path).read_bytes)
+					)
+				except (FileNotFoundError, OSError) as error:
+					raise AppError(
+						409,
+						"KNOWLEDGE_FILE_DETACH_FAILED",
+						"Не удалось безопасно отделить файл базы знаний от удаляемого чата",
+					) from error
+				storage_key = build_storage_key(item.user_id, "knowledge", item.id)
+				await storage.save(storage_key, content, source_attachment.content_type)
+				copied_knowledge_keys.append(storage_key)
+				item.storage_key = storage_key
+			if item.source_file_id in attachments_by_id:
+				item.source_file_id = None
+			if item.source_message_id in message_ids:
+				item.source_message_id = None
+
+		db.delete(conversation)
+		db.commit()
+	except Exception:
+		db.rollback()
+		for storage_key in copied_knowledge_keys:
+			with suppress(Exception):
+				await storage.delete(storage_key)
+		raise
+
+	for attachment in attachments:
+		try:
+			if attachment.storage_key:
+				await storage.delete(attachment.storage_key)
+			elif attachment.storage_path:
+				await asyncio.to_thread(Path(attachment.storage_path).unlink, missing_ok=True)
+		except Exception:
+			logger.exception("Conversation attachment cleanup failed: attachment_id=%s", attachment.id)
+
+
+async def purge_expired_conversations(db: Session, now: datetime | None = None) -> None:
+	cutoff = (now or utc_now()) - TRASH_RETENTION
+	conversation_ids = list(db.scalars(select(Conversation.id).where(
+		Conversation.deleted_at.is_not(None),
+		Conversation.deleted_at <= cutoff,
+	)))
+	for conversation_id in conversation_ids:
+		conversation = db.get(Conversation, conversation_id)
+		if conversation is None:
+			continue
+		try:
+			await permanently_delete_conversation(db, conversation)
+		except Exception:
+			logger.exception("Expired conversation cleanup failed: conversation_id=%s", conversation_id)
+
+
+async def _trash_cleanup_loop() -> None:
+	while True:
+		try:
+			with SessionLocal() as db:
+				await purge_expired_conversations(db)
+				await purge_expired_knowledge_items(db)
+		except asyncio.CancelledError:
+			raise
+		except Exception:
+			logger.exception("Trash cleanup cycle failed")
+		await asyncio.sleep(TRASH_CLEANUP_INTERVAL_SECONDS)
+
+
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
 	settings.validate_production()
@@ -379,7 +488,13 @@ async def lifespan(_app: FastAPI):
 	if settings.is_production and settings.auth_secret == "velorian-development-secret-change-me":
 		raise RuntimeError("AUTH_SECRET must be changed in production")
 	init_database()
-	yield
+	cleanup_task = asyncio.create_task(_trash_cleanup_loop())
+	try:
+		yield
+	finally:
+		cleanup_task.cancel()
+		with suppress(asyncio.CancelledError):
+			await cleanup_task
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -640,7 +755,19 @@ def me(user: User = Depends(get_current_user)):
 
 @app.get(f"{settings.api_prefix}/conversations", tags=["conversations"])
 def list_conversations(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
-	items = db.scalars(select(Conversation).where(Conversation.user_id == user.id).order_by(desc(Conversation.updated_at))).all()
+	items = db.scalars(select(Conversation).where(
+		Conversation.user_id == user.id,
+		Conversation.deleted_at.is_(None),
+	).order_by(desc(Conversation.updated_at))).all()
+	return {"conversations": [_conversation_payload(item) for item in items]}
+
+
+@app.get(f"{settings.api_prefix}/conversations/trash", tags=["conversations"])
+def list_deleted_conversations(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	items = db.scalars(select(Conversation).where(
+		Conversation.user_id == user.id,
+		Conversation.deleted_at.is_not(None),
+	).order_by(desc(Conversation.deleted_at))).all()
 	return {"conversations": [_conversation_payload(item) for item in items]}
 
 
@@ -654,6 +781,43 @@ def create_conversation(payload: ConversationPayload, user: User = Depends(get_c
 	db.add(conversation)
 	db.commit()
 	return {"conversation": _conversation_payload(conversation)}
+
+
+@app.post(f"{settings.api_prefix}/conversations/trash/{{conversation_id}}/restore", tags=["conversations"])
+def restore_conversation(conversation_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	conversation = _owned_conversation(db, conversation_id, user.id, include_deleted=True)
+	if conversation.deleted_at is None:
+		raise AppError(409, "CONVERSATION_NOT_DELETED", "Диалог не находится в корзине")
+	conversation.deleted_at = None
+	conversation.updated_at = utc_now()
+	db.commit()
+	return {"conversation": _conversation_payload(conversation)}
+
+
+@app.delete(f"{settings.api_prefix}/conversations/trash", tags=["conversations"])
+async def empty_conversation_trash(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	conversation_ids = list(db.scalars(select(Conversation.id).where(
+		Conversation.user_id == user.id,
+		Conversation.deleted_at.is_not(None),
+	)))
+	for conversation_id in conversation_ids:
+		conversation = db.get(Conversation, conversation_id)
+		if conversation is not None:
+			await permanently_delete_conversation(db, conversation)
+	return Response(status_code=204)
+
+
+@app.delete(f"{settings.api_prefix}/conversations/trash/{{conversation_id}}", tags=["conversations"])
+async def permanently_delete_conversation_endpoint(
+	conversation_id: str,
+	user: User = Depends(get_current_user),
+	db: Session = Depends(get_db),
+):
+	conversation = _owned_conversation(db, conversation_id, user.id, include_deleted=True)
+	if conversation.deleted_at is None:
+		raise AppError(409, "CONVERSATION_NOT_DELETED", "Сначала переместите диалог в корзину")
+	await permanently_delete_conversation(db, conversation)
+	return Response(status_code=204)
 
 
 @app.get(f"{settings.api_prefix}/conversations/{{conversation_id}}", tags=["conversations"])
@@ -703,17 +867,11 @@ def activate_message_branch(message_id: str, user: User = Depends(get_current_us
 
 
 @app.delete(f"{settings.api_prefix}/conversations/{{conversation_id}}", tags=["conversations"])
-async def delete_conversation(conversation_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def delete_conversation(conversation_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	conversation = _owned_conversation(db, conversation_id, user.id)
-	files = db.execute(select(Attachment.storage_key, Attachment.storage_path).where(Attachment.conversation_id == conversation.id)).all()
-	db.delete(conversation)
+	conversation.deleted_at = utc_now()
+	conversation.updated_at = utc_now()
 	db.commit()
-	storage = get_file_storage()
-	for storage_key, storage_path in files:
-		if storage_key:
-			await storage.delete(storage_key)
-		elif storage_path:
-			await asyncio.to_thread(Path(storage_path).unlink, missing_ok=True)
 	return Response(status_code=204)
 
 

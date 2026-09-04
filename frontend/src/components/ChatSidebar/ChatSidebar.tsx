@@ -1,4 +1,14 @@
-import { useEffect, useMemo, useRef } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import {
+	emptyConversationTrash,
+	emptyKnowledgeTrash,
+	listDeletedConversations,
+	listDeletedKnowledgeItems,
+	permanentlyDeleteConversation,
+	permanentlyDeleteKnowledgeItem,
+	restoreConversation,
+	restoreKnowledgeItem,
+} from '../../api/chatApi';
 import { ACCENT_THEMES, ACCENT_THEME_LABELS, type AccentTheme } from '../../theme/accentTheme';
 import type { AuthUser, ConversationSummary } from '../../types/chat';
 import {
@@ -22,6 +32,8 @@ import { useSidebarStore } from '../../stores/sidebarStore';
 import { useConversationsStore } from '../../stores/conversationsStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useDebounce } from '../../hooks/useDebounce';
+import { useKnowledgeStore } from '../../stores/knowledgeStore';
+import { reportError } from '../../utils/reportError';
 
 type ChatSidebarProps = {
 	user: AuthUser;
@@ -38,6 +50,14 @@ type ChatSidebarProps = {
 
 export function ChatSidebar(props: ChatSidebarProps) {
 	const allConversations = useConversationsStore((state) => state.conversations);
+	const deletedConversations = useConversationsStore((state) => state.deletedConversations);
+	const setDeletedConversations = useConversationsStore((state) => state.setDeletedConversations);
+	const upsertConversation = useConversationsStore((state) => state.upsertConversation);
+	const removeDeletedConversation = useConversationsStore((state) => state.removeDeletedConversation);
+	const deletedKnowledgeItems = useKnowledgeStore((state) => state.deletedItems);
+	const setDeletedKnowledgeItems = useKnowledgeStore((state) => state.setDeletedItems);
+	const upsertKnowledgeItem = useKnowledgeStore((state) => state.upsertItem);
+	const removeDeletedKnowledgeItem = useKnowledgeStore((state) => state.removeDeletedItem);
 	const search = useConversationsStore((state) => state.search);
 	const setSearch = useConversationsStore((state) => state.setSearch);
 	const accentTheme = useUiStore((state) => state.accent);
@@ -60,6 +80,11 @@ export function ChatSidebar(props: ChatSidebarProps) {
 	const closeMenus = useSidebarStore((state) => state.closeMenus);
 	const sidebarRef = useRef<HTMLElement>(null);
 	const searchInputRef = useRef<HTMLInputElement>(null);
+	const [trashOpen, setTrashOpen] = useState(false);
+	const [trashTab, setTrashTab] = useState<'chats' | 'knowledge'>('chats');
+	const [trashLoading, setTrashLoading] = useState(false);
+	const [trashBusyId, setTrashBusyId] = useState<string | null>(null);
+	const [trashError, setTrashError] = useState<string | null>(null);
 	const debouncedSearch = useDebounce(search, 250);
 	const conversations = useMemo(() => {
 		const query = debouncedSearch.trim().toLocaleLowerCase('ru');
@@ -95,6 +120,112 @@ export function ChatSidebar(props: ChatSidebarProps) {
 	function openCollapsedSearch() {
 		toggleCollapsed();
 		requestAnimationFrame(() => searchInputRef.current?.focus());
+	}
+
+	async function openTrash() {
+		setAccountOpen(false);
+		setSettingsOpen(false);
+		setTrashOpen(true);
+		setTrashLoading(true);
+		setTrashError(null);
+		const [chatsResult, knowledgeResult] = await Promise.allSettled([
+			listDeletedConversations(),
+			listDeletedKnowledgeItems(),
+		]);
+		if (chatsResult.status === 'fulfilled') setDeletedConversations(chatsResult.value);
+		if (knowledgeResult.status === 'fulfilled') setDeletedKnowledgeItems(knowledgeResult.value);
+		if (chatsResult.status === 'rejected' || knowledgeResult.status === 'rejected') {
+			const error = chatsResult.status === 'rejected' ? chatsResult.reason : knowledgeResult.status === 'rejected' ? knowledgeResult.reason : null;
+			reportError('UNIFIED_TRASH_LOAD_FAILED', error);
+			setTrashError(error instanceof Error ? error.message : 'Не удалось полностью загрузить корзину');
+		}
+		setTrashLoading(false);
+	}
+
+	async function handleRestoreChat(conversationId: string) {
+		setTrashBusyId(`chat:${conversationId}`);
+		setTrashError(null);
+		try {
+			const restored = await restoreConversation(conversationId);
+			removeDeletedConversation(conversationId);
+			upsertConversation(restored);
+		} catch (error) {
+			reportError('CONVERSATION_RESTORE_FAILED', error, { conversationId });
+			setTrashError(error instanceof Error ? error.message : 'Не удалось восстановить чат');
+		} finally {
+			setTrashBusyId(null);
+		}
+	}
+
+	async function handlePermanentChatDelete(conversationId: string) {
+		setTrashBusyId(`chat:${conversationId}`);
+		setTrashError(null);
+		try {
+			await permanentlyDeleteConversation(conversationId);
+			removeDeletedConversation(conversationId);
+		} catch (error) {
+			reportError('CONVERSATION_PERMANENT_DELETE_FAILED', error, { conversationId });
+			setTrashError(error instanceof Error ? error.message : 'Не удалось удалить чат навсегда');
+		} finally {
+			setTrashBusyId(null);
+		}
+	}
+
+	async function handleEmptyChatTrash() {
+		setTrashBusyId('chat:all');
+		setTrashError(null);
+		try {
+			await emptyConversationTrash();
+			setDeletedConversations([]);
+		} catch (error) {
+			reportError('CONVERSATION_TRASH_EMPTY_FAILED', error);
+			setTrashError(error instanceof Error ? error.message : 'Не удалось очистить корзину чатов');
+		} finally {
+			setTrashBusyId(null);
+		}
+	}
+
+	async function handleRestoreKnowledge(itemId: string) {
+		setTrashBusyId(`knowledge:${itemId}`);
+		setTrashError(null);
+		try {
+			const restored = await restoreKnowledgeItem(itemId);
+			removeDeletedKnowledgeItem(itemId);
+			upsertKnowledgeItem(restored);
+		} catch (error) {
+			reportError('KNOWLEDGE_RESTORE_FAILED', error, { itemId });
+			setTrashError(error instanceof Error ? error.message : 'Не удалось восстановить запись');
+		} finally {
+			setTrashBusyId(null);
+		}
+	}
+
+	async function handlePermanentKnowledgeDelete(itemId: string) {
+		setTrashBusyId(`knowledge:${itemId}`);
+		setTrashError(null);
+		try {
+			await permanentlyDeleteKnowledgeItem(itemId);
+			removeDeletedKnowledgeItem(itemId);
+		} catch (error) {
+			reportError('KNOWLEDGE_PERMANENT_DELETE_FAILED', error, { itemId });
+			setTrashError(error instanceof Error ? error.message : 'Не удалось удалить запись навсегда');
+		} finally {
+			setTrashBusyId(null);
+		}
+	}
+
+	async function handleEmptyKnowledgeTrash() {
+		setTrashBusyId('knowledge:all');
+		setTrashError(null);
+		try {
+			await emptyKnowledgeTrash();
+			setDeletedKnowledgeItems([]);
+		} catch (error) {
+			reportError('KNOWLEDGE_TRASH_EMPTY_FAILED', error);
+			setTrashError(error instanceof Error ? error.message : 'Не удалось очистить корзину БД');
+		} finally {
+			setTrashBusyId(null);
+		}
 	}
 
 	const sidebarClass = [
@@ -255,6 +386,10 @@ export function ChatSidebar(props: ChatSidebarProps) {
 									</div>
 								</div>
 							)}
+							<button type="button" onClick={() => void openTrash()}>
+								<TrashIcon />
+								<span>Корзина</span>
+							</button>
 							<button type="button" onClick={props.onLogout}>
 								<LogoutIcon />
 								<span>Выйти</span>
@@ -318,7 +453,101 @@ export function ChatSidebar(props: ChatSidebarProps) {
 						setDialog(null);
 					}}
 				>
-					<p>Чат «{dialog.conversation.title}» и его файлы будут удалены без возможности восстановления.</p>
+					<p>Чат «{dialog.conversation.title}» будет перемещён в корзину.</p>
+				</ModalDialog>
+			)}
+			{trashOpen && (
+				<ModalDialog
+					title="Корзина"
+					confirmLabel="Закрыть"
+					onClose={() => setTrashOpen(false)}
+					onConfirm={() => setTrashOpen(false)}
+				>
+					<div className="chat-sidebar__trash">
+						<div className="chat-sidebar__trash-tabs" role="tablist" aria-label="Раздел корзины">
+							<button
+								className={trashTab === 'chats' ? 'chat-sidebar__trash-tab chat-sidebar__trash-tab--active' : 'chat-sidebar__trash-tab'}
+								type="button"
+								role="tab"
+								aria-selected={trashTab === 'chats'}
+								onClick={() => setTrashTab('chats')}
+							>
+								Корзина чатов ({deletedConversations.length})
+							</button>
+							<button
+								className={trashTab === 'knowledge' ? 'chat-sidebar__trash-tab chat-sidebar__trash-tab--active' : 'chat-sidebar__trash-tab'}
+								type="button"
+								role="tab"
+								aria-selected={trashTab === 'knowledge'}
+								onClick={() => setTrashTab('knowledge')}
+							>
+								Корзина БД ({deletedKnowledgeItems.length})
+							</button>
+						</div>
+						<p className="chat-sidebar__trash-note">Удаление навсегда выполняется через 30 суток после перемещения в корзину.</p>
+						{trashError && <p className="chat-sidebar__trash-error">{trashError}</p>}
+						{trashLoading ? (
+							<p className="chat-sidebar__trash-empty">Загрузка…</p>
+						) : trashTab === 'chats' ? (
+							<div className="chat-sidebar__trash-pane" role="tabpanel">
+								<div className="chat-sidebar__trash-toolbar">
+									<button
+										className="chat-sidebar__trash-danger"
+										type="button"
+										disabled={deletedConversations.length === 0 || trashBusyId !== null}
+										onClick={() => void handleEmptyChatTrash()}
+									>
+										<TrashIcon /> Очистить корзину
+									</button>
+								</div>
+								{deletedConversations.length === 0 ? <p className="chat-sidebar__trash-empty">Удалённых чатов нет</p> : (
+									<ul className="chat-sidebar__trash-list">
+										{deletedConversations.map((conversation) => (
+											<li key={conversation.id}>
+												<div className="chat-sidebar__trash-copy">
+													<strong>{conversation.title}</strong>
+													{conversation.deletedAt && <small>Удалён {new Date(conversation.deletedAt).toLocaleString('ru-RU')}</small>}
+												</div>
+												<div className="chat-sidebar__trash-actions">
+													<button type="button" disabled={trashBusyId !== null} onClick={() => void handleRestoreChat(conversation.id)}>Восстановить</button>
+													<button className="chat-sidebar__trash-danger" type="button" disabled={trashBusyId !== null} onClick={() => void handlePermanentChatDelete(conversation.id)}><TrashIcon /> Удалить навсегда</button>
+												</div>
+											</li>
+										))}
+									</ul>
+								)}
+							</div>
+						) : (
+							<div className="chat-sidebar__trash-pane" role="tabpanel">
+								<div className="chat-sidebar__trash-toolbar">
+									<button
+										className="chat-sidebar__trash-danger"
+										type="button"
+										disabled={deletedKnowledgeItems.length === 0 || trashBusyId !== null}
+										onClick={() => void handleEmptyKnowledgeTrash()}
+									>
+										<TrashIcon /> Очистить корзину
+									</button>
+								</div>
+								{deletedKnowledgeItems.length === 0 ? <p className="chat-sidebar__trash-empty">Удалённых записей нет</p> : (
+									<ul className="chat-sidebar__trash-list">
+										{deletedKnowledgeItems.map((item) => (
+											<li key={item.id}>
+												<div className="chat-sidebar__trash-copy">
+													<strong>{item.title}</strong>
+													{item.deletedAt && <small>Удалена {new Date(item.deletedAt).toLocaleString('ru-RU')}</small>}
+												</div>
+												<div className="chat-sidebar__trash-actions">
+													<button type="button" disabled={trashBusyId !== null} onClick={() => void handleRestoreKnowledge(item.id)}>Восстановить</button>
+													<button className="chat-sidebar__trash-danger" type="button" disabled={trashBusyId !== null} onClick={() => void handlePermanentKnowledgeDelete(item.id)}><TrashIcon /> Удалить навсегда</button>
+												</div>
+											</li>
+										))}
+									</ul>
+								)}
+							</div>
+						)}
+					</div>
 				</ModalDialog>
 			)}
 		</>

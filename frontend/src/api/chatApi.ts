@@ -94,6 +94,10 @@ export async function listConversations(): Promise<ConversationSummary[]> {
 	return (await requestJson<{ conversations: ConversationSummary[] }>('/conversations')).conversations;
 }
 
+export async function listDeletedConversations(): Promise<ConversationSummary[]> {
+	return (await requestJson<{ conversations: ConversationSummary[] }>('/conversations/trash')).conversations;
+}
+
 export async function createConversation(title = 'Новый чат'): Promise<ConversationSummary> {
 	return (
 		await requestJson<{ conversation: ConversationSummary }>('/conversations', {
@@ -119,6 +123,20 @@ export async function renameConversation(id: string, title: string): Promise<Con
 
 export async function deleteConversation(id: string): Promise<void> {
 	await apiFetch(`/conversations/${id}`, { method: 'DELETE' });
+}
+
+export async function restoreConversation(id: string): Promise<ConversationSummary> {
+	return (
+		await requestJson<{ conversation: ConversationSummary }>(`/conversations/trash/${id}/restore`, { method: 'POST' })
+	).conversation;
+}
+
+export async function permanentlyDeleteConversation(id: string): Promise<void> {
+	await apiFetch(`/conversations/trash/${id}`, { method: 'DELETE' });
+}
+
+export async function emptyConversationTrash(): Promise<void> {
+	await apiFetch('/conversations/trash', { method: 'DELETE' });
 }
 
 export type StreamEvent =
@@ -285,6 +303,26 @@ export async function deleteKnowledgeApproach(id: string): Promise<void> {
 
 export async function deleteKnowledgeItem(id: string): Promise<void> {
 	await apiFetch(`/knowledge/${id}`, { method: 'DELETE' });
+}
+
+export async function listDeletedKnowledgeItems(): Promise<KnowledgeItem[]> {
+	return (
+		await requestJson<{ items: KnowledgeItem[] }>('/knowledge/trash')
+	).items.map(normalizeKnowledgeItem);
+}
+
+export async function restoreKnowledgeItem(id: string): Promise<KnowledgeItem> {
+	return normalizeKnowledgeItem((
+		await requestJson<{ item: KnowledgeItem }>(`/knowledge/trash/${id}/restore`, { method: 'POST' })
+	).item);
+}
+
+export async function permanentlyDeleteKnowledgeItem(id: string): Promise<void> {
+	await apiFetch(`/knowledge/trash/${id}`, { method: 'DELETE' });
+}
+
+export async function emptyKnowledgeTrash(): Promise<void> {
+	await apiFetch('/knowledge/trash', { method: 'DELETE' });
 }
 
 export async function activateMessageBranch(messageId: string): Promise<ChatMessage> {

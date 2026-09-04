@@ -331,7 +331,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 				return next;
 			});
 			setDialog(null);
-			showToast('Элемент удалён', 'success');
+			showToast('Элемент перемещён в корзину', 'success');
 		} catch (error) {
 			showToast(error instanceof Error ? error.message : 'Не удалось удалить элемент', 'error');
 		}
@@ -361,8 +361,8 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 		const failedCount = results.length - deletedIds.size;
 		showToast(
 			failedCount > 0
-				? `Удалено: ${deletedIds.size}. Не удалось удалить: ${failedCount}`
-				: `Удалено элементов: ${deletedIds.size}`,
+				? `Перемещено в корзину: ${deletedIds.size}. Не удалось удалить: ${failedCount}`
+				: `Перемещено в корзину элементов: ${deletedIds.size}`,
 			failedCount > 0 ? 'error' : 'success',
 		);
 		setBulkDeleting(false);
@@ -830,7 +830,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 						onClose={() => setDialog(null)}
 						onConfirm={() => void removeItem(dialog.item)}
 					>
-						<p>«{dialog.item.title}» будет удалён из базы знаний</p>
+						<p>«{dialog.item.title}» будет перемещён в корзину</p>
 					</ModalDialog>
 				)}
 				{bulkDeleteOpen && (
@@ -842,7 +842,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 						onClose={() => setBulkDeleteOpen(false)}
 						onConfirm={() => void removeSelectedItems()}
 					>
-						<p>Выбранные элементы будут удалены из базы знаний: {selectedItems.length}</p>
+						<p>Выбранные элементы будут перемещены в корзину: {selectedItems.length}</p>
 					</ModalDialog>
 				)}
 			</main>

@@ -5,7 +5,7 @@ import hashlib
 import json
 import logging
 import re
-from datetime import datetime
+from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import quote
@@ -31,6 +31,7 @@ router = APIRouter(prefix=f"{settings.api_prefix}/knowledge", tags=["knowledge"]
 logger = logging.getLogger("velorian")
 RatingValue = Annotated[int, Field(strict=True, ge=1, le=5)]
 KNOWLEDGE_FILTER_KEYS = ("geo", "celebrity", "offer", "news_source")
+TRASH_RETENTION = timedelta(days=30)
 
 
 class KnowledgeFiltersPayload(BaseModel):
@@ -166,13 +167,17 @@ def knowledge_payload(item: KnowledgeItem) -> dict:
 		"filters": knowledge_filters(item.item_metadata),
 		"createdAt": item.created_at.isoformat(),
 		"updatedAt": item.updated_at.isoformat(),
+		"deletedAt": item.deleted_at.isoformat() if item.deleted_at else None,
 		"downloadUrl": f"{settings.api_prefix}/knowledge/{item.id}/file",
 		"originalDownloadUrl": f"{settings.api_prefix}/knowledge/{item.id}/file?original=true" if item.storage_key or item.storage_path or item.source_file_id else None,
 	}
 
 
-def owned_knowledge_item(db: Session, item_id: str, user_id: str) -> KnowledgeItem:
-	item = db.scalar(select(KnowledgeItem).where(KnowledgeItem.id == item_id, KnowledgeItem.user_id == user_id))
+def owned_knowledge_item(db: Session, item_id: str, user_id: str, include_deleted: bool = False) -> KnowledgeItem:
+	statement = select(KnowledgeItem).where(KnowledgeItem.id == item_id, KnowledgeItem.user_id == user_id)
+	if not include_deleted:
+		statement = statement.where(KnowledgeItem.deleted_at.is_(None))
+	item = db.scalar(statement)
 	if item is None:
 		raise AppError(404, "KNOWLEDGE_NOT_FOUND", "Элемент базы знаний не найден")
 	return item
@@ -250,7 +255,10 @@ def list_knowledge_items(
 	user: User = Depends(get_current_user),
 	db: Session = Depends(get_db),
 ):
-	statement = select(KnowledgeItem).where(KnowledgeItem.user_id == user.id)
+	statement = select(KnowledgeItem).where(
+		KnowledgeItem.user_id == user.id,
+		KnowledgeItem.deleted_at.is_(None),
+	)
 	if search.strip():
 		for term in search.split():
 			statement = statement.where(_knowledge_search_condition(db, term))
@@ -353,7 +361,11 @@ async def upload_knowledge_file(
 	if extracted.status not in {"ready", "empty", "ocr_unavailable"}:
 		raise AppError(422, "FILE_PROCESSING_FAILED", f"Не удалось обработать файл {name}")
 	checksum = hashlib.sha256(content).hexdigest()
-	for existing in db.scalars(select(KnowledgeItem).where(KnowledgeItem.user_id == user.id, KnowledgeItem.source_type == "uploaded_file")):
+	for existing in db.scalars(select(KnowledgeItem).where(
+		KnowledgeItem.user_id == user.id,
+		KnowledgeItem.source_type == "uploaded_file",
+		KnowledgeItem.deleted_at.is_(None),
+	)):
 		if (existing.item_metadata or {}).get("sha256") == checksum:
 			raise AppError(409, "KNOWLEDGE_DUPLICATE", "Такой файл уже добавлен в базу знаний")
 	item = KnowledgeItem(
@@ -389,8 +401,45 @@ async def upload_knowledge_file(
 	return {"item": knowledge_payload(item)}
 
 
+async def _persist_attachment_copy(
+	db: Session,
+	item: KnowledgeItem,
+	attachment: Attachment,
+	commit: bool = True,
+) -> str | None:
+	if item.storage_key or item.storage_path:
+		if commit:
+			db.commit()
+		return None
+	storage = get_file_storage()
+	storage_key: str | None = None
+	try:
+		content = (
+			await storage.get(attachment.storage_key)
+			if attachment.storage_key
+			else await asyncio.to_thread(Path(attachment.storage_path).read_bytes)
+		)
+		storage_key = build_storage_key(item.user_id, "knowledge", item.id)
+		await storage.save(storage_key, content, attachment.content_type)
+		item.storage_key = storage_key
+		if commit:
+			db.commit()
+		return storage_key
+	except (FileNotFoundError, OSError) as error:
+		db.rollback()
+		raise AppError(404, "ATTACHMENT_MISSING", "Файл отсутствует в хранилище") from error
+	except Exception:
+		db.rollback()
+		if storage_key:
+			try:
+				await storage.delete(storage_key)
+			except Exception:
+				logger.exception("Knowledge attachment cleanup failed: storage_key=%s", storage_key)
+		raise
+
+
 @router.post("/attachments/{attachment_id}")
-def save_attachment_to_knowledge(
+async def save_attachment_to_knowledge(
 	attachment_id: str,
 	payload: KnowledgeAttachmentPayload,
 	user: User = Depends(get_current_user),
@@ -408,6 +457,10 @@ def save_attachment_to_knowledge(
 		KnowledgeItem.source_file_id == attachment.id,
 	))
 	if existing is not None:
+		if existing.deleted_at is not None:
+			existing.deleted_at = None
+			existing.updated_at = utc_now()
+		await _persist_attachment_copy(db, existing, attachment)
 		return {"item": knowledge_payload(existing), "created": False}
 	if not attachment.extracted_text.strip():
 		raise AppError(422, "EMPTY_KNOWLEDGE_FILE", "Пустой файл нельзя добавить в базу знаний")
@@ -430,20 +483,25 @@ def save_attachment_to_knowledge(
 	)
 	db.add(item)
 	try:
-		db.commit()
-	except IntegrityError as error:
+		db.flush()
+	except IntegrityError:
 		db.rollback()
 		existing = db.scalar(select(KnowledgeItem).where(
 			KnowledgeItem.user_id == user.id, KnowledgeItem.source_file_id == attachment.id,
 		))
 		if existing is None:
 			raise
+		if existing.deleted_at is not None:
+			existing.deleted_at = None
+			existing.updated_at = utc_now()
+		await _persist_attachment_copy(db, existing, attachment)
 		return {"item": knowledge_payload(existing), "created": False}
+	await _persist_attachment_copy(db, item, attachment)
 	return {"item": knowledge_payload(item), "created": True}
 
 
 @router.post("/messages/{message_id}")
-def save_rated_message(message_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def save_rated_message(message_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	message = db.scalar(
 		select(Message)
 		.join(Conversation, Conversation.id == Message.conversation_id)
@@ -471,8 +529,10 @@ def save_rated_message(message_id: str, user: User = Depends(get_current_user), 
 		message_item.content = message.content
 		message_item.rating = rating.score
 		message_item.is_active = True
+		message_item.deleted_at = None
 		message_item.updated_at = utc_now()
 	items.append(message_item)
+	file_copies: list[tuple[KnowledgeItem, Attachment]] = []
 	for attachment in message.attachments:
 		file_item = db.scalar(select(KnowledgeItem).where(KnowledgeItem.user_id == user.id, KnowledgeItem.source_file_id == attachment.id))
 		if file_item is None:
@@ -491,9 +551,127 @@ def save_rated_message(message_id: str, user: User = Depends(get_current_user), 
 		else:
 			file_item.rating = rating.score
 			file_item.is_active = True
+			file_item.deleted_at = None
+			file_item.updated_at = utc_now()
 		items.append(file_item)
-	db.commit()
+		file_copies.append((file_item, attachment))
+	copied_storage_keys: list[str] = []
+	try:
+		db.flush()
+		for file_item, attachment in file_copies:
+			storage_key = await _persist_attachment_copy(db, file_item, attachment, commit=False)
+			if storage_key:
+				copied_storage_keys.append(storage_key)
+		db.commit()
+	except Exception:
+		db.rollback()
+		storage = get_file_storage()
+		for storage_key in copied_storage_keys:
+			try:
+				await storage.delete(storage_key)
+			except Exception:
+				logger.exception("Rated Knowledge cleanup failed: storage_key=%s", storage_key)
+		raise
 	return {"items": [knowledge_payload(item) for item in items]}
+
+
+async def permanently_delete_knowledge_item(db: Session, item: KnowledgeItem) -> None:
+	storage_path = Path(item.storage_path) if item.storage_path else None
+	storage_key = item.storage_key
+	storage = get_file_storage()
+	file_backup: bytes | None = None
+	file_removed = False
+	try:
+		if storage_key:
+			try:
+				file_backup = await storage.get(storage_key)
+			except (FileNotFoundError, OSError):
+				file_backup = None
+			await storage.delete(storage_key)
+			file_removed = True
+		elif storage_path is not None and storage_path.exists():
+			file_backup = await asyncio.to_thread(storage_path.read_bytes)
+			await asyncio.to_thread(storage_path.unlink, missing_ok=True)
+			file_removed = True
+	except Exception as error:
+		logger.exception("Knowledge file deletion failed; preserving database item: item_id=%s", item.id)
+		raise AppError(503, "KNOWLEDGE_FILE_DELETE_FAILED", "Не удалось удалить файл. Запись сохранена, повторите попытку.") from error
+	try:
+		db.delete(item)
+		db.commit()
+	except Exception:
+		db.rollback()
+		if file_removed and file_backup is not None:
+			try:
+				if storage_key:
+					await storage.save(storage_key, file_backup, item.mime_type)
+				elif storage_path is not None:
+					await asyncio.to_thread(storage_path.write_bytes, file_backup)
+			except Exception:
+				logger.critical("Knowledge file restore failed after database rollback: item_id=%s", item.id, exc_info=True)
+		raise
+
+
+async def purge_expired_knowledge_items(db: Session, now: datetime | None = None) -> None:
+	cutoff = (now or utc_now()) - TRASH_RETENTION
+	item_ids = list(db.scalars(select(KnowledgeItem.id).where(
+		KnowledgeItem.deleted_at.is_not(None),
+		KnowledgeItem.deleted_at <= cutoff,
+	)))
+	for item_id in item_ids:
+		item = db.get(KnowledgeItem, item_id)
+		if item is None:
+			continue
+		try:
+			await permanently_delete_knowledge_item(db, item)
+		except Exception:
+			logger.exception("Expired Knowledge cleanup failed: item_id=%s", item_id)
+
+
+@router.get("/trash")
+def list_deleted_knowledge_items(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	items = list(db.scalars(select(KnowledgeItem).where(
+		KnowledgeItem.user_id == user.id,
+		KnowledgeItem.deleted_at.is_not(None),
+	).order_by(KnowledgeItem.deleted_at.desc())))
+	return {"items": [knowledge_payload(item) for item in items]}
+
+
+@router.post("/trash/{item_id}/restore")
+def restore_knowledge_item(item_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	item = owned_knowledge_item(db, item_id, user.id, include_deleted=True)
+	if item.deleted_at is None:
+		raise AppError(409, "KNOWLEDGE_NOT_DELETED", "Запись не находится в корзине")
+	item.deleted_at = None
+	item.updated_at = utc_now()
+	db.commit()
+	return {"item": knowledge_payload(item)}
+
+
+@router.delete("/trash", status_code=204)
+async def empty_knowledge_trash(user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	item_ids = list(db.scalars(select(KnowledgeItem.id).where(
+		KnowledgeItem.user_id == user.id,
+		KnowledgeItem.deleted_at.is_not(None),
+	)))
+	for item_id in item_ids:
+		item = db.get(KnowledgeItem, item_id)
+		if item is not None:
+			await permanently_delete_knowledge_item(db, item)
+	return Response(status_code=204)
+
+
+@router.delete("/trash/{item_id}", status_code=204)
+async def permanently_delete_knowledge_item_endpoint(
+	item_id: str,
+	user: User = Depends(get_current_user),
+	db: Session = Depends(get_db),
+):
+	item = owned_knowledge_item(db, item_id, user.id, include_deleted=True)
+	if item.deleted_at is None:
+		raise AppError(409, "KNOWLEDGE_NOT_DELETED", "Сначала переместите запись в корзину")
+	await permanently_delete_knowledge_item(db, item)
+	return Response(status_code=204)
 
 
 @router.get("/{item_id}")
@@ -522,42 +700,11 @@ def update_knowledge_item(item_id: str, payload: KnowledgeUpdatePayload, user: U
 
 
 @router.delete("/{item_id}", status_code=204)
-async def delete_knowledge_item(item_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def delete_knowledge_item(item_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	item = owned_knowledge_item(db, item_id, user.id)
-	storage_path = Path(item.storage_path) if item.storage_path else None
-	storage_key = item.storage_key
-	storage = get_file_storage()
-	file_backup: bytes | None = None
-	file_removed = False
-	try:
-		if storage_key:
-			try:
-				file_backup = await storage.get(storage_key)
-			except (FileNotFoundError, OSError):
-				file_backup = None
-			await storage.delete(storage_key)
-			file_removed = True
-		elif storage_path is not None and storage_path.exists():
-			file_backup = await asyncio.to_thread(storage_path.read_bytes)
-			await asyncio.to_thread(storage_path.unlink, missing_ok=True)
-			file_removed = True
-	except Exception as error:
-		logger.exception("Knowledge file deletion failed; preserving database item: item_id=%s", item_id)
-		raise AppError(503, "KNOWLEDGE_FILE_DELETE_FAILED", "Не удалось удалить файл. Запись сохранена, повторите попытку.") from error
-	try:
-		db.delete(item)
-		db.commit()
-	except Exception:
-		db.rollback()
-		if file_removed and file_backup is not None:
-			try:
-				if storage_key:
-					await storage.save(storage_key, file_backup, item.mime_type)
-				elif storage_path is not None:
-					await asyncio.to_thread(storage_path.write_bytes, file_backup)
-			except Exception:
-				logger.critical("Knowledge file restore failed after database rollback: item_id=%s", item_id, exc_info=True)
-		raise
+	item.deleted_at = utc_now()
+	item.updated_at = utc_now()
+	db.commit()
 	return Response(status_code=204)
 
 

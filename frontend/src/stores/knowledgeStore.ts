@@ -21,6 +21,7 @@ function itemFilters(item: KnowledgeItem): KnowledgeFilters {
 
 type KnowledgeStore = {
 	items: KnowledgeItem[];
+	deletedItems: KnowledgeItem[];
 	nextCursor: string | null;
 	search: string;
 	isLoading: boolean;
@@ -40,6 +41,9 @@ type KnowledgeStore = {
 	file: File | null;
 	pendingItemIds: Set<string>;
 	setItems: (value: StateValue<KnowledgeItem[]>) => void;
+	setDeletedItems: (value: StateValue<KnowledgeItem[]>) => void;
+	upsertItem: (item: KnowledgeItem) => void;
+	removeDeletedItem: (id: string) => void;
 	setNextCursor: (cursor: string | null) => void;
 	setSearch: (search: string) => void;
 	setLoading: (loading: boolean) => void;
@@ -66,6 +70,7 @@ type KnowledgeStore = {
 
 export const useKnowledgeStore = create<KnowledgeStore>((set) => ({
 	items: [],
+	deletedItems: [],
 	nextCursor: null,
 	search: '',
 	isLoading: true,
@@ -85,6 +90,9 @@ export const useKnowledgeStore = create<KnowledgeStore>((set) => ({
 	file: null,
 	pendingItemIds: new Set(),
 	setItems: (value) => set((state) => ({ items: resolveStateValue(value, state.items) })),
+	setDeletedItems: (value) => set((state) => ({ deletedItems: resolveStateValue(value, state.deletedItems) })),
+	upsertItem: (item) => set((state) => ({ items: [item, ...state.items.filter((entry) => entry.id !== item.id)] })),
+	removeDeletedItem: (id) => set((state) => ({ deletedItems: state.deletedItems.filter((item) => item.id !== id) })),
 	setNextCursor: (nextCursor) => set({ nextCursor }),
 	setSearch: (search) => set({ search }),
 	setLoading: (isLoading) => set({ isLoading }),
@@ -141,6 +149,7 @@ export const useKnowledgeStore = create<KnowledgeStore>((set) => ({
 	reset: () =>
 		set({
 			items: [],
+			deletedItems: [],
 			nextCursor: null,
 			search: '',
 			isLoading: true,

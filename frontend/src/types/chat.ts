@@ -91,6 +91,7 @@ export type ConversationSummary = {
 	title: string;
 	createdAt: string;
 	updatedAt: string;
+	deletedAt?: string | null;
 };
 
 export type Conversation = ConversationSummary & {
@@ -119,6 +120,7 @@ export type KnowledgeItem = {
 	filters: KnowledgeFilters;
 	createdAt: string;
 	updatedAt: string;
+	deletedAt?: string | null;
 	downloadUrl?: string | null;
 	originalDownloadUrl?: string | null;
 };

@@ -443,6 +443,109 @@
 		font-size: 11px;
 	}
 
+	&__trash {
+		display: grid;
+		gap: 12px;
+	}
+
+	&__trash-tabs {
+		display: grid;
+		grid-template-columns: 1fr 1fr;
+		gap: 6px;
+	}
+
+	&__trash-tab {
+		font-size: 13px;
+	}
+
+	&__trash-tab--active {
+		border-color: var(--color-accent) !important;
+
+		color: var(--color-accent) !important;
+		background: var(--color-accent-soft) !important;
+	}
+
+	&__trash-note,
+	&__trash-empty,
+	&__trash-error {
+		margin: 0;
+
+		font-size: 13px;
+	}
+
+	&__trash-error {
+		color: var(--color-error);
+	}
+
+	&__trash-pane {
+		display: grid;
+		gap: 10px;
+	}
+
+	&__trash-toolbar {
+		display: flex;
+		justify-content: flex-end;
+	}
+
+	&__trash-list {
+		display: grid;
+		gap: 8px;
+
+		margin: 0;
+		padding: 0;
+
+		list-style: none;
+	}
+
+	&__trash-list li {
+		display: grid;
+		gap: 10px;
+
+		padding: 12px;
+
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-medium);
+
+		background: var(--color-bg-elevated);
+	}
+
+	&__trash-copy {
+		display: grid;
+		gap: 3px;
+	}
+
+	&__trash-copy strong {
+		color: var(--color-text-primary);
+	}
+
+	&__trash-copy small {
+		color: var(--color-text-secondary);
+	}
+
+	&__trash-actions {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 7px;
+	}
+
+	&__trash button {
+		display: inline-flex;
+		align-items: center;
+		gap: 7px;
+	}
+
+	&__trash-danger {
+		border-color: var(--color-error) !important;
+
+		color: var(--color-error) !important;
+		background: transparent !important;
+	}
+
+	&__trash-danger:hover:not(:disabled) {
+		color: var(--color-on-accent) !important;
+		background: var(--color-error) !important;
+	}
+
 	&__visually-hidden {
 		position: absolute;
 
