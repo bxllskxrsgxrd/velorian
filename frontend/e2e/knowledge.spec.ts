@@ -56,7 +56,8 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await dialog.getByLabel('Содержимое').fill('Текст для внутренней базы знаний');
 
-	await dialog.getByRole('button', { name: 'Создать новый подход' }).click();
+	// Новое название кнопки.
+	await dialog.getByRole('button', { name: 'Новый подход' }).click();
 
 	await dialog.getByLabel('Название нового подхода').fill('UGC-разбор');
 
@@ -64,7 +65,8 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await dialog.getByRole('button', { name: 'Поставить рейтинг 3 из 5' }).click();
 
-	await dialog.getByRole('button', { name: 'Добавить' }).click();
+	// Новое название confirm-кнопки.
+	await dialog.getByRole('button', { name: 'Добавить данные' }).click();
 
 	await expect(page.getByText('Проверенный оффер', { exact: true })).toBeVisible();
 
@@ -111,7 +113,6 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(bulkBar).not.toBeVisible();
 
-	// Проверяем сохранение после reload.
 	await page.reload();
 
 	await expect(page.getByRole('img', { name: /Рейтинг Проверенный оффер: 3 из 5/ })).toBeVisible();
@@ -141,7 +142,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(editDialog.locator('.rating__star--inactive')).toHaveCount(2);
 
-	// Проверяем новый таб предпросмотра.
+	// Предпросмотр.
 	await previewTab.click();
 
 	await expect(previewTab).toHaveAttribute('aria-selected', 'true');
@@ -156,7 +157,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(preview.getByText('Подход · UGC-разбор')).toBeVisible();
 
-	// Незаполненные метаданные не должны отображаться.
+	// Незаполненные метаданные не отображаются.
 	await expect(preview.getByText(/ГЕО ·/)).toHaveCount(0);
 
 	await expect(preview.getByText(/Селеба ·/)).toHaveCount(0);
@@ -165,7 +166,6 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(preview.getByText(/Новостник ·/)).toHaveCount(0);
 
-	// Возвращаемся к редактированию.
 	await editTab.click();
 
 	await expect(editTab).toHaveAttribute('aria-selected', 'true');
@@ -174,7 +174,6 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(editDialog.locator('.rating__star--active')).toHaveCount(5);
 
-	// Новое название confirm-кнопки.
 	await editDialog.getByRole('button', { name: 'Сохранить изменения' }).click();
 
 	await expect(page.getByRole('img', { name: /Рейтинг Проверенный оффер: 5 из 5/ })).toBeVisible();
@@ -187,7 +186,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(page.getByText('5/5', { exact: true })).toHaveCount(0);
 
-	// Проверяем переключатель использования.
+	// Переключатель использования.
 	await page.locator('label.checkbox').filter({ hasText: 'Использовать' }).click();
 
 	await expect(page.getByRole('checkbox', { name: 'Использовать' })).not.toBeChecked();
@@ -240,7 +239,6 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(activeSelect).toHaveValue('inactive');
 
-	// Проверяем URL фильтров.
 	await expect
 		.poll(() => {
 			const url = new URL(page.url());
@@ -350,7 +348,8 @@ test('agent can browse and search the current user knowledge through chat', asyn
 
 	await dialog.getByLabel('Содержимое').fill('Для health-офферов используем curiosity angle.');
 
-	await dialog.getByRole('button', { name: 'Добавить' }).click();
+	// Здесь тоже новое название confirm-кнопки.
+	await dialog.getByRole('button', { name: 'Добавить данные' }).click();
 
 	await page.getByRole('button', { name: 'Новый чат' }).click();
 

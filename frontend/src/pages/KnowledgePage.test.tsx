@@ -35,11 +35,7 @@ const api = vi.hoisted(() => ({
 
 vi.mock('../api/chatApi', () => api);
 
-/**
- * MarkdownEditor тестируется отдельно.
- * Здесь достаточно простого textarea, чтобы тесты KnowledgePage
- * не зависели от lazy/Suspense и внутренней реализации редактора.
- */
+// Нужен только для таба предпросмотра.
 vi.mock('../components/MarkdownEditor/MarkdownEditor', () => ({
 	default: ({
 		value,
@@ -96,7 +92,10 @@ function renderKnowledge(initialEntry = '/knowledge') {
 		<MemoryRouter initialEntries={[initialEntry]}>
 			<ToastProvider>
 				<KnowledgePage
-					user={{ id: 'user', email: 'user@example.com' }}
+					user={{
+						id: 'user',
+						email: 'user@example.com',
+					}}
 					onLogout={vi.fn().mockResolvedValue(undefined)}
 				/>
 
@@ -129,8 +128,10 @@ describe('KnowledgePage', () => {
 
 		api.emptyConversationTrash.mockResolvedValue(undefined);
 		api.emptyKnowledgeTrash.mockResolvedValue(undefined);
+
 		api.permanentlyDeleteConversation.mockResolvedValue(undefined);
 		api.permanentlyDeleteKnowledgeItem.mockResolvedValue(undefined);
+
 		api.restoreConversation.mockResolvedValue(undefined);
 		api.restoreKnowledgeItem.mockResolvedValue(undefined);
 
@@ -143,17 +144,41 @@ describe('KnowledgePage', () => {
 
 		await screen.findByText('Сохранённых данных пока нет');
 
-		fireEvent.click(screen.getByRole('button', { name: 'Добавить данные' }));
+		fireEvent.click(
+			screen.getByRole('button', {
+				name: 'Добавить данные',
+			}),
+		);
 
 		const dialog = screen.getByRole('dialog');
 
-		fireEvent.change(within(dialog).getByRole('textbox', { name: 'Название' }), {
-			target: { value: 'Оффер' },
-		});
+		expect(
+			within(dialog).getByRole('tab', {
+				name: 'Редактирование',
+			}),
+		).toHaveAttribute('aria-selected', 'true');
 
-		fireEvent.change(await within(dialog).findByLabelText('Редактор содержимого'), {
-			target: { value: 'Проверенный текст' },
-		});
+		fireEvent.change(
+			within(dialog).getByRole('textbox', {
+				name: 'Название',
+			}),
+			{
+				target: {
+					value: 'Оффер',
+				},
+			},
+		);
+
+		fireEvent.change(
+			within(dialog).getByRole('textbox', {
+				name: 'Содержимое',
+			}),
+			{
+				target: {
+					value: 'Проверенный текст',
+				},
+			},
+		);
 
 		fireEvent.click(
 			within(dialog).getByRole('button', {
@@ -163,7 +188,7 @@ describe('KnowledgePage', () => {
 
 		fireEvent.click(
 			within(dialog).getByRole('button', {
-				name: 'Добавить',
+				name: 'Добавить данные',
 			}),
 		);
 
@@ -176,7 +201,67 @@ describe('KnowledgePage', () => {
 			});
 		});
 
-		expect(await screen.findByText('Оффер', { exact: true })).toBeInTheDocument();
+		expect(
+			await screen.findByText('Оффер', {
+				exact: true,
+			}),
+		).toBeInTheDocument();
+	});
+
+	it('shows manual data in add preview before saving', async () => {
+		renderKnowledge();
+
+		await screen.findByText('Сохранённых данных пока нет');
+
+		fireEvent.click(
+			screen.getByRole('button', {
+				name: 'Добавить данные',
+			}),
+		);
+
+		const dialog = screen.getByRole('dialog');
+
+		fireEvent.change(
+			within(dialog).getByRole('textbox', {
+				name: 'Название',
+			}),
+			{
+				target: {
+					value: 'Новый оффер',
+				},
+			},
+		);
+
+		fireEvent.change(
+			within(dialog).getByRole('textbox', {
+				name: 'Содержимое',
+			}),
+			{
+				target: {
+					value: 'Текст для предпросмотра',
+				},
+			},
+		);
+
+		const previewTab = within(dialog).getByRole('tab', {
+			name: 'Предпросмотр',
+		});
+
+		fireEvent.click(previewTab);
+
+		expect(previewTab).toHaveAttribute('aria-selected', 'true');
+
+		const preview = within(dialog).getByRole('tabpanel');
+
+		expect(
+			within(preview).getByRole('heading', {
+				name: 'Новый оффер',
+			}),
+		).toBeInTheDocument();
+
+		expect(within(preview).getByText(/Добавлено вручную ·/)).toBeInTheDocument();
+
+		expect(await within(preview).findByLabelText('Предпросмотр содержимого')).toHaveValue('Текст для предпросмотра');
 	});
 
 	it('combines all four metadata filters in the list request', async () => {
@@ -285,6 +370,10 @@ describe('KnowledgePage', () => {
 			}),
 		).toHaveAttribute('aria-pressed', 'true');
 
+		expect(dialog.querySelectorAll('.rating__star--active')).toHaveLength(4);
+
+		expect(dialog.querySelectorAll('.rating__star--inactive')).toHaveLength(1);
+
 		fireEvent.click(
 			within(dialog).getByRole('button', {
 				name: 'Поставить рейтинг 5 из 5',
@@ -314,7 +403,7 @@ describe('KnowledgePage', () => {
 		).toBeInTheDocument();
 	});
 
-	it('switches to preview and shows only filled metadata', async () => {
+	it('switches to edit preview and shows only filled metadata', async () => {
 		const stored = {
 			...item,
 			rating: 4,
@@ -345,27 +434,42 @@ describe('KnowledgePage', () => {
 
 		const dialog = screen.getByRole('dialog');
 
+		const editTab = within(dialog).getByRole('tab', {
+			name: 'Редактирование',
+		});
+
 		const previewTab = within(dialog).getByRole('tab', {
 			name: 'Предпросмотр',
 		});
 
+		expect(editTab).toHaveAttribute('aria-selected', 'true');
 		expect(previewTab).toHaveAttribute('aria-selected', 'false');
 
 		fireEvent.click(previewTab);
 
+		expect(editTab).toHaveAttribute('aria-selected', 'false');
 		expect(previewTab).toHaveAttribute('aria-selected', 'true');
 
 		const preview = within(dialog).getByRole('tabpanel');
 
-		expect(within(preview).getByRole('heading', { name: 'Оффер' })).toBeInTheDocument();
+		expect(
+			within(preview).getByRole('heading', {
+				name: 'Оффер',
+			}),
+		).toBeInTheDocument();
+
 		expect(within(preview).getByText('Проверенный текст')).toBeInTheDocument();
 
 		expect(within(preview).getByText('ГЕО · UK')).toBeInTheDocument();
+
 		expect(within(preview).getByText('Оффер · Pixum AI')).toBeInTheDocument();
 
 		expect(within(preview).queryByText(/Селеба ·/)).not.toBeInTheDocument();
+
 		expect(within(preview).queryByText(/Новостник ·/)).not.toBeInTheDocument();
+
 		expect(within(preview).queryByText(/Подход ·/)).not.toBeInTheDocument();
+
 		expect(within(preview).queryByText('Без подхода')).not.toBeInTheDocument();
 	});
 });
