@@ -649,7 +649,11 @@
 		width: 32px;
 		height: 32px;
 		flex: 0 0 32px;
-
+		padding: 0;
+		border: 0;
+		border-radius: var(--radius-medium);
+		color: var(--color-text-secondary);
+		background: transparent;
 		font-size: 28px;
 		font-weight: 300;
 		line-height: 1;
@@ -919,18 +923,20 @@
 		font-size: 13px;
 	}
 
-	.knowledge-edit-modal__switch.knowledge-card__active-toggle {
+	.knowledge-edit-modal__switch {
 		width: 100%;
 		min-height: 30px;
-		display: flex;
-		align-items: center;
-		justify-content: space-between;
+		justify-content: flex-start;
 		flex-direction: row-reverse;
 		gap: 12px;
 		padding-left: 20px;
 		border-left: 1px solid var(--color-border);
 		color: var(--color-text-primary);
 		font-size: 13px;
+	}
+
+	.knowledge-edit-modal__switch .checkbox__control {
+		margin-left: auto;
 	}
 
 	.knowledge-edit-modal__preview {

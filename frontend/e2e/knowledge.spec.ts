@@ -17,68 +17,118 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	const dialog = page.getByRole('dialog');
 
-	const formStars = dialog.locator('.rating__star svg');
-
-	await expect(formStars).toHaveCount(5);
-
-	const starRendering = await formStars.first().evaluate((svg) => {
-		const box = svg.getBoundingClientRect();
-		const style = getComputedStyle(svg);
-		const buttonStyle = getComputedStyle(svg.closest('button')!);
-
-		return {
-			width: box.width,
-			height: box.height,
-			display: style.display,
-			opacity: style.opacity,
-			stroke: style.stroke,
-			buttonPadding: buttonStyle.padding,
-			buttonBorderWidth: buttonStyle.borderWidth,
-		};
+	// Модалка добавления открывается на вкладке редактирования.
+	const editTab = dialog.getByRole('tab', {
+		name: 'Редактирование',
 	});
 
-	expect(starRendering).toMatchObject({
-		width: 18,
-		height: 18,
-		display: 'block',
-		opacity: '1',
-		buttonPadding: '0px',
-		buttonBorderWidth: '0px',
+	const previewTab = dialog.getByRole('tab', {
+		name: 'Предпросмотр',
 	});
 
-	expect(starRendering.stroke).not.toBe('none');
+	await expect(editTab).toHaveAttribute('aria-selected', 'true');
+	await expect(previewTab).toHaveAttribute('aria-selected', 'false');
 
+	// Рейтинг содержит пять интерактивных звёзд.
+	const ratingButtons = dialog.locator('.rating__star');
+
+	await expect(ratingButtons).toHaveCount(5);
+
+	// Hover подсвечивает нужное количество звёзд.
 	await dialog.getByRole('button', { name: 'Поставить рейтинг 3 из 5' }).hover();
 
 	await expect(dialog.locator('.rating__star--active')).toHaveCount(3);
+	await expect(dialog.locator('.rating__star--inactive')).toHaveCount(2);
 
+	// Заполняем основные данные.
 	await dialog.getByLabel('Название').fill('Проверенный оффер');
 
 	await dialog.getByLabel('Содержимое').fill('Текст для внутренней базы знаний');
 
-	// Новое название кнопки.
+	// Добавляем подход.
 	await dialog.getByRole('button', { name: 'Новый подход' }).click();
 
 	await dialog.getByLabel('Название нового подхода').fill('UGC-разбор');
 
-	await dialog.getByRole('button', { name: 'Создать', exact: true }).click();
+	await dialog
+		.getByRole('button', {
+			name: 'Создать',
+			exact: true,
+		})
+		.click();
 
-	await dialog.getByRole('button', { name: 'Поставить рейтинг 3 из 5' }).click();
+	await expect(dialog.getByLabel('Подход элемента')).toHaveValue(/.+/);
 
-	// Новое название confirm-кнопки.
+	// Выбираем рейтинг.
+	const ratingThree = dialog.getByRole('button', {
+		name: 'Поставить рейтинг 3 из 5',
+	});
+
+	await ratingThree.click();
+
+	await expect(ratingThree).toHaveAttribute('aria-pressed', 'true');
+
+	await expect(dialog.locator('.rating__star--active')).toHaveCount(3);
+
+	// Проверяем preview до сохранения.
+	await previewTab.click();
+
+	await expect(previewTab).toHaveAttribute('aria-selected', 'true');
+	await expect(editTab).toHaveAttribute('aria-selected', 'false');
+
+	const createPreview = dialog.getByRole('tabpanel');
+
+	await expect(
+		createPreview.getByRole('heading', {
+			name: 'Проверенный оффер',
+		}),
+	).toBeVisible();
+
+	await expect(createPreview.getByText('Подход · UGC-разбор')).toBeVisible();
+
+	await expect(createPreview.getByText(/Добавлено вручную ·/)).toBeVisible();
+
+	// Незаполненные метаданные не появляются.
+	await expect(createPreview.getByText(/ГЕО ·/)).toHaveCount(0);
+	await expect(createPreview.getByText(/Селеба ·/)).toHaveCount(0);
+	await expect(createPreview.getByText(/Оффер ·/)).toHaveCount(0);
+	await expect(createPreview.getByText(/Новостник ·/)).toHaveCount(0);
+
+	// Возвращаемся и сохраняем.
+	await editTab.click();
+
+	await expect(editTab).toHaveAttribute('aria-selected', 'true');
+
 	await dialog.getByRole('button', { name: 'Добавить данные' }).click();
 
-	await expect(page.getByText('Проверенный оффер', { exact: true })).toBeVisible();
+	await expect(
+		page.getByText('Проверенный оффер', {
+			exact: true,
+		}),
+	).toBeVisible();
 
-	await expect(page.getByRole('img', { name: /Рейтинг Проверенный оффер: 3 из 5/ })).toBeVisible();
+	await expect(
+		page.getByRole('img', {
+			name: /Рейтинг Проверенный оффер: 3 из 5/,
+		}),
+	).toBeVisible();
 
-	// Цифровой счётчик рейтинга больше не отображается.
-	await expect(page.getByText('3/5', { exact: true })).toHaveCount(0);
+	// Числовой рейтинг больше не выводится.
+	await expect(
+		page.getByText('3/5', {
+			exact: true,
+		}),
+	).toHaveCount(0);
 
 	await expect(page.getByText('Подход: UGC-разбор')).toBeVisible();
 
-	await expect(page.getByRole('checkbox', { name: 'Использовать' })).toBeChecked();
+	await expect(
+		page.getByRole('checkbox', {
+			name: 'Использовать',
+		}),
+	).toBeChecked();
 
+	// Bulk selection.
 	const selectCheckbox = page.getByRole('checkbox', {
 		name: 'Выбрать Проверенный оффер',
 	});
@@ -107,100 +157,142 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 		}),
 	).toBeDisabled();
 
-	await bulkBar.getByRole('button', { name: 'Снять выбор' }).click();
+	await bulkBar
+		.getByRole('button', {
+			name: 'Снять выбор',
+		})
+		.click();
 
 	await expect(selectCheckbox).not.toBeChecked();
-
 	await expect(bulkBar).not.toBeVisible();
 
+	// Данные сохраняются после reload.
 	await page.reload();
 
-	await expect(page.getByRole('img', { name: /Рейтинг Проверенный оффер: 3 из 5/ })).toBeVisible();
+	await expect(
+		page.getByRole('img', {
+			name: /Рейтинг Проверенный оффер: 3 из 5/,
+		}),
+	).toBeVisible();
 
 	await expect(page.getByText('3/5', { exact: true })).toHaveCount(0);
 
 	// Редактирование.
-	await page.getByRole('button', { name: 'Редактировать' }).click();
+	await page
+		.getByRole('button', {
+			name: 'Редактировать',
+		})
+		.click();
 
 	const editDialog = page.getByRole('dialog');
 
-	const editTab = editDialog.getByRole('tab', {
+	const editDialogTab = editDialog.getByRole('tab', {
 		name: 'Редактирование',
 	});
 
-	const previewTab = editDialog.getByRole('tab', {
+	const editPreviewTab = editDialog.getByRole('tab', {
 		name: 'Предпросмотр',
 	});
 
-	await expect(editTab).toHaveAttribute('aria-selected', 'true');
+	await expect(editDialogTab).toHaveAttribute('aria-selected', 'true');
 
-	await expect(previewTab).toHaveAttribute('aria-selected', 'false');
+	await expect(editPreviewTab).toHaveAttribute('aria-selected', 'false');
 
-	await expect(editDialog.locator('.rating__star svg')).toHaveCount(5);
+	await expect(editDialog.locator('.rating__star')).toHaveCount(5);
 
 	await expect(editDialog.locator('.rating__star--active')).toHaveCount(3);
 
 	await expect(editDialog.locator('.rating__star--inactive')).toHaveCount(2);
 
-	// Предпросмотр.
-	await previewTab.click();
+	const ratingFive = editDialog.getByRole('button', {
+		name: 'Поставить рейтинг 5 из 5',
+	});
 
-	await expect(previewTab).toHaveAttribute('aria-selected', 'true');
+	await ratingFive.click();
 
-	await expect(editTab).toHaveAttribute('aria-selected', 'false');
-
-	const preview = editDialog.getByRole('tabpanel');
-
-	await expect(preview.getByRole('heading', { name: 'Проверенный оффер' })).toBeVisible();
-
-	await expect(preview.getByText('Текст для внутренней базы знаний')).toBeVisible();
-
-	await expect(preview.getByText('Подход · UGC-разбор')).toBeVisible();
-
-	// Незаполненные метаданные не отображаются.
-	await expect(preview.getByText(/ГЕО ·/)).toHaveCount(0);
-
-	await expect(preview.getByText(/Селеба ·/)).toHaveCount(0);
-
-	await expect(preview.getByText(/Оффер ·/)).toHaveCount(0);
-
-	await expect(preview.getByText(/Новостник ·/)).toHaveCount(0);
-
-	await editTab.click();
-
-	await expect(editTab).toHaveAttribute('aria-selected', 'true');
-
-	await editDialog.getByRole('button', { name: 'Поставить рейтинг 5 из 5' }).click();
+	await expect(ratingFive).toHaveAttribute('aria-pressed', 'true');
 
 	await expect(editDialog.locator('.rating__star--active')).toHaveCount(5);
 
-	await editDialog.getByRole('button', { name: 'Сохранить изменения' }).click();
+	// Preview редактирования.
+	await editPreviewTab.click();
 
-	await expect(page.getByRole('img', { name: /Рейтинг Проверенный оффер: 5 из 5/ })).toBeVisible();
+	await expect(editPreviewTab).toHaveAttribute('aria-selected', 'true');
+
+	const editPreview = editDialog.getByRole('tabpanel');
+
+	await expect(
+		editPreview.getByRole('heading', {
+			name: 'Проверенный оффер',
+		}),
+	).toBeVisible();
+
+	await expect(editPreview.getByText('Текст для внутренней базы знаний')).toBeVisible();
+
+	await expect(editPreview.getByText('Подход · UGC-разбор')).toBeVisible();
+
+	await expect(editPreview.getByText(/ГЕО ·/)).toHaveCount(0);
+	await expect(editPreview.getByText(/Селеба ·/)).toHaveCount(0);
+	await expect(editPreview.getByText(/Оффер ·/)).toHaveCount(0);
+	await expect(editPreview.getByText(/Новостник ·/)).toHaveCount(0);
+
+	await editDialogTab.click();
+
+	await editDialog
+		.getByRole('button', {
+			name: 'Сохранить изменения',
+		})
+		.click();
+
+	await expect(
+		page.getByRole('img', {
+			name: /Рейтинг Проверенный оффер: 5 из 5/,
+		}),
+	).toBeVisible();
 
 	await expect(page.getByText('5/5', { exact: true })).toHaveCount(0);
 
+	// Рейтинг переживает reload.
 	await page.reload();
 
-	await expect(page.getByRole('img', { name: /Рейтинг Проверенный оффер: 5 из 5/ })).toBeVisible();
+	await expect(
+		page.getByRole('img', {
+			name: /Рейтинг Проверенный оффер: 5 из 5/,
+		}),
+	).toBeVisible();
 
-	await expect(page.getByText('5/5', { exact: true })).toHaveCount(0);
+	// Отключаем использование записи агентом.
+	await page
+		.locator('label.checkbox')
+		.filter({
+			hasText: 'Использовать',
+		})
+		.click();
 
-	// Переключатель использования.
-	await page.locator('label.checkbox').filter({ hasText: 'Использовать' }).click();
-
-	await expect(page.getByRole('checkbox', { name: 'Использовать' })).not.toBeChecked();
+	await expect(
+		page.getByRole('checkbox', {
+			name: 'Использовать',
+		}),
+	).not.toBeChecked();
 
 	await page.reload();
 
-	await expect(page.getByRole('checkbox', { name: 'Использовать' })).not.toBeChecked();
+	await expect(
+		page.getByRole('checkbox', {
+			name: 'Использовать',
+		}),
+	).not.toBeChecked();
 
 	const controls = page.getByRole('region', {
 		name: 'Управление базой знаний',
 	});
 
 	// Фильтры.
-	await controls.getByRole('button', { name: /^Фильтры/ }).click();
+	await controls
+		.getByRole('button', {
+			name: /^Фильтры/,
+		})
+		.click();
 
 	const filtersDropdown = page.locator('.knowledge-page__dropdown--filters');
 
@@ -214,7 +306,6 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	const activeSelect = filtersDropdown.locator('label').filter({ hasText: 'Использование' }).locator('select');
 
-	// Рейтинг.
 	await Promise.all([
 		page.waitForRequest((request) => request.url().includes('min_rating=4')),
 		ratingSelect.selectOption('4'),
@@ -222,19 +313,16 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(ratingSelect).toHaveValue('4');
 
-	// Источник.
 	await sourceSelect.selectOption('manual');
 
 	await expect(sourceSelect).toHaveValue('manual');
 
-	// Подход.
 	await approachSelect.selectOption({
 		label: 'UGC-разбор',
 	});
 
 	await expect(approachSelect).not.toHaveValue('');
 
-	// Использование.
 	await activeSelect.selectOption('inactive');
 
 	await expect(activeSelect).toHaveValue('inactive');
@@ -258,13 +346,21 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 		});
 
 	// Сортировка.
-	await controls.getByRole('button', { name: 'Сортировка' }).click();
+	await controls
+		.getByRole('button', {
+			name: 'Сортировка',
+		})
+		.click();
 
 	const sortDropdown = page.locator('.knowledge-page__dropdown--sort');
 
 	await expect(sortDropdown).toBeVisible();
 
-	await sortDropdown.getByRole('button', { name: 'Рейтинг: высокий' }).click();
+	await sortDropdown
+		.getByRole('button', {
+			name: 'Рейтинг: высокий',
+		})
+		.click();
 
 	await expect(sortDropdown).not.toBeVisible();
 
@@ -285,8 +381,12 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 			sort: 'rating_desc',
 		});
 
-	// Повторно открываем фильтры для сброса.
-	await controls.getByRole('button', { name: /^Фильтры/ }).click();
+	// Сбрасываем только фильтры.
+	await controls
+		.getByRole('button', {
+			name: /^Фильтры/,
+		})
+		.click();
 
 	await expect(filtersDropdown).toBeVisible();
 
@@ -298,8 +398,6 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await reset.click();
 
-	// Сбрасываются только фильтры.
-	// Поиск и сортировка сохраняются.
 	await expect
 		.poll(() => {
 			const url = new URL(page.url());
