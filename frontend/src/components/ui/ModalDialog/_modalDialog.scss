@@ -19,8 +19,16 @@
 		box-shadow: var(--shadow-surface);
 	}
 
-	h2 { margin: 0 0 14px; font-size: 20px; }
-	&__content { min-height: 0; overflow-y: auto; color: var(--color-text-secondary); @include app-scrollbar; }
+	h2 {
+		margin: 0 0 14px;
+		font-size: 20px;
+	}
+	&__content {
+		min-height: 0;
+		overflow-y: auto;
+		color: var(--color-text-secondary);
+		@include app-scrollbar;
+	}
 	input {
 		width: 100%;
 		padding: 11px 12px;
@@ -29,11 +37,36 @@
 		outline: none;
 		color: var(--color-text-primary);
 		background: var(--color-bg-elevated);
-		&:focus { border-color: var(--color-accent); box-shadow: var(--focus-ring); }
+		&:focus {
+			border-color: var(--color-accent);
+			box-shadow: var(--focus-ring);
+		}
 	}
-	&__actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 20px; }
-	button { padding: 9px 14px; border: 1px solid var(--color-border); border-radius: 10px; color: var(--color-text-primary); background: var(--color-bg-elevated); cursor: pointer; }
-	button:disabled { opacity: .55; cursor: default; }
-	&__confirm { color: var(--color-on-accent) !important; border-color: transparent !important; background: var(--color-accent) !important; }
-	&__confirm--danger { color: #fff !important; background: var(--color-error) !important; }
+	&__actions {
+		display: flex;
+		justify-content: flex-end;
+		gap: 8px;
+		margin-top: 20px;
+	}
+	button:not(.icon-button) {
+		padding: 9px 14px;
+		border: 1px solid var(--color-border);
+		border-radius: 10px;
+		color: var(--color-text-primary);
+		background: var(--color-bg-elevated);
+		cursor: pointer;
+	}
+	button:not(.icon-button):disabled {
+		opacity: 0.55;
+		cursor: default;
+	}
+	&__confirm {
+		color: var(--color-on-accent) !important;
+		border-color: transparent !important;
+		background: var(--color-accent) !important;
+	}
+	&__confirm--danger {
+		color: #fff !important;
+		background: var(--color-error) !important;
+	}
 }

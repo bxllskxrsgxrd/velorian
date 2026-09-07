@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { DeleteAttachmentIcon } from '../icons/AppIcons';
+import { CrossIcon } from '../icons/AppIcons';
 import { DocumentIcon } from '../icons/AppIcons';
 import { IconButton } from '../ui/IconButton/IconButton';
 
@@ -62,7 +62,7 @@ export function AttachmentPreview({ file, onRemove, onOpen }: AttachmentPreviewP
 				}}
 				aria-label="Удалить файл"
 			>
-				<DeleteAttachmentIcon />
+				<CrossIcon />
 			</IconButton>
 		</div>
 	);

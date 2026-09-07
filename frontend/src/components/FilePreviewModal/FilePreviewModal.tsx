@@ -3,12 +3,14 @@ import type { PreviewFile } from '../../types/chat';
 import { getFileCodeLanguage } from '../../utils/codeLanguage';
 import { isTextPreview } from '../../utils/files';
 import { reportError } from '../../utils/reportError';
-import { DeleteAttachmentIcon } from '../icons/AppIcons';
+import { CrossIcon } from '../icons/AppIcons';
 import { IconButton } from '../ui/IconButton/IconButton';
 import './_filePreviewModal.scss';
 import { useFilesStore } from '../../stores/filesStore';
 
-const HighlightedCode = lazy(() => import('../MessageBubble/AssistantMessageContent').then((module) => ({ default: module.HighlightedCode })));
+const HighlightedCode = lazy(() =>
+	import('../MessageBubble/AssistantMessageContent').then((module) => ({ default: module.HighlightedCode })),
+);
 const MarkdownPreview = lazy(() => import('../MessageBubble/AssistantMessageContent'));
 
 type FilePreviewModalProps = {
@@ -65,16 +67,24 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 		if (isText) {
 			const textContent = textPreview?.url === file.url ? textPreview.content : 'Загрузка…';
 			if (isMarkdown) {
-				return <div className="file-preview__markdown"><Suspense fallback={<pre className="file-preview__text">{textContent}</pre>}><MarkdownPreview content={textContent} isStreaming={false} /></Suspense></div>;
+				return (
+					<div className="file-preview__markdown">
+						<Suspense fallback={<pre className="file-preview__text">{textContent}</pre>}>
+							<MarkdownPreview content={textContent} isStreaming={false} />
+						</Suspense>
+					</div>
+				);
 			}
 
 			return (
-				<Suspense fallback={<pre className="file-preview__text">{textContent}</pre>}><HighlightedCode
-					code={textContent}
-					language={getFileCodeLanguage(file.name)}
-					className="file-preview__text"
-					ariaLabel={`Содержимое файла ${file.name}`}
-				/></Suspense>
+				<Suspense fallback={<pre className="file-preview__text">{textContent}</pre>}>
+					<HighlightedCode
+						code={textContent}
+						language={getFileCodeLanguage(file.name)}
+						className="file-preview__text"
+						ariaLabel={`Содержимое файла ${file.name}`}
+					/>
+				</Suspense>
 			);
 		}
 
@@ -96,7 +106,7 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 							}}
 							aria-label="Закрыть превью"
 						>
-							<DeleteAttachmentIcon />
+							<CrossIcon />
 						</IconButton>
 					</div>
 					<div
@@ -122,7 +132,7 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 							}}
 							aria-label="Закрыть превью"
 						>
-							<DeleteAttachmentIcon />
+							<CrossIcon />
 						</IconButton>
 					</div>
 					<div

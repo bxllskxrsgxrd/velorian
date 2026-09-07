@@ -1,5 +1,7 @@
 import type { ReactNode } from 'react';
 import './_modalDialog.scss';
+import { IconButton } from '../IconButton/IconButton';
+import { CrossIcon } from '../../icons/AppIcons';
 
 type ModalDialogProps = {
 	title: string;
@@ -44,15 +46,14 @@ export function ModalDialog({
 							{subtitle && <p className="modal-dialog__subtitle">{subtitle}</p>}
 						</div>
 						{showCloseButton && (
-							<button
+							<IconButton
 								className="modal-dialog__close"
-								type="button"
 								disabled={closeDisabled}
 								onClick={onClose}
 								aria-label="Закрыть"
 							>
-								<span aria-hidden="true">×</span>
-							</button>
+								<CrossIcon />
+							</IconButton>
 						)}
 					</div>
 				) : (
