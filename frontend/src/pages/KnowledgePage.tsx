@@ -25,7 +25,7 @@ import { useKnowledgeStore } from '../stores/knowledgeStore';
 import { useConversationsStore } from '../stores/conversationsStore';
 import { useUiStore } from '../stores/uiStore';
 import './_knowledgePage.scss';
-import { SearchIcon, TrashIcon } from '../components/icons/AppIcons';
+import { PlusIcon, SearchIcon, TrashIcon } from '../components/icons/AppIcons';
 
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor/MarkdownEditor'));
 
@@ -112,6 +112,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	const { showToast } = useToast();
 
 	const [activeDropdown, setActiveDropdown] = useState<'filters' | 'sort' | null>(null);
+	const [editDialogTab, setEditDialogTab] = useState<'edit' | 'preview'>('edit');
 	const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(() => new Set());
 	const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 	const [bulkDeleting, setBulkDeleting] = useState(false);
@@ -438,6 +439,20 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 		</div>
 	);
 	const filterFields = <KnowledgeFilterFields value={formFilters} onChange={setFormFilters} disabled={saving} />;
+	const selectedApproachName = selectedApproachId
+		? (approaches.find((approach) => approach.id === selectedApproachId)?.name ??
+			(dialog?.type === 'edit' && dialog.item.approach?.id === selectedApproachId ? dialog.item.approach.name : null))
+		: null;
+	const previewMetadata = [
+		{ label: 'ГЕО', value: formFilters.geo },
+		{ label: 'Селеба', value: formFilters.celebrity },
+		{ label: 'Оффер', value: formFilters.offer },
+		{ label: 'Новостник', value: formFilters.news_source },
+		{ label: 'Подход', value: selectedApproachName },
+	].filter(
+		({ label, value }) =>
+			typeof value === 'string' && value.trim().length > 0 && !(label === 'Подход' && value.trim() === 'Без подхода'),
+	);
 
 	return (
 		<div className="knowledge-shell">
@@ -657,7 +672,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 									<div className="knowledge-card__head">
 										<div>
 											<strong>{`${item.title}`}</strong>
-											<Rating value={item.rating} readonly size="small" showValue ariaLabel={`Рейтинг ${item.title}`} />
+											<Rating value={item.rating} readonly size="small" ariaLabel={`Рейтинг ${item.title}`} />
 											{item.approach && <span className="knowledge-card__approach">Подход: {item.approach.name}</span>}
 											<div className="knowledge-card__metadata">
 												{Object.entries(storedFilters(item))
@@ -666,10 +681,12 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 														<span key={key}>
 															{
 																(
-																	{ geo: 'ГЕО', celebrity: 'Селеба', offer: 'Оффер', news_source: 'Новостник' } as Record<
-																		string,
-																		string
-																	>
+																	{
+																		geo: 'ГЕО',
+																		celebrity: 'Селеба',
+																		offer: 'Оффер',
+																		news_source: 'Новостник',
+																	} as Record<string, string>
 																)[key]
 															}
 															: {value}
@@ -703,7 +720,13 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 										<button type="button" onClick={() => setDialog({ type: 'view', item })}>
 											Открыть
 										</button>
-										<button type="button" onClick={() => openEdit(item)}>
+										<button
+											type="button"
+											onClick={() => {
+												setEditDialogTab('edit');
+												openEdit(item);
+											}}
+										>
 											Редактировать
 										</button>
 										{item.downloadUrl && (
@@ -776,25 +799,144 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 				)}
 				{dialog?.type === 'edit' && (
 					<ModalDialog
+						className="knowledge-edit-modal"
 						title="Редактировать данные"
-						confirmLabel={saving ? 'Сохранение…' : 'Сохранить'}
+						subtitle="Все изменения будут применены после сохранения"
+						showCloseButton
+						confirmLabel={saving ? 'Сохранение…' : 'Сохранить изменения'}
 						confirmDisabled={saving}
 						onClose={() => setDialog(null)}
 						onConfirm={() => void saveDialog()}
 					>
-						<div className="knowledge-form">
-							<input value={title} onChange={(event) => setTitle(event.target.value)} aria-label="Название" />
-							<Suspense fallback={<div>Загрузка редактора…</div>}>
-								<MarkdownEditor value={content} onChange={setContent} />
-							</Suspense>
-							{filterFields}
-							{approachField}
-							<label>
-								Рейтинг
-								<Rating value={rating} onChange={setRating} ariaLabel="Рейтинг элемента" />
-							</label>
-							<Checkbox checked={isActive} onChange={setIsActive} label="Использовать" />
+						<div className="knowledge-edit-modal__tabs" role="tablist" aria-label="Режим модального окна">
+							<button
+								className={editDialogTab === 'edit' ? 'active' : ''}
+								type="button"
+								role="tab"
+								aria-selected={editDialogTab === 'edit'}
+								onClick={() => setEditDialogTab('edit')}
+							>
+								Редактирование
+							</button>
+							<button
+								className={editDialogTab === 'preview' ? 'active' : ''}
+								type="button"
+								role="tab"
+								aria-selected={editDialogTab === 'preview'}
+								onClick={() => setEditDialogTab('preview')}
+							>
+								Предпросмотр
+							</button>
 						</div>
+						{editDialogTab === 'edit' ? (
+							<div className="knowledge-edit-modal__form" role="tabpanel">
+								<label>
+									Название
+									<input value={title} onChange={(event) => setTitle(event.target.value)} />
+								</label>
+								<label>
+									Содержимое
+									<textarea
+										value={content}
+										onChange={(event) => setContent(event.target.value)}
+										placeholder="Вставьте текст"
+									/>
+								</label>
+								<div className="knowledge-edit-modal__divider" />
+								<section className="knowledge-edit-modal__metadata" aria-labelledby="knowledge-edit-metadata-title">
+									<h3 id="knowledge-edit-metadata-title">Метаданные</h3>
+									{filterFields}
+									<div className="knowledge-edit-modal__approach">
+										<label>
+											Подход
+											<select
+												value={selectedApproachId}
+												onChange={(event) => setSelectedApproachId(event.target.value)}
+												aria-label="Подход элемента"
+											>
+												<option value="">Без подхода</option>
+												{approaches.map((approach) => (
+													<option key={approach.id} value={approach.id}>
+														{approach.name}
+													</option>
+												))}
+											</select>
+										</label>
+										<button
+											className="knowledge-edit-modal__new-approach"
+											type="button"
+											onClick={() => setShowApproachCreator(true)}
+										>
+											<PlusIcon />
+											Новый подход
+										</button>
+									</div>
+									{showApproachCreator && (
+										<div className="knowledge-form__approach-create">
+											<input
+												value={newApproachName}
+												onChange={(event) => setNewApproachName(event.target.value)}
+												placeholder="Название нового подхода"
+												aria-label="Название нового подхода"
+												maxLength={80}
+											/>
+											<button
+												type="button"
+												disabled={!newApproachName.trim() || creatingApproach}
+												onClick={() => void addApproach()}
+											>
+												{creatingApproach ? 'Создание…' : 'Создать'}
+											</button>
+											<button type="button" onClick={resetApproachCreator}>
+												Отмена
+											</button>
+										</div>
+									)}
+								</section>
+								<div className="knowledge-edit-modal__divider" />
+								<div className="knowledge-edit-modal__settings">
+									<div className="knowledge-edit-modal__rating">
+										<span>Рейтинг</span>
+										<Rating value={rating} onChange={setRating} ariaLabel="Рейтинг элемента" />
+									</div>
+									<Checkbox
+										checked={isActive}
+										onChange={setIsActive}
+										label="Использовать в ответах"
+										className="knowledge-edit-modal__switch knowledge-card__active-toggle"
+									/>
+								</div>
+							</div>
+						) : (
+							<div className="knowledge-edit-modal__preview" role="tabpanel">
+								<article className="knowledge-edit-modal__preview-card">
+									<h3>{title.trim() || 'Без названия'}</h3>
+									<Rating value={rating} readonly ariaLabel="Рейтинг элемента" />
+									<span className="knowledge-edit-modal__preview-source">
+										{dialog.item.sourceType === 'rated_content'
+											? 'Ответ агента'
+											: dialog.item.sourceType === 'assistant_file'
+												? 'Файл из диалога'
+												: dialog.item.sourceType === 'uploaded_file'
+													? 'Файл'
+													: 'Добавлено вручную'}{' '}
+										· {new Date(dialog.item.createdAt).toLocaleDateString('ru-RU')}
+									</span>
+									<p className="knowledge-edit-modal__preview-content">
+										{content || 'Текстовое содержимое не извлечено'}
+									</p>
+									{previewMetadata.length > 0 && (
+										<div className="knowledge-edit-modal__chips">
+											{previewMetadata.map(({ label, value }) => (
+												<span key={label}>
+													{label} · {value?.trim()}
+												</span>
+											))}
+										</div>
+									)}
+								</article>
+							</div>
+						)}
 					</ModalDialog>
 				)}
 				{dialog?.type === 'view' && (
@@ -804,7 +946,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 						onClose={() => setDialog(null)}
 						onConfirm={() => setDialog(null)}
 					>
-						<Rating value={dialog.item.rating} readonly showValue />
+						<Rating value={dialog.item.rating} readonly />
 						{dialog.item.approach && <p>Подход: {dialog.item.approach.name}</p>}
 						<div className="knowledge-card__metadata knowledge-card__metadata--view">
 							{Object.entries(storedFilters(dialog.item))

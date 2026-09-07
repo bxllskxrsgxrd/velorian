@@ -5,6 +5,9 @@ type ModalDialogProps = {
 	title: string;
 	children: ReactNode;
 	confirmLabel: string;
+	className?: string;
+	subtitle?: string;
+	showCloseButton?: boolean;
 	danger?: boolean;
 	confirmDisabled?: boolean;
 	closeDisabled?: boolean;
@@ -16,6 +19,9 @@ export function ModalDialog({
 	title,
 	children,
 	confirmLabel,
+	className = '',
+	subtitle,
+	showCloseButton = false,
 	danger,
 	confirmDisabled = false,
 	closeDisabled = false,
@@ -24,14 +30,34 @@ export function ModalDialog({
 }: ModalDialogProps) {
 	return (
 		<div
-			className="modal-dialog"
+			className={['modal-dialog', className].filter(Boolean).join(' ')}
 			role="presentation"
 			onMouseDown={(event) => {
 				if (!closeDisabled && event.target === event.currentTarget) onClose();
 			}}
 		>
 			<div className="modal-dialog__panel" role="dialog" aria-modal="true" aria-labelledby="modal-dialog-title">
-				<h2 id="modal-dialog-title">{title}</h2>
+				{subtitle || showCloseButton ? (
+					<div className="modal-dialog__header">
+						<div>
+							<h2 id="modal-dialog-title">{title}</h2>
+							{subtitle && <p className="modal-dialog__subtitle">{subtitle}</p>}
+						</div>
+						{showCloseButton && (
+							<button
+								className="modal-dialog__close"
+								type="button"
+								disabled={closeDisabled}
+								onClick={onClose}
+								aria-label="Закрыть"
+							>
+								<span aria-hidden="true">×</span>
+							</button>
+						)}
+					</div>
+				) : (
+					<h2 id="modal-dialog-title">{title}</h2>
+				)}
 				<div className="modal-dialog__content">{children}</div>
 				<div className="modal-dialog__actions">
 					<button type="button" disabled={closeDisabled} onClick={onClose}>

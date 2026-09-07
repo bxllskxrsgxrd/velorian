@@ -11,7 +11,6 @@ type RatingProps = {
 	ariaLabel?: string;
 	/** @deprecated Use ariaLabel. */
 	label?: string;
-	showValue?: boolean;
 	disabled?: boolean;
 	className?: string;
 };
@@ -32,7 +31,6 @@ export function Rating({
 	size = 'medium',
 	ariaLabel,
 	label,
-	showValue = false,
 	disabled = false,
 	className = '',
 }: RatingProps) {
@@ -48,7 +46,9 @@ export function Rating({
 		readonly && 'rating--readonly',
 		disabled && 'rating--disabled',
 		className,
-	].filter(Boolean).join(' ');
+	]
+		.filter(Boolean)
+		.join(' ');
 
 	function select(score: number) {
 		if (!disabled) onChange?.(savedValue === score ? null : score);
@@ -81,9 +81,13 @@ export function Rating({
 						'rating__star',
 						active ? 'rating__star--active' : 'rating__star--inactive',
 						hoverValue !== null && active && 'rating__star--hover',
-					].filter(Boolean).join(' ');
+					]
+						.filter(Boolean)
+						.join(' ');
 					return readonly ? (
-						<span className={starClassName} key={score}><StarIcon /></span>
+						<span className={starClassName} key={score}>
+							<StarIcon />
+						</span>
 					) : (
 						<button
 							className={starClassName}
@@ -103,7 +107,6 @@ export function Rating({
 					);
 				})}
 			</span>
-			{showValue && <span className="rating__value">{value == null ? 'Без рейтинга' : `${value}/5`}</span>}
 		</div>
 	);
 }

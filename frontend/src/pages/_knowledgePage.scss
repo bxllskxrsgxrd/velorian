@@ -612,6 +612,316 @@
 	background: var(--color-bg-elevated);
 	@include app-scrollbar;
 }
+
+.modal-dialog.knowledge-edit-modal {
+	.modal-dialog__panel {
+		width: min(680px, 100%);
+		height: min(760px, calc(100dvh - 40px));
+		padding: 0;
+		overflow: hidden;
+	}
+
+	.modal-dialog__header {
+		display: flex;
+		align-items: flex-start;
+		justify-content: space-between;
+		gap: 20px;
+		padding: 26px 28px 18px;
+	}
+
+	.modal-dialog__header > div {
+		min-width: 0;
+	}
+
+	.modal-dialog__header h2 {
+		margin: 0 0 4px;
+		color: var(--color-text-primary);
+		font-size: 22px;
+	}
+
+	.modal-dialog__subtitle {
+		margin: 0;
+		color: var(--color-text-secondary);
+		font-size: 13px;
+	}
+
+	.modal-dialog__close {
+		width: 32px;
+		height: 32px;
+		flex: 0 0 32px;
+		padding: 0;
+		border: 0;
+		border-radius: var(--radius-medium);
+		color: var(--color-text-secondary);
+		background: transparent;
+		font-size: 28px;
+		font-weight: 300;
+		line-height: 1;
+	}
+
+	.modal-dialog__close:hover:not(:disabled) {
+		color: var(--color-accent);
+		background: var(--color-accent-soft);
+	}
+
+	.modal-dialog__close:focus-visible {
+		outline: 1px solid var(--color-accent-focus);
+		outline-offset: 2px;
+		box-shadow: var(--focus-ring);
+	}
+
+	.modal-dialog__content {
+		min-height: 0;
+		flex: 1;
+		display: flex;
+		flex-direction: column;
+		overflow: hidden;
+	}
+
+	.modal-dialog__actions {
+		flex: 0 0 auto;
+		margin: 0;
+		padding: 18px 28px;
+		border-top: 1px solid var(--color-border);
+	}
+
+	.modal-dialog__actions button {
+		min-height: 40px;
+		padding-inline: 18px;
+	}
+
+	.modal-dialog__actions button:focus-visible {
+		outline: 1px solid var(--color-accent-focus);
+		outline-offset: 2px;
+		box-shadow: var(--focus-ring);
+	}
+
+	.knowledge-edit-modal__tabs {
+		flex: 0 0 auto;
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		margin: 0 28px;
+		padding-bottom: 18px;
+		border-bottom: 1px solid var(--color-border);
+	}
+
+	.knowledge-edit-modal__tabs button {
+		min-height: 42px;
+		padding: 8px 14px;
+		border: 1px solid var(--color-border);
+		border-radius: 0;
+		color: var(--color-text-secondary);
+		background: transparent;
+		font: inherit;
+	}
+
+	.knowledge-edit-modal__tabs button:first-child {
+		border-radius: var(--radius-medium) 0 0 var(--radius-medium);
+	}
+
+	.knowledge-edit-modal__tabs button:last-child {
+		margin-left: -1px;
+		border-radius: 0 var(--radius-medium) var(--radius-medium) 0;
+	}
+
+	.knowledge-edit-modal__tabs button:hover:not(:disabled):not(.active) {
+		color: var(--color-text-primary);
+		background: var(--color-bg-elevated);
+	}
+
+	.knowledge-edit-modal__tabs button:focus-visible {
+		position: relative;
+		z-index: 1;
+		outline: 1px solid var(--color-accent-focus);
+		outline-offset: 2px;
+		box-shadow: var(--focus-ring);
+	}
+
+	.knowledge-edit-modal__tabs button.active {
+		position: relative;
+		z-index: 1;
+		border-color: var(--color-accent);
+		color: var(--color-on-accent);
+		background: var(--color-accent);
+	}
+
+	.knowledge-edit-modal__form,
+	.knowledge-edit-modal__preview {
+		min-height: 0;
+		flex: 1;
+		overflow-y: auto;
+		@include app-scrollbar;
+	}
+
+	.knowledge-edit-modal__form {
+		display: flex;
+		flex-direction: column;
+		gap: 14px;
+		padding: 18px 28px 24px;
+	}
+
+	.knowledge-edit-modal__form label,
+	.knowledge-edit-modal__metadata label {
+		display: grid;
+		gap: 6px;
+		color: var(--color-text-primary);
+		font-size: 13px;
+	}
+
+	.knowledge-edit-modal__form input:not(.checkbox__input),
+	.knowledge-edit-modal__form select,
+	.knowledge-edit-modal__form textarea {
+		@include knowledge-field-control;
+	}
+
+	.knowledge-edit-modal__form textarea {
+		min-height: 150px;
+		resize: vertical;
+		@include app-scrollbar;
+	}
+
+	.knowledge-edit-modal__divider {
+		flex: 0 0 auto;
+		height: 1px;
+		margin-block: 3px;
+		background: var(--color-border);
+	}
+
+	.knowledge-edit-modal__metadata {
+		display: grid;
+		gap: 12px;
+	}
+
+	.knowledge-edit-modal__metadata h3 {
+		margin: 0;
+		color: var(--color-text-primary);
+		font-size: 16px;
+	}
+
+	.knowledge-edit-modal__metadata .knowledge-filter-fields {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		gap: 10px 14px;
+	}
+
+	.knowledge-edit-modal__approach {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		align-items: end;
+		gap: 14px;
+	}
+
+	.knowledge-edit-modal__new-approach {
+		min-height: 42px;
+		display: inline-flex;
+		align-items: center;
+		justify-content: center;
+		gap: 8px;
+		padding: 8px 14px;
+		border: 1px solid var(--color-accent);
+		border-radius: var(--radius-medium);
+		outline: none;
+		color: var(--color-accent);
+		background: transparent;
+		font: inherit;
+	}
+
+	.knowledge-edit-modal__new-approach:hover:not(:disabled) {
+		background: var(--color-accent-soft);
+	}
+
+	.knowledge-edit-modal__new-approach:focus-visible {
+		box-shadow: var(--focus-ring);
+	}
+
+	.knowledge-form__approach-create {
+		margin-top: -2px;
+	}
+
+	.knowledge-edit-modal__settings {
+		display: grid;
+		grid-template-columns: repeat(2, minmax(0, 1fr));
+		align-items: center;
+		min-height: 42px;
+	}
+
+	.knowledge-edit-modal__rating {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 12px;
+		padding-right: 20px;
+		color: var(--color-text-primary);
+		font-size: 13px;
+	}
+
+	.knowledge-edit-modal__switch {
+		width: 100%;
+		min-height: 30px;
+		justify-content: flex-start;
+		flex-direction: row-reverse;
+		gap: 12px;
+		padding-left: 20px;
+		border-left: 1px solid var(--color-border);
+		color: var(--color-text-primary);
+		font-size: 13px;
+	}
+
+	.knowledge-edit-modal__switch .checkbox__control {
+		margin-left: auto;
+	}
+
+	.knowledge-edit-modal__preview {
+		padding: 18px 28px 24px;
+	}
+
+	.knowledge-edit-modal__preview-card {
+		padding: 20px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-large);
+		color: var(--color-text-primary);
+		background: var(--color-bg-elevated);
+	}
+
+	.knowledge-edit-modal__preview-card h3 {
+		margin: 0 0 8px;
+		font-size: 18px;
+		overflow-wrap: anywhere;
+	}
+
+	.knowledge-edit-modal__preview-source {
+		display: block;
+		margin-top: 5px;
+		color: var(--color-text-secondary);
+		font-size: 13px;
+	}
+
+	.knowledge-edit-modal__preview-content {
+		margin: 18px 0;
+		color: var(--color-text-primary);
+		line-height: 1.55;
+		white-space: pre-wrap;
+		overflow-wrap: anywhere;
+	}
+
+	.knowledge-edit-modal__chips {
+		display: flex;
+		flex-wrap: wrap;
+		gap: 6px;
+	}
+
+	.knowledge-edit-modal__chips span {
+		width: fit-content;
+		max-width: 100%;
+		padding: 5px 9px;
+		border: 1px solid var(--color-border);
+		border-radius: 999px;
+		color: var(--color-text-secondary);
+		background: var(--color-bg-surface);
+		font-size: 12px;
+		overflow-wrap: anywhere;
+	}
+}
 .knowledge-page__more {
 	justify-self: center;
 	padding: 9px 14px;
@@ -657,6 +967,48 @@
 }
 
 @media (max-width: 760px) {
+	.modal-dialog.knowledge-edit-modal {
+		padding: 10px;
+
+		.modal-dialog__panel {
+			height: calc(100dvh - 20px);
+		}
+
+		.modal-dialog__header {
+			padding: 20px 18px 14px;
+		}
+
+		.knowledge-edit-modal__tabs {
+			margin-inline: 18px;
+			padding-bottom: 14px;
+		}
+
+		.knowledge-edit-modal__form,
+		.knowledge-edit-modal__preview {
+			padding: 16px 18px 20px;
+		}
+
+		.knowledge-edit-modal__metadata .knowledge-filter-fields,
+		.knowledge-edit-modal__approach,
+		.knowledge-edit-modal__settings {
+			grid-template-columns: 1fr;
+		}
+
+		.knowledge-edit-modal__rating {
+			padding-right: 0;
+		}
+
+		.knowledge-edit-modal__switch {
+			padding: 12px 0 0;
+			border-top: 1px solid var(--color-border);
+			border-left: 0;
+		}
+
+		.modal-dialog__actions {
+			padding: 14px 18px;
+		}
+	}
+
 	.knowledge-page > header {
 		align-items: stretch;
 		flex-direction: column;
