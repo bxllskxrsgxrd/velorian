@@ -472,6 +472,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	const dropdownRef = useRef<HTMLDivElement>(null);
 	const cardMenuRef = useRef<HTMLDivElement>(null);
 	const cardTooltipTimerRef = useRef<number | null>(null);
+	const cardTooltipPointerRef = useRef<KnowledgeCardTooltipState | null>(null);
 	const selectedItems = useMemo(() => items.filter((item) => selectedItemIds.has(item.id)), [items, selectedItemIds]);
 	const cardMenuItem = cardMenu ? items.find((item) => item.id === cardMenu.itemId) : null;
 
@@ -513,6 +514,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 			if (event.key !== 'Escape') return;
 			if (cardTooltipTimerRef.current !== null) window.clearTimeout(cardTooltipTimerRef.current);
 			cardTooltipTimerRef.current = null;
+			cardTooltipPointerRef.current = null;
 			setCardMenu(null);
 			setCardTooltip(null);
 		}
@@ -735,20 +737,32 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	function hideCardTooltip() {
 		if (cardTooltipTimerRef.current !== null) window.clearTimeout(cardTooltipTimerRef.current);
 		cardTooltipTimerRef.current = null;
+		cardTooltipPointerRef.current = null;
 		setCardTooltip(null);
 	}
 
-	function scheduleCardTooltip(itemId: string, card: HTMLElement) {
+	function cardTooltipPosition(itemId: string, clientX: number, clientY: number): KnowledgeCardTooltipState {
+		const horizontalInset = Math.min(122, window.innerWidth / 2);
+		return {
+			itemId,
+			left: Math.max(horizontalInset, Math.min(clientX, window.innerWidth - horizontalInset)),
+			top: Math.max(56, Math.min(clientY - 10, window.innerHeight - 8)),
+		};
+	}
+
+	function scheduleCardTooltip(itemId: string, clientX: number, clientY: number) {
 		hideCardTooltip();
-		const bounds = card.getBoundingClientRect();
+		cardTooltipPointerRef.current = cardTooltipPosition(itemId, clientX, clientY);
 		cardTooltipTimerRef.current = window.setTimeout(() => {
 			cardTooltipTimerRef.current = null;
-			setCardTooltip({
-				itemId,
-				left: Math.max(8, Math.min(bounds.left + 32, window.innerWidth - 236)),
-				top: bounds.top >= 44 ? bounds.top - 36 : bounds.top + 12,
-			});
+			if (cardTooltipPointerRef.current) setCardTooltip(cardTooltipPointerRef.current);
 		}, 600);
+	}
+
+	function updateCardTooltipPosition(itemId: string, clientX: number, clientY: number) {
+		const nextPosition = cardTooltipPosition(itemId, clientX, clientY);
+		cardTooltipPointerRef.current = nextPosition;
+		if (cardTooltip?.itemId === itemId) setCardTooltip(nextPosition);
 	}
 
 	function openCardMenu(itemId: string, left: number, top: number) {
@@ -1016,7 +1030,8 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 							<article
 								className={`knowledge-card ${selectedItemIds.has(item.id) ? 'knowledge-card--selected' : ''}`}
 								key={item.id}
-								onMouseEnter={(event) => scheduleCardTooltip(item.id, event.currentTarget)}
+								onMouseEnter={(event) => scheduleCardTooltip(item.id, event.clientX, event.clientY)}
+								onMouseMove={(event) => updateCardTooltipPosition(item.id, event.clientX, event.clientY)}
 								onMouseLeave={hideCardTooltip}
 								onContextMenu={(event) => {
 									hideCardTooltip();
