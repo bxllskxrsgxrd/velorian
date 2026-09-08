@@ -374,6 +374,7 @@
 	text-align: center;
 }
 .knowledge-card {
+	position: relative;
 	display: grid;
 	grid-template-columns: 20px minmax(0, 1fr);
 	align-items: start;
@@ -407,6 +408,54 @@
 .knowledge-card__head strong {
 	min-width: 0;
 	overflow-wrap: anywhere;
+}
+.knowledge-card__head > .knowledge-card__head-actions {
+	min-width: fit-content;
+	display: flex;
+	align-items: flex-start;
+	flex-direction: row;
+	gap: 8px;
+}
+.knowledge-card__more {
+	width: 32px;
+	height: 32px;
+	display: grid;
+	place-items: center;
+	flex: 0 0 32px;
+	padding: 0;
+	border: 1px solid transparent;
+	border-radius: var(--radius-medium);
+	outline: none;
+	color: var(--color-text-secondary);
+	background: transparent;
+	cursor: pointer;
+	opacity: 0;
+	pointer-events: none;
+	transition:
+		opacity var(--transition-fast),
+		border-color var(--transition-fast),
+		color var(--transition-fast),
+		background-color var(--transition-fast),
+		box-shadow var(--transition-fast);
+}
+.knowledge-card:hover .knowledge-card__more,
+.knowledge-card:focus-within .knowledge-card__more,
+.knowledge-card--menu-open .knowledge-card__more {
+	opacity: 1;
+	pointer-events: auto;
+}
+.knowledge-card__more:hover {
+	border-color: var(--color-accent);
+	color: var(--color-accent);
+	background: var(--color-accent-soft);
+}
+.knowledge-card__more:focus-visible {
+	border-color: var(--color-accent);
+	box-shadow: var(--focus-ring);
+}
+.knowledge-card__more svg {
+	width: 18px;
+	height: 18px;
 }
 .knowledge-card__select {
 	flex: 0 0 auto;
@@ -501,34 +550,55 @@
 	color: var(--color-text-secondary);
 	white-space: pre-wrap;
 }
-.knowledge-card__actions {
+.knowledge-card__menu {
+	position: fixed;
+	z-index: 90;
+	width: 220px;
+	padding: 6px;
+	border: 1px solid var(--color-border);
+	border-radius: var(--radius-medium);
+	background: var(--color-bg-surface);
+	box-shadow: var(--shadow-surface);
+}
+.knowledge-card__menu button,
+.knowledge-card__menu a {
+	width: 100%;
+	min-height: 36px;
 	display: flex;
-	gap: 6px;
 	align-items: center;
-}
-.knowledge-card__actions button,
-.knowledge-card__actions a {
-	@include knowledge-outline-button;
-
-	min-height: 34px;
-	padding: 0 10px;
-}
-.knowledge-card__actions .knowledge-card__delete {
-	margin-left: auto;
-	border-color: var(--color-error);
-	color: var(--color-error);
+	padding: 8px 10px;
+	border: 0;
+	border-radius: 8px;
+	outline: none;
+	color: var(--color-text-primary);
 	background: transparent;
+	font: inherit;
+	text-align: left;
+	text-decoration: none;
+	cursor: pointer;
 }
-// .knowledge-card__actions .knowledge-card__delete:hover {
-// 	border-color: var(--color-error);
-// 	color: var(--color-error);
-// 	background: color-mix(in srgb, var(--color-error) 12%, transparent);
-// }
-
-.knowledge-card__actions .knowledge-card__delete:hover:not(:disabled) {
-	border-color: var(--color-error) !important;
-	color: var(--color-error) !important;
-	background: color-mix(in srgb, var(--color-error) 12%, transparent) !important;
+.knowledge-card__menu button:hover,
+.knowledge-card__menu a:hover {
+	color: var(--color-accent);
+	background: var(--color-accent-soft);
+}
+.knowledge-card__menu button:focus-visible,
+.knowledge-card__menu a:focus-visible {
+	outline: 1px solid var(--color-accent-focus);
+	box-shadow: var(--focus-ring);
+}
+.knowledge-card__menu-separator {
+	height: 1px;
+	margin: 5px 4px;
+	background: var(--color-border);
+}
+.knowledge-card__menu .knowledge-card__menu-delete {
+	color: var(--color-error);
+}
+.knowledge-card__menu .knowledge-card__menu-delete:hover,
+.knowledge-card__menu .knowledge-card__menu-delete:focus-visible {
+	color: var(--color-error);
+	background: color-mix(in srgb, var(--color-error) 12%, transparent);
 }
 
 .knowledge-form__parameters {

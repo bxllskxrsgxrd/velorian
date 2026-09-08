@@ -25,13 +25,14 @@ import { useKnowledgeStore } from '../stores/knowledgeStore';
 import { useConversationsStore } from '../stores/conversationsStore';
 import { useUiStore } from '../stores/uiStore';
 import './_knowledgePage.scss';
-import { CrossIcon, DocumentIcon, PlusIcon, SearchIcon, TrashIcon } from '../components/icons/AppIcons';
+import { CrossIcon, DocumentIcon, MoreIcon, PlusIcon, SearchIcon, TrashIcon } from '../components/icons/AppIcons';
 
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor/MarkdownEditor'));
 
 type RatingFilter = 'all' | '5' | '4' | '3' | 'unrated';
 type SortMode = 'date_desc' | 'date_asc' | 'rating_desc' | 'rating_asc';
 type FilePreviewState = { status: 'idle' | 'loading' | 'ready' | 'error'; content: string };
+type KnowledgeCardMenuState = { itemId: string; top: number; left: number };
 
 const TEXT_FILE_EXTENSIONS = new Set([
 	'.txt',
@@ -465,8 +466,11 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(() => new Set());
 	const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 	const [bulkDeleting, setBulkDeleting] = useState(false);
+	const [cardMenu, setCardMenu] = useState<KnowledgeCardMenuState | null>(null);
 	const dropdownRef = useRef<HTMLDivElement>(null);
+	const cardMenuRef = useRef<HTMLDivElement>(null);
 	const selectedItems = useMemo(() => items.filter((item) => selectedItemIds.has(item.id)), [items, selectedItemIds]);
+	const cardMenuItem = cardMenu ? items.find((item) => item.id === cardMenu.itemId) : null;
 
 	useEffect(() => {
 		function handleClickOutside(event: MouseEvent) {
@@ -486,6 +490,22 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 			document.removeEventListener('keydown', handleEscape);
 		};
 	}, [activeDropdown]);
+
+	useEffect(() => {
+		if (!cardMenu) return;
+		function handleClickOutside(event: MouseEvent) {
+			if (!cardMenuRef.current?.contains(event.target as Node)) setCardMenu(null);
+		}
+		function handleEscape(event: KeyboardEvent) {
+			if (event.key === 'Escape') setCardMenu(null);
+		}
+		document.addEventListener('mousedown', handleClickOutside);
+		document.addEventListener('keydown', handleEscape);
+		return () => {
+			document.removeEventListener('mousedown', handleClickOutside);
+			document.removeEventListener('keydown', handleEscape);
+		};
+	}, [cardMenu]);
 
 	useEffect(() => {
 		setSearch(params.get('q') ?? '');
@@ -694,6 +714,19 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 			else next.delete(itemId);
 			return next;
 		});
+	}
+
+	function openCardMenu(itemId: string, left: number, top: number) {
+		setCardMenu({
+			itemId,
+			left: Math.max(8, Math.min(left, window.innerWidth - 228)),
+			top: Math.max(8, Math.min(top, window.innerHeight - 248)),
+		});
+	}
+
+	function runCardMenuAction(action: () => void) {
+		setCardMenu(null);
+		action();
 	}
 
 	async function removeSelectedItems() {
@@ -946,8 +979,19 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 					{!loading &&
 						items.map((item) => (
 							<article
-								className={`knowledge-card ${selectedItemIds.has(item.id) ? 'knowledge-card--selected' : ''}`}
+								className={[
+									'knowledge-card',
+									selectedItemIds.has(item.id) && 'knowledge-card--selected',
+									cardMenu?.itemId === item.id && 'knowledge-card--menu-open',
+								]
+									.filter(Boolean)
+									.join(' ')}
 								key={item.id}
+								onContextMenu={(event) => {
+									if ((event.target as HTMLElement).closest('button, a, input, label')) return;
+									event.preventDefault();
+									openCardMenu(item.id, event.clientX, event.clientY);
+								}}
 							>
 								<div className="knowledge-card__select-column">
 									<Checkbox
@@ -996,43 +1040,33 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 												<span className="knowledge-card__extraction-warning">{extractionStatusLabel(item)}</span>
 											)}
 										</div>
-										<Checkbox
-											checked={item.isActive}
-											disabled={pendingItemIds.has(item.id)}
-											onChange={(checked) => void toggleItem(item, checked)}
-											label="Использовать в ответах"
-											className="knowledge-card__active-toggle"
-										/>
+										<div className="knowledge-card__head-actions">
+											<Checkbox
+												checked={item.isActive}
+												disabled={pendingItemIds.has(item.id)}
+												onChange={(checked) => void toggleItem(item, checked)}
+												label="Использовать в ответах"
+												className="knowledge-card__active-toggle"
+											/>
+											<button
+												className="knowledge-card__more"
+												type="button"
+												aria-label={`Действия с записью «${item.title}»`}
+												aria-expanded={cardMenu?.itemId === item.id}
+												onClick={(event) => {
+													if (cardMenu?.itemId === item.id) {
+														setCardMenu(null);
+														return;
+													}
+													const bounds = event.currentTarget.getBoundingClientRect();
+													openCardMenu(item.id, bounds.right - 220, bounds.bottom + 6);
+												}}
+											>
+												<MoreIcon />
+											</button>
+										</div>
 									</div>
 									<p>{item.content || 'Текстовое содержимое не извлечено'}</p>
-									<div className="knowledge-card__actions">
-										<button type="button" onClick={() => setDialog({ type: 'view', item })}>
-											Открыть
-										</button>
-										<button type="button" onClick={() => openEdit(item)}>
-											Редактировать
-										</button>
-										{item.downloadUrl && (
-											<a href={item.downloadUrl} download={item.fileName}>
-												Скачать .md
-											</a>
-										)}
-										{item.originalDownloadUrl && (
-											<a href={item.originalDownloadUrl} download={item.originalFilename ?? undefined}>
-												Скачать оригинал
-											</a>
-										)}
-										<button type="button" onClick={() => void changeRating(item, null)}>
-											Убрать рейтинг
-										</button>
-										<button
-											className="knowledge-card__delete"
-											type="button"
-											onClick={() => setDialog({ type: 'delete', item })}
-										>
-											Удалить
-										</button>
-									</div>
 								</div>
 							</article>
 						))}
@@ -1047,6 +1081,55 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 						</button>
 					)}
 				</section>
+				{cardMenu && cardMenuItem && (
+					<div
+						ref={cardMenuRef}
+						className="knowledge-card__menu"
+						role="menu"
+						aria-label={`Действия с записью «${cardMenuItem.title}»`}
+						style={{ top: cardMenu.top, left: cardMenu.left }}
+					>
+						<button type="button" role="menuitem" onClick={() => runCardMenuAction(() => openEdit(cardMenuItem))}>
+							Редактировать
+						</button>
+						{cardMenuItem.downloadUrl && (
+							<a
+								href={cardMenuItem.downloadUrl}
+								download={cardMenuItem.fileName}
+								role="menuitem"
+								onClick={() => setCardMenu(null)}
+							>
+								Скачать .md
+							</a>
+						)}
+						{cardMenuItem.originalDownloadUrl && (
+							<a
+								href={cardMenuItem.originalDownloadUrl}
+								download={cardMenuItem.originalFilename ?? undefined}
+								role="menuitem"
+								onClick={() => setCardMenu(null)}
+							>
+								Скачать оригинал
+							</a>
+						)}
+						<button
+							type="button"
+							role="menuitem"
+							onClick={() => runCardMenuAction(() => void changeRating(cardMenuItem, null))}
+						>
+							Убрать рейтинг
+						</button>
+						<div className="knowledge-card__menu-separator" role="separator" />
+						<button
+							className="knowledge-card__menu-delete"
+							type="button"
+							role="menuitem"
+							onClick={() => runCardMenuAction(() => setDialog({ type: 'delete', item: cardMenuItem }))}
+						>
+							Удалить
+						</button>
+					</div>
+				)}
 
 				{(dialog?.type === 'add' || dialog?.type === 'edit') && (
 					<KnowledgeDataDialog
