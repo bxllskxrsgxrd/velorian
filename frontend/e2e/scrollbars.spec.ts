@@ -43,7 +43,7 @@ test('Knowledge, Sidebar and modal share one scrollbar at a small viewport', asy
 
 	await page.getByRole('button', { name: 'Добавить данные' }).click();
 	await page.setViewportSize({ width: 1280, height: 430 });
-	const modal = await scrollbarSnapshot(page.locator('.modal-dialog__content'));
+	const modal = await scrollbarSnapshot(page.locator('.modal-dialog.knowledge-edit-modal .knowledge-edit-modal__form'));
 	expectSharedScrollbar(modal);
 	expect(modal.overflowY).toBe('auto');
 	expect(modal.scrollHeight).toBeGreaterThan(modal.clientHeight);
@@ -56,7 +56,9 @@ test('Knowledge, Sidebar and modal share one scrollbar at a small viewport', asy
 
 	const pineColor = knowledge.scrollbarColor;
 	for (const accent of ['terracotta', 'plum', 'pine']) {
-		await page.evaluate((value) => { document.documentElement.dataset.accent = value; }, accent);
+		await page.evaluate((value) => {
+			document.documentElement.dataset.accent = value;
+		}, accent);
 		const themed = await scrollbarSnapshot(page.locator('.knowledge-page'));
 		expectSharedScrollbar(themed);
 		expect(themed.scrollbarColor).toBe(pineColor);
@@ -76,7 +78,9 @@ test('code blocks and multiline PromptBar keep matching horizontal and vertical 
 	expect(code.overflowX).toBe('auto');
 	expect(code.scrollWidth).toBeGreaterThan(code.clientWidth);
 
-	await textarea.fill(Array.from({ length: 40 }, (_, index) => `Строка ${index + 1}: ${'текст '.repeat(12)}`).join('\n'));
+	await textarea.fill(
+		Array.from({ length: 40 }, (_, index) => `Строка ${index + 1}: ${'текст '.repeat(12)}`).join('\n'),
+	);
 	const prompt = await scrollbarSnapshot(textarea);
 	expectSharedScrollbar(prompt);
 	expect(prompt.overflowY).toBe('auto');
