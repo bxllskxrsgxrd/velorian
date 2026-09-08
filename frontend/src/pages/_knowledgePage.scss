@@ -456,9 +456,12 @@
 .knowledge-card__head label {
 	display: flex;
 	align-items: center;
-	gap: 6px;
+	gap: 12px;
 	color: var(--color-text-secondary);
 	font-size: 12px;
+}
+.knowledge-card__active-toggle {
+	flex-direction: row-reverse;
 }
 .knowledge-card__active-toggle .checkbox__control {
 	position: relative;
@@ -523,10 +526,10 @@
 // }
 
 .knowledge-card__actions .knowledge-card__delete:hover:not(:disabled) {
-		border-color: var(--color-error) !important;
-		color: var(--color-error) !important;
-		background: color-mix(in srgb, var(--color-error) 12%, transparent) !important;
-	}
+	border-color: var(--color-error) !important;
+	color: var(--color-error) !important;
+	background: color-mix(in srgb, var(--color-error) 12%, transparent) !important;
+}
 
 .knowledge-form__parameters {
 	display: grid;
@@ -923,20 +926,18 @@
 		font-size: 13px;
 	}
 
-	.knowledge-edit-modal__switch {
+	.knowledge-edit-modal__switch.knowledge-card__active-toggle {
 		width: 100%;
 		min-height: 30px;
-		justify-content: flex-start;
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
 		flex-direction: row-reverse;
 		gap: 12px;
 		padding-left: 20px;
 		border-left: 1px solid var(--color-border);
 		color: var(--color-text-primary);
 		font-size: 13px;
-	}
-
-	.knowledge-edit-modal__switch .checkbox__control {
-		margin-left: auto;
 	}
 
 	.knowledge-edit-modal__preview {

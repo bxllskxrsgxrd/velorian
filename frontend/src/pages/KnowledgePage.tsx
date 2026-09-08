@@ -754,7 +754,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 											checked={item.isActive}
 											disabled={pendingItemIds.has(item.id)}
 											onChange={(checked) => void toggleItem(item, checked)}
-											label="Использовать"
+											label="Использовать в ответах"
 											className="knowledge-card__active-toggle"
 										/>
 									</div>
