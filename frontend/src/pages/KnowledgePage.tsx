@@ -19,7 +19,7 @@ import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
 import { Rating } from '../components/ui/Rating/Rating';
 import { Checkbox } from '../components/ui/Checkbox/Checkbox';
 import { KnowledgeFilterFields } from '../components/KnowledgeFilterFields/KnowledgeFilterFields';
-import type { AuthUser, KnowledgeFilters, KnowledgeItem } from '../types/chat';
+import type { AuthUser, KnowledgeApproach, KnowledgeFilters, KnowledgeItem } from '../types/chat';
 import { reportError } from '../utils/reportError';
 import { useKnowledgeStore } from '../stores/knowledgeStore';
 import { useConversationsStore } from '../stores/conversationsStore';
@@ -96,6 +96,312 @@ function storedFilters(item: KnowledgeItem): KnowledgeFilters {
 	);
 }
 
+type KnowledgeDataDialogProps = {
+	mode: 'create' | 'edit';
+	item?: KnowledgeItem;
+	title: string;
+	setTitle: (value: string) => void;
+	content: string;
+	setContent: (value: string) => void;
+	rating: number | null;
+	setRating: (value: number | null) => void;
+	isActive: boolean;
+	setIsActive: (value: boolean) => void;
+	selectedApproachId: string;
+	setSelectedApproachId: (value: string) => void;
+	formFilters: KnowledgeFilters;
+	setFormFilters: (value: KnowledgeFilters) => void;
+	approaches: KnowledgeApproach[];
+	newApproachName: string;
+	setNewApproachName: (value: string) => void;
+	showApproachCreator: boolean;
+	setShowApproachCreator: (value: boolean) => void;
+	creatingApproach: boolean;
+	onAddApproach: () => void;
+	onResetApproachCreator: () => void;
+	file: File | null;
+	setFile: (value: File | null) => void;
+	saving: boolean;
+	onClose: () => void;
+	onConfirm: () => void;
+};
+
+function KnowledgeDataDialog({
+	mode,
+	item,
+	title,
+	setTitle,
+	content,
+	setContent,
+	rating,
+	setRating,
+	isActive,
+	setIsActive,
+	selectedApproachId,
+	setSelectedApproachId,
+	formFilters,
+	setFormFilters,
+	approaches,
+	newApproachName,
+	setNewApproachName,
+	showApproachCreator,
+	setShowApproachCreator,
+	creatingApproach,
+	onAddApproach,
+	onResetApproachCreator,
+	file,
+	setFile,
+	saving,
+	onClose,
+	onConfirm,
+}: KnowledgeDataDialogProps) {
+	const [activeTab, setActiveTab] = useState<'edit' | 'preview'>('edit');
+	const [filePreview, setFilePreview] = useState<FilePreviewState>({ status: 'idle', content: '' });
+	const fileInputRef = useRef<HTMLInputElement>(null);
+	const filePreviewRequestRef = useRef(0);
+	const selectedApproachName = selectedApproachId
+		? approaches.find((approach) => approach.id === selectedApproachId)?.name ??
+			(item?.approach?.id === selectedApproachId ? item.approach.name : null)
+		: null;
+	const previewMetadata = [
+		{ label: 'ГЕО', value: formFilters.geo },
+		{ label: 'Селеба', value: formFilters.celebrity },
+		{ label: 'Оффер', value: formFilters.offer },
+		{ label: 'Новостник', value: formFilters.news_source },
+		{ label: 'Подход', value: selectedApproachName },
+	].filter(
+		({ label, value }) =>
+			typeof value === 'string' && value.trim().length > 0 && !(label === 'Подход' && value.trim() === 'Без подхода'),
+	);
+
+	async function handleFileChange(nextFile: File | null) {
+		setFile(nextFile);
+		const requestId = ++filePreviewRequestRef.current;
+		if (!nextFile) {
+			setFilePreview({ status: 'idle', content: '' });
+			return;
+		}
+
+		setFilePreview({ status: 'loading', content: '' });
+		const dotIndex = nextFile.name.lastIndexOf('.');
+		const extension = dotIndex >= 0 ? nextFile.name.slice(dotIndex).toLowerCase() : '';
+		if (!nextFile.type.startsWith('text/') && !TEXT_FILE_EXTENSIONS.has(extension)) {
+			setFilePreview({ status: 'error', content: '' });
+			return;
+		}
+
+		try {
+			const extractedContent = await nextFile.text();
+			if (requestId !== filePreviewRequestRef.current) return;
+			setFilePreview(
+				extractedContent.trim()
+					? { status: 'ready', content: extractedContent }
+					: { status: 'error', content: '' },
+			);
+		} catch {
+			if (requestId === filePreviewRequestRef.current) setFilePreview({ status: 'error', content: '' });
+		}
+	}
+
+	function clearSelectedFile() {
+		void handleFileChange(null);
+		if (fileInputRef.current) fileInputRef.current.value = '';
+	}
+
+	const sourceLabel = file
+		? `Добавлено из файла · ${file.name}`
+		: mode === 'create'
+			? `Добавлено вручную · ${new Date().toLocaleDateString('ru-RU')}`
+			: `${item?.sourceType === 'rated_content'
+					? 'Ответ агента'
+					: item?.sourceType === 'assistant_file'
+						? 'Файл из диалога'
+						: item?.sourceType === 'uploaded_file'
+							? 'Файл'
+							: 'Добавлено вручную'} · ${item ? new Date(item.createdAt).toLocaleDateString('ru-RU') : ''}`;
+
+	return (
+		<ModalDialog
+			className="knowledge-edit-modal"
+			title={mode === 'create' ? 'Добавить данные' : 'Редактировать данные'}
+			subtitle={
+				mode === 'create'
+					? 'Добавьте текст вручную или загрузите файл'
+					: 'Все изменения будут применены после сохранения'
+			}
+			showCloseButton
+			confirmLabel={
+				saving ? (mode === 'create' ? 'Добавление…' : 'Сохранение…') : mode === 'create' ? 'Добавить данные' : 'Сохранить изменения'
+			}
+			confirmDisabled={saving}
+			onClose={onClose}
+			onConfirm={onConfirm}
+		>
+			<div className="knowledge-edit-modal__tabs" role="tablist" aria-label="Режим модального окна">
+				<button
+					className={activeTab === 'edit' ? 'active' : ''}
+					type="button"
+					role="tab"
+					aria-selected={activeTab === 'edit'}
+					onClick={() => setActiveTab('edit')}
+				>
+					Редактирование
+				</button>
+				<button
+					className={activeTab === 'preview' ? 'active' : ''}
+					type="button"
+					role="tab"
+					aria-selected={activeTab === 'preview'}
+					onClick={() => setActiveTab('preview')}
+				>
+					Предпросмотр
+				</button>
+			</div>
+			{activeTab === 'edit' ? (
+				<div className="knowledge-edit-modal__form" role="tabpanel">
+					<label>
+						Название
+						<input value={title} onChange={(event) => setTitle(event.target.value)} />
+					</label>
+					<label>
+						Содержимое
+						<textarea
+							value={content}
+							onChange={(event) => setContent(event.target.value)}
+							placeholder="Вставьте текст"
+						/>
+					</label>
+					<div className="knowledge-edit-modal__file-field">
+						<span>Файл</span>
+						<input
+							ref={fileInputRef}
+							className="knowledge-edit-modal__file-input"
+							type="file"
+							onChange={(event) => void handleFileChange(event.target.files?.[0] ?? null)}
+						/>
+						<div className="knowledge-edit-modal__file-picker">
+							<button type="button" onClick={() => fileInputRef.current?.click()}>
+								<DocumentIcon />
+								<span>{file ? file.name : 'Выбрать файл'}</span>
+							</button>
+							{file && (
+								<button
+									className="knowledge-edit-modal__file-remove"
+									type="button"
+									onClick={clearSelectedFile}
+									aria-label={`Убрать файл ${file.name}`}
+								>
+									<CrossIcon />
+								</button>
+							)}
+						</div>
+					</div>
+					<div className="knowledge-edit-modal__divider" />
+					<section className="knowledge-edit-modal__metadata" aria-labelledby="knowledge-data-metadata-title">
+						<h3 id="knowledge-data-metadata-title">Метаданные</h3>
+						<KnowledgeFilterFields value={formFilters} onChange={setFormFilters} disabled={saving} />
+						<div className="knowledge-edit-modal__approach">
+							<label>
+								Подход
+								<select
+									value={selectedApproachId}
+									onChange={(event) => setSelectedApproachId(event.target.value)}
+									aria-label="Подход элемента"
+								>
+									<option value="">Без подхода</option>
+									{approaches.map((approach) => (
+										<option key={approach.id} value={approach.id}>
+											{approach.name}
+										</option>
+									))}
+								</select>
+							</label>
+							<button
+								className="knowledge-edit-modal__new-approach"
+								type="button"
+								onClick={() => setShowApproachCreator(true)}
+							>
+								<PlusIcon />
+								Новый подход
+							</button>
+						</div>
+						{showApproachCreator && (
+							<div className="knowledge-form__approach-create">
+								<input
+									value={newApproachName}
+									onChange={(event) => setNewApproachName(event.target.value)}
+									placeholder="Название нового подхода"
+									aria-label="Название нового подхода"
+									maxLength={80}
+								/>
+								<button
+									type="button"
+									disabled={!newApproachName.trim() || creatingApproach}
+									onClick={onAddApproach}
+								>
+									{creatingApproach ? 'Создание…' : 'Создать'}
+								</button>
+								<button type="button" onClick={onResetApproachCreator}>
+									Отмена
+								</button>
+							</div>
+						)}
+					</section>
+					<div className="knowledge-edit-modal__divider" />
+					<div className="knowledge-edit-modal__settings">
+						<div className="knowledge-edit-modal__rating">
+							<span>Рейтинг</span>
+							<Rating value={rating} onChange={setRating} ariaLabel="Рейтинг элемента" />
+						</div>
+						<Checkbox
+							checked={isActive}
+							onChange={setIsActive}
+							label="Использовать в ответах"
+							className="knowledge-edit-modal__switch knowledge-card__active-toggle"
+						/>
+					</div>
+				</div>
+			) : (
+				<div className="knowledge-edit-modal__preview" role="tabpanel">
+					<article className="knowledge-edit-modal__preview-card">
+						<h3>{title.trim() || file?.name || 'Без названия'}</h3>
+						<Rating value={rating} readonly ariaLabel="Рейтинг элемента" />
+						<span className="knowledge-edit-modal__preview-source">{sourceLabel}</span>
+						<div className="knowledge-edit-modal__preview-markdown">
+							{file ? (
+								filePreview.status === 'loading' ? (
+									<p>Загрузка содержимого файла…</p>
+								) : filePreview.status === 'ready' ? (
+									<Suspense fallback={<p>Загрузка содержимого файла…</p>}>
+										<MarkdownEditor value={filePreview.content} onChange={() => undefined} readonly />
+									</Suspense>
+								) : (
+									<p>Не удалось отобразить содержимое файла в предпросмотре</p>
+								)
+							) : content.trim() ? (
+								<Suspense fallback={<p>Загрузка предпросмотра…</p>}>
+									<MarkdownEditor value={content} onChange={() => undefined} readonly />
+								</Suspense>
+							) : (
+								<p>Текстовое содержимое не заполнено</p>
+							)}
+						</div>
+						{previewMetadata.length > 0 && (
+							<div className="knowledge-edit-modal__chips">
+								{previewMetadata.map(({ label, value }) => (
+									<span key={label}>
+										{label} · {value?.trim()}
+									</span>
+								))}
+							</div>
+						)}
+					</article>
+				</div>
+			)}
+		</ModalDialog>
+	);
+}
+
 export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: () => Promise<void> }) {
 	const navigate = useNavigate();
 	const [params, setParams] = useSearchParams();
@@ -156,15 +462,10 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	const { showToast } = useToast();
 
 	const [activeDropdown, setActiveDropdown] = useState<'filters' | 'sort' | null>(null);
-	const [addDialogTab, setAddDialogTab] = useState<'edit' | 'preview'>('edit');
-	const [editDialogTab, setEditDialogTab] = useState<'edit' | 'preview'>('edit');
-	const [filePreview, setFilePreview] = useState<FilePreviewState>({ status: 'idle', content: '' });
 	const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(() => new Set());
 	const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 	const [bulkDeleting, setBulkDeleting] = useState(false);
 	const dropdownRef = useRef<HTMLDivElement>(null);
-	const fileInputRef = useRef<HTMLInputElement>(null);
-	const filePreviewRequestRef = useRef(0);
 	const selectedItems = useMemo(() => items.filter((item) => selectedItemIds.has(item.id)), [items, selectedItemIds]);
 
 	useEffect(() => {
@@ -277,45 +578,6 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 			next.delete(key),
 		);
 		setParams(next);
-	}
-
-	function handleOpenAdd() {
-		setAddDialogTab('edit');
-		setFilePreview({ status: 'idle', content: '' });
-		filePreviewRequestRef.current += 1;
-		openAdd();
-	}
-
-	async function handleFileChange(nextFile: File | null) {
-		setFile(nextFile);
-		const requestId = ++filePreviewRequestRef.current;
-		if (!nextFile) {
-			setFilePreview({ status: 'idle', content: '' });
-			return;
-		}
-
-		setFilePreview({ status: 'loading', content: '' });
-		const dotIndex = nextFile.name.lastIndexOf('.');
-		const extension = dotIndex >= 0 ? nextFile.name.slice(dotIndex).toLowerCase() : '';
-		if (!nextFile.type.startsWith('text/') && !TEXT_FILE_EXTENSIONS.has(extension)) {
-			setFilePreview({ status: 'error', content: '' });
-			return;
-		}
-
-		try {
-			const extractedContent = await nextFile.text();
-			if (requestId !== filePreviewRequestRef.current) return;
-			setFilePreview(
-				extractedContent.trim() ? { status: 'ready', content: extractedContent } : { status: 'error', content: '' },
-			);
-		} catch {
-			if (requestId === filePreviewRequestRef.current) setFilePreview({ status: 'error', content: '' });
-		}
-	}
-
-	function clearSelectedFile() {
-		void handleFileChange(null);
-		if (fileInputRef.current) fileInputRef.current.value = '';
 	}
 
 	const activeFiltersCount = [
@@ -481,22 +743,6 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 			setLoadingMore(false);
 		}
 	}
-	const filterFields = <KnowledgeFilterFields value={formFilters} onChange={setFormFilters} disabled={saving} />;
-	const selectedApproachName = selectedApproachId
-		? (approaches.find((approach) => approach.id === selectedApproachId)?.name ??
-			(dialog?.type === 'edit' && dialog.item.approach?.id === selectedApproachId ? dialog.item.approach.name : null))
-		: null;
-	const previewMetadata = [
-		{ label: 'ГЕО', value: formFilters.geo },
-		{ label: 'Селеба', value: formFilters.celebrity },
-		{ label: 'Оффер', value: formFilters.offer },
-		{ label: 'Новостник', value: formFilters.news_source },
-		{ label: 'Подход', value: selectedApproachName },
-	].filter(
-		({ label, value }) =>
-			typeof value === 'string' && value.trim().length > 0 && !(label === 'Подход' && value.trim() === 'Без подхода'),
-	);
-
 	return (
 		<div className="knowledge-shell">
 			<ChatSidebar
@@ -530,7 +776,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 							{user.email} · на странице активно {counts.active} из {counts.total}
 						</p>
 					</div>
-					<button className="knowledge-page__add" type="button" onClick={handleOpenAdd}>
+					<button className="knowledge-page__add" type="button" onClick={openAdd}>
 						Добавить данные
 					</button>
 				</header>
@@ -763,13 +1009,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 										<button type="button" onClick={() => setDialog({ type: 'view', item })}>
 											Открыть
 										</button>
-										<button
-											type="button"
-											onClick={() => {
-												setEditDialogTab('edit');
-												openEdit(item);
-											}}
-										>
+										<button type="button" onClick={() => openEdit(item)}>
 											Редактировать
 										</button>
 										{item.downloadUrl && (
@@ -808,325 +1048,37 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 					)}
 				</section>
 
-				{dialog?.type === 'add' && (
-					<ModalDialog
-						className="knowledge-edit-modal"
-						title="Добавить данные"
-						subtitle="Добавьте текст вручную или загрузите файл"
-						showCloseButton
-						confirmLabel={saving ? 'Добавление…' : 'Добавить данные'}
-						confirmDisabled={saving}
+				{(dialog?.type === 'add' || dialog?.type === 'edit') && (
+					<KnowledgeDataDialog
+						key={dialog.type === 'edit' ? `edit:${dialog.item.id}` : 'create'}
+						mode={dialog.type === 'edit' ? 'edit' : 'create'}
+						item={dialog.type === 'edit' ? dialog.item : undefined}
+						title={title}
+						setTitle={setTitle}
+						content={content}
+						setContent={setContent}
+						rating={rating}
+						setRating={setRating}
+						isActive={isActive}
+						setIsActive={setIsActive}
+						selectedApproachId={selectedApproachId}
+						setSelectedApproachId={setSelectedApproachId}
+						formFilters={formFilters}
+						setFormFilters={setFormFilters}
+						approaches={approaches}
+						newApproachName={newApproachName}
+						setNewApproachName={setNewApproachName}
+						showApproachCreator={showApproachCreator}
+						setShowApproachCreator={setShowApproachCreator}
+						creatingApproach={creatingApproach}
+						onAddApproach={() => void addApproach()}
+						onResetApproachCreator={resetApproachCreator}
+						file={file}
+						setFile={setFile}
+						saving={saving}
 						onClose={() => setDialog(null)}
 						onConfirm={() => void saveDialog()}
-					>
-						<div className="knowledge-edit-modal__tabs" role="tablist" aria-label="Режим модального окна">
-							<button
-								className={addDialogTab === 'edit' ? 'active' : ''}
-								type="button"
-								role="tab"
-								aria-selected={addDialogTab === 'edit'}
-								onClick={() => setAddDialogTab('edit')}
-							>
-								Редактирование
-							</button>
-							<button
-								className={addDialogTab === 'preview' ? 'active' : ''}
-								type="button"
-								role="tab"
-								aria-selected={addDialogTab === 'preview'}
-								onClick={() => setAddDialogTab('preview')}
-							>
-								Предпросмотр
-							</button>
-						</div>
-						{addDialogTab === 'edit' ? (
-							<div className="knowledge-edit-modal__form" role="tabpanel">
-								<label>
-									Название
-									<input value={title} onChange={(event) => setTitle(event.target.value)} />
-								</label>
-								<label>
-									Содержимое
-									<textarea
-										value={content}
-										onChange={(event) => setContent(event.target.value)}
-										placeholder="Вставьте текст"
-									/>
-								</label>
-								<div className="knowledge-edit-modal__file-field">
-									<span>Файл</span>
-									<input
-										ref={fileInputRef}
-										className="knowledge-edit-modal__file-input"
-										type="file"
-										onChange={(event) => void handleFileChange(event.target.files?.[0] ?? null)}
-									/>
-									<div className="knowledge-edit-modal__file-picker">
-										<button type="button" onClick={() => fileInputRef.current?.click()}>
-											<DocumentIcon />
-											<span>{file ? file.name : 'Выбрать файл'}</span>
-										</button>
-										{file && (
-											<button
-												className="knowledge-edit-modal__file-remove"
-												type="button"
-												onClick={clearSelectedFile}
-												aria-label={`Убрать файл ${file.name}`}
-											>
-												<CrossIcon />
-											</button>
-										)}
-									</div>
-								</div>
-								<div className="knowledge-edit-modal__divider" />
-								<section className="knowledge-edit-modal__metadata" aria-labelledby="knowledge-create-metadata-title">
-									<h3 id="knowledge-create-metadata-title">Метаданные</h3>
-									{filterFields}
-									<div className="knowledge-edit-modal__approach">
-										<label>
-											Подход
-											<select
-												value={selectedApproachId}
-												onChange={(event) => setSelectedApproachId(event.target.value)}
-												aria-label="Подход элемента"
-											>
-												<option value="">Без подхода</option>
-												{approaches.map((approach) => (
-													<option key={approach.id} value={approach.id}>
-														{approach.name}
-													</option>
-												))}
-											</select>
-										</label>
-										<button
-											className="knowledge-edit-modal__new-approach"
-											type="button"
-											onClick={() => setShowApproachCreator(true)}
-										>
-											<PlusIcon />
-											Новый подход
-										</button>
-									</div>
-									{showApproachCreator && (
-										<div className="knowledge-form__approach-create">
-											<input
-												value={newApproachName}
-												onChange={(event) => setNewApproachName(event.target.value)}
-												placeholder="Название нового подхода"
-												aria-label="Название нового подхода"
-												maxLength={80}
-											/>
-											<button
-												type="button"
-												disabled={!newApproachName.trim() || creatingApproach}
-												onClick={() => void addApproach()}
-											>
-												{creatingApproach ? 'Создание…' : 'Создать'}
-											</button>
-											<button type="button" onClick={resetApproachCreator}>
-												Отмена
-											</button>
-										</div>
-									)}
-								</section>
-								<div className="knowledge-edit-modal__divider" />
-								<div className="knowledge-edit-modal__settings">
-									<div className="knowledge-edit-modal__rating">
-										<span>Рейтинг</span>
-										<Rating value={rating} onChange={setRating} ariaLabel="Рейтинг элемента" />
-									</div>
-									<Checkbox
-										checked={isActive}
-										onChange={setIsActive}
-										label="Использовать в ответах"
-										className="knowledge-edit-modal__switch knowledge-card__active-toggle"
-									/>
-								</div>
-							</div>
-						) : (
-							<div className="knowledge-edit-modal__preview" role="tabpanel">
-								<article className="knowledge-edit-modal__preview-card">
-									<h3>{title.trim() || file?.name || 'Без названия'}</h3>
-									<Rating value={rating} readonly ariaLabel="Рейтинг элемента" />
-									<span className="knowledge-edit-modal__preview-source">
-										{file
-											? `Добавлено из файла · ${file.name}`
-											: `Добавлено вручную · ${new Date().toLocaleDateString('ru-RU')}`}
-									</span>
-									<div className="knowledge-edit-modal__preview-markdown">
-										{file ? (
-											filePreview.status === 'loading' ? (
-												<p>Загрузка содержимого файла…</p>
-											) : filePreview.status === 'ready' ? (
-												<Suspense fallback={<p>Загрузка содержимого файла…</p>}>
-													<MarkdownEditor value={filePreview.content} onChange={() => undefined} readonly />
-												</Suspense>
-											) : (
-												<p>Не удалось отобразить содержимое файла в предпросмотре</p>
-											)
-										) : content.trim() ? (
-											<Suspense fallback={<p>Загрузка предпросмотра…</p>}>
-												<MarkdownEditor value={content} onChange={() => undefined} readonly />
-											</Suspense>
-										) : (
-											<p>Текстовое содержимое не заполнено</p>
-										)}
-									</div>
-									{previewMetadata.length > 0 && (
-										<div className="knowledge-edit-modal__chips">
-											{previewMetadata.map(({ label, value }) => (
-												<span key={label}>
-													{label} · {value?.trim()}
-												</span>
-											))}
-										</div>
-									)}
-								</article>
-							</div>
-						)}
-					</ModalDialog>
-				)}
-				{dialog?.type === 'edit' && (
-					<ModalDialog
-						className="knowledge-edit-modal"
-						title="Редактировать данные"
-						subtitle="Все изменения будут применены после сохранения"
-						showCloseButton
-						confirmLabel={saving ? 'Сохранение…' : 'Сохранить изменения'}
-						confirmDisabled={saving}
-						onClose={() => setDialog(null)}
-						onConfirm={() => void saveDialog()}
-					>
-						<div className="knowledge-edit-modal__tabs" role="tablist" aria-label="Режим модального окна">
-							<button
-								className={editDialogTab === 'edit' ? 'active' : ''}
-								type="button"
-								role="tab"
-								aria-selected={editDialogTab === 'edit'}
-								onClick={() => setEditDialogTab('edit')}
-							>
-								Редактирование
-							</button>
-							<button
-								className={editDialogTab === 'preview' ? 'active' : ''}
-								type="button"
-								role="tab"
-								aria-selected={editDialogTab === 'preview'}
-								onClick={() => setEditDialogTab('preview')}
-							>
-								Предпросмотр
-							</button>
-						</div>
-						{editDialogTab === 'edit' ? (
-							<div className="knowledge-edit-modal__form" role="tabpanel">
-								<label>
-									Название
-									<input value={title} onChange={(event) => setTitle(event.target.value)} />
-								</label>
-								<label>
-									Содержимое
-									<textarea
-										value={content}
-										onChange={(event) => setContent(event.target.value)}
-										placeholder="Вставьте текст"
-									/>
-								</label>
-								<div className="knowledge-edit-modal__divider" />
-								<section className="knowledge-edit-modal__metadata" aria-labelledby="knowledge-edit-metadata-title">
-									<h3 id="knowledge-edit-metadata-title">Метаданные</h3>
-									{filterFields}
-									<div className="knowledge-edit-modal__approach">
-										<label>
-											Подход
-											<select
-												value={selectedApproachId}
-												onChange={(event) => setSelectedApproachId(event.target.value)}
-												aria-label="Подход элемента"
-											>
-												<option value="">Без подхода</option>
-												{approaches.map((approach) => (
-													<option key={approach.id} value={approach.id}>
-														{approach.name}
-													</option>
-												))}
-											</select>
-										</label>
-										<button
-											className="knowledge-edit-modal__new-approach"
-											type="button"
-											onClick={() => setShowApproachCreator(true)}
-										>
-											<PlusIcon />
-											Новый подход
-										</button>
-									</div>
-									{showApproachCreator && (
-										<div className="knowledge-form__approach-create">
-											<input
-												value={newApproachName}
-												onChange={(event) => setNewApproachName(event.target.value)}
-												placeholder="Название нового подхода"
-												aria-label="Название нового подхода"
-												maxLength={80}
-											/>
-											<button
-												type="button"
-												disabled={!newApproachName.trim() || creatingApproach}
-												onClick={() => void addApproach()}
-											>
-												{creatingApproach ? 'Создание…' : 'Создать'}
-											</button>
-											<button type="button" onClick={resetApproachCreator}>
-												Отмена
-											</button>
-										</div>
-									)}
-								</section>
-								<div className="knowledge-edit-modal__divider" />
-								<div className="knowledge-edit-modal__settings">
-									<div className="knowledge-edit-modal__rating">
-										<span>Рейтинг</span>
-										<Rating value={rating} onChange={setRating} ariaLabel="Рейтинг элемента" />
-									</div>
-									<Checkbox
-										checked={isActive}
-										onChange={setIsActive}
-										label="Использовать в ответах"
-										className="knowledge-edit-modal__switch knowledge-card__active-toggle"
-									/>
-								</div>
-							</div>
-						) : (
-							<div className="knowledge-edit-modal__preview" role="tabpanel">
-								<article className="knowledge-edit-modal__preview-card">
-									<h3>{title.trim() || 'Без названия'}</h3>
-									<Rating value={rating} readonly ariaLabel="Рейтинг элемента" />
-									<span className="knowledge-edit-modal__preview-source">
-										{dialog.item.sourceType === 'rated_content'
-											? 'Ответ агента'
-											: dialog.item.sourceType === 'assistant_file'
-												? 'Файл из диалога'
-												: dialog.item.sourceType === 'uploaded_file'
-													? 'Файл'
-													: 'Добавлено вручную'}{' '}
-										· {new Date(dialog.item.createdAt).toLocaleDateString('ru-RU')}
-									</span>
-									<p className="knowledge-edit-modal__preview-content">
-										{content || 'Текстовое содержимое не извлечено'}
-									</p>
-									{previewMetadata.length > 0 && (
-										<div className="knowledge-edit-modal__chips">
-											{previewMetadata.map(({ label, value }) => (
-												<span key={label}>
-													{label} · {value?.trim()}
-												</span>
-											))}
-										</div>
-									)}
-								</article>
-							</div>
-						)}
-					</ModalDialog>
+					/>
 				)}
 				{dialog?.type === 'view' && (
 					<ModalDialog
