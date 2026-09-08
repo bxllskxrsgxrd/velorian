@@ -1,4 +1,5 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
+import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
 	createKnowledgeApproach,
@@ -25,7 +26,7 @@ import { useKnowledgeStore } from '../stores/knowledgeStore';
 import { useConversationsStore } from '../stores/conversationsStore';
 import { useUiStore } from '../stores/uiStore';
 import './_knowledgePage.scss';
-import { CrossIcon, DocumentIcon, PlusIcon, SearchIcon, TrashIcon } from '../components/icons/AppIcons';
+import { CrossIcon, DocumentIcon, ListIcon, PlusIcon, SearchIcon, TrashIcon } from '../components/icons/AppIcons';
 
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor/MarkdownEditor'));
 
@@ -33,7 +34,6 @@ type RatingFilter = 'all' | '5' | '4' | '3' | 'unrated';
 type SortMode = 'date_desc' | 'date_asc' | 'rating_desc' | 'rating_asc';
 type FilePreviewState = { status: 'idle' | 'loading' | 'ready' | 'error'; content: string };
 type KnowledgeCardMenuState = { itemId: string; top: number; left: number };
-type KnowledgeCardTooltipState = { itemId: string; top: number; left: number };
 
 const TEXT_FILE_EXTENSIONS = new Set([
 	'.txt',
@@ -468,11 +468,11 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 	const [bulkDeleting, setBulkDeleting] = useState(false);
 	const [cardMenu, setCardMenu] = useState<KnowledgeCardMenuState | null>(null);
-	const [cardTooltip, setCardTooltip] = useState<KnowledgeCardTooltipState | null>(null);
 	const dropdownRef = useRef<HTMLDivElement>(null);
 	const cardMenuRef = useRef<HTMLDivElement>(null);
-	const cardTooltipTimerRef = useRef<number | null>(null);
-	const cardTooltipPointerRef = useRef<KnowledgeCardTooltipState | null>(null);
+	const cardCursorIndicatorRef = useRef<HTMLDivElement>(null);
+	const cardCursorPositionRef = useRef<{ clientX: number; clientY: number } | null>(null);
+	const cardCursorTimerRef = useRef<number | null>(null);
 	const selectedItems = useMemo(() => items.filter((item) => selectedItemIds.has(item.id)), [items, selectedItemIds]);
 	const cardMenuItem = cardMenu ? items.find((item) => item.id === cardMenu.itemId) : null;
 
@@ -496,34 +496,27 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	}, [activeDropdown]);
 
 	useEffect(() => {
-		if (!cardMenu && !cardTooltip) return;
+		if (!cardMenu) return;
 		function handleClickOutside(event: MouseEvent) {
-			if (!cardMenuRef.current?.contains(event.target as Node)) {
-				setCardMenu(null);
-				setCardTooltip(null);
-			}
+			if (!cardMenuRef.current?.contains(event.target as Node)) setCardMenu(null);
+		}
+		function handleEscape(event: KeyboardEvent) {
+			if (event.key === 'Escape') setCardMenu(null);
 		}
 		document.addEventListener('mousedown', handleClickOutside);
-		return () => {
-			document.removeEventListener('mousedown', handleClickOutside);
-		};
-	}, [cardMenu, cardTooltip]);
-
-	useEffect(() => {
-		function handleEscape(event: KeyboardEvent) {
-			if (event.key !== 'Escape') return;
-			if (cardTooltipTimerRef.current !== null) window.clearTimeout(cardTooltipTimerRef.current);
-			cardTooltipTimerRef.current = null;
-			cardTooltipPointerRef.current = null;
-			setCardMenu(null);
-			setCardTooltip(null);
-		}
 		document.addEventListener('keydown', handleEscape);
 		return () => {
+			document.removeEventListener('mousedown', handleClickOutside);
 			document.removeEventListener('keydown', handleEscape);
-			if (cardTooltipTimerRef.current !== null) window.clearTimeout(cardTooltipTimerRef.current);
 		};
-	}, []);
+	}, [cardMenu]);
+
+	useEffect(
+		() => () => {
+			if (cardCursorTimerRef.current !== null) window.clearTimeout(cardCursorTimerRef.current);
+		},
+		[],
+	);
 
 	useEffect(() => {
 		setSearch(params.get('q') ?? '');
@@ -734,35 +727,40 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 		});
 	}
 
-	function hideCardTooltip() {
-		if (cardTooltipTimerRef.current !== null) window.clearTimeout(cardTooltipTimerRef.current);
-		cardTooltipTimerRef.current = null;
-		cardTooltipPointerRef.current = null;
-		setCardTooltip(null);
+	function hideCardCursorIndicator() {
+		if (cardCursorTimerRef.current !== null) window.clearTimeout(cardCursorTimerRef.current);
+		cardCursorTimerRef.current = null;
+		cardCursorPositionRef.current = null;
+		if (cardCursorIndicatorRef.current) {
+			cardCursorIndicatorRef.current.style.transform = 'translate3d(-100px, -100px, 0)';
+		}
 	}
 
-	function cardTooltipPosition(itemId: string, clientX: number, clientY: number): KnowledgeCardTooltipState {
-		const horizontalInset = Math.min(122, window.innerWidth / 2);
-		return {
-			itemId,
-			left: Math.max(horizontalInset, Math.min(clientX, window.innerWidth - horizontalInset)),
-			top: Math.max(56, Math.min(clientY - 10, window.innerHeight - 8)),
-		};
-	}
+	function updateCardCursorIndicator(target: EventTarget | null, clientX: number, clientY: number) {
+		const indicator = cardCursorIndicatorRef.current;
+		const interactiveTarget = target instanceof Element && target.closest('button, a, input, label, select, textarea');
+		hideCardCursorIndicator();
+		if (!indicator || interactiveTarget || !window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
+			return;
+		}
 
-	function scheduleCardTooltip(itemId: string, clientX: number, clientY: number) {
-		hideCardTooltip();
-		cardTooltipPointerRef.current = cardTooltipPosition(itemId, clientX, clientY);
-		cardTooltipTimerRef.current = window.setTimeout(() => {
-			cardTooltipTimerRef.current = null;
-			if (cardTooltipPointerRef.current) setCardTooltip(cardTooltipPointerRef.current);
-		}, 600);
-	}
-
-	function updateCardTooltipPosition(itemId: string, clientX: number, clientY: number) {
-		const nextPosition = cardTooltipPosition(itemId, clientX, clientY);
-		cardTooltipPointerRef.current = nextPosition;
-		if (cardTooltip?.itemId === itemId) setCardTooltip(nextPosition);
+		cardCursorPositionRef.current = { clientX, clientY };
+		cardCursorTimerRef.current = window.setTimeout(() => {
+			cardCursorTimerRef.current = null;
+			const position = cardCursorPositionRef.current;
+			if (!position || !cardCursorIndicatorRef.current) return;
+			const indicatorSize = 16;
+			const viewportInset = 6;
+			const x = Math.max(
+				viewportInset,
+				Math.min(position.clientX + 10, window.innerWidth - indicatorSize - viewportInset),
+			);
+			const y = Math.max(
+				viewportInset,
+				Math.min(position.clientY + 10, window.innerHeight - indicatorSize - viewportInset),
+			);
+			cardCursorIndicatorRef.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
+		}, 400);
 	}
 
 	function openCardMenu(itemId: string, left: number, top: number) {
@@ -1030,11 +1028,11 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 							<article
 								className={`knowledge-card ${selectedItemIds.has(item.id) ? 'knowledge-card--selected' : ''}`}
 								key={item.id}
-								onMouseEnter={(event) => scheduleCardTooltip(item.id, event.clientX, event.clientY)}
-								onMouseMove={(event) => updateCardTooltipPosition(item.id, event.clientX, event.clientY)}
-								onMouseLeave={hideCardTooltip}
+								onMouseEnter={(event) => updateCardCursorIndicator(event.target, event.clientX, event.clientY)}
+								onMouseMove={(event) => updateCardCursorIndicator(event.target, event.clientX, event.clientY)}
+								onMouseLeave={hideCardCursorIndicator}
 								onContextMenu={(event) => {
-									hideCardTooltip();
+									hideCardCursorIndicator();
 									if ((event.target as HTMLElement).closest('button, a, input, label')) return;
 									event.preventDefault();
 									openCardMenu(item.id, event.clientX, event.clientY);
@@ -1110,15 +1108,11 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 						</button>
 					)}
 				</section>
-				{cardTooltip && !cardMenu && (
-					<div
-						key={cardTooltip.itemId}
-						className="knowledge-card__context-tooltip"
-						role="tooltip"
-						style={{ top: cardTooltip.top, left: cardTooltip.left }}
-					>
-						Правый клик — меню действий
-					</div>
+				{createPortal(
+					<div ref={cardCursorIndicatorRef} className="knowledge-card__cursor-indicator" aria-hidden="true">
+						<ListIcon />
+					</div>,
+					document.body,
 				)}
 				{cardMenu && cardMenuItem && (
 					<div

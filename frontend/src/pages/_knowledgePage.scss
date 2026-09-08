@@ -502,21 +502,22 @@
 	color: var(--color-text-secondary);
 	white-space: pre-wrap;
 }
-.knowledge-card__context-tooltip {
+.knowledge-card__cursor-indicator {
 	position: fixed;
-	z-index: 80;
-	transform: translate(-50%, -100%);
-	box-sizing: border-box;
-	max-width: min(228px, calc(100vw - 16px));
-	padding: 7px 10px;
-	border: 1px solid var(--color-border);
-	border-radius: 8px;
-	color: var(--color-text-secondary);
-	background: var(--color-bg-surface);
-	box-shadow: var(--shadow-surface);
-	font-size: 12px;
-	text-align: center;
+	top: 0;
+	left: 0;
+	z-index: 1000;
+	width: 16px;
+	height: 16px;
+	display: grid;
+	place-items: center;
+	transform: translate3d(-100px, -100px, 0);
+	color: var(--color-accent);
 	pointer-events: none;
+}
+.knowledge-card__cursor-indicator svg {
+	width: 16px;
+	height: 16px;
 }
 .knowledge-card__menu {
 	position: fixed;
