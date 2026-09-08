@@ -25,7 +25,7 @@ import { useKnowledgeStore } from '../stores/knowledgeStore';
 import { useConversationsStore } from '../stores/conversationsStore';
 import { useUiStore } from '../stores/uiStore';
 import './_knowledgePage.scss';
-import { CrossIcon, DocumentIcon, MoreIcon, PlusIcon, SearchIcon, TrashIcon } from '../components/icons/AppIcons';
+import { CrossIcon, DocumentIcon, PlusIcon, SearchIcon, TrashIcon } from '../components/icons/AppIcons';
 
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor/MarkdownEditor'));
 
@@ -33,6 +33,7 @@ type RatingFilter = 'all' | '5' | '4' | '3' | 'unrated';
 type SortMode = 'date_desc' | 'date_asc' | 'rating_desc' | 'rating_asc';
 type FilePreviewState = { status: 'idle' | 'loading' | 'ready' | 'error'; content: string };
 type KnowledgeCardMenuState = { itemId: string; top: number; left: number };
+type KnowledgeCardTooltipState = { itemId: string; top: number; left: number };
 
 const TEXT_FILE_EXTENSIONS = new Set([
 	'.txt',
@@ -467,8 +468,10 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
 	const [bulkDeleting, setBulkDeleting] = useState(false);
 	const [cardMenu, setCardMenu] = useState<KnowledgeCardMenuState | null>(null);
+	const [cardTooltip, setCardTooltip] = useState<KnowledgeCardTooltipState | null>(null);
 	const dropdownRef = useRef<HTMLDivElement>(null);
 	const cardMenuRef = useRef<HTMLDivElement>(null);
+	const cardTooltipTimerRef = useRef<number | null>(null);
 	const selectedItems = useMemo(() => items.filter((item) => selectedItemIds.has(item.id)), [items, selectedItemIds]);
 	const cardMenuItem = cardMenu ? items.find((item) => item.id === cardMenu.itemId) : null;
 
@@ -492,20 +495,33 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	}, [activeDropdown]);
 
 	useEffect(() => {
-		if (!cardMenu) return;
+		if (!cardMenu && !cardTooltip) return;
 		function handleClickOutside(event: MouseEvent) {
-			if (!cardMenuRef.current?.contains(event.target as Node)) setCardMenu(null);
-		}
-		function handleEscape(event: KeyboardEvent) {
-			if (event.key === 'Escape') setCardMenu(null);
+			if (!cardMenuRef.current?.contains(event.target as Node)) {
+				setCardMenu(null);
+				setCardTooltip(null);
+			}
 		}
 		document.addEventListener('mousedown', handleClickOutside);
-		document.addEventListener('keydown', handleEscape);
 		return () => {
 			document.removeEventListener('mousedown', handleClickOutside);
-			document.removeEventListener('keydown', handleEscape);
 		};
-	}, [cardMenu]);
+	}, [cardMenu, cardTooltip]);
+
+	useEffect(() => {
+		function handleEscape(event: KeyboardEvent) {
+			if (event.key !== 'Escape') return;
+			if (cardTooltipTimerRef.current !== null) window.clearTimeout(cardTooltipTimerRef.current);
+			cardTooltipTimerRef.current = null;
+			setCardMenu(null);
+			setCardTooltip(null);
+		}
+		document.addEventListener('keydown', handleEscape);
+		return () => {
+			document.removeEventListener('keydown', handleEscape);
+			if (cardTooltipTimerRef.current !== null) window.clearTimeout(cardTooltipTimerRef.current);
+		};
+	}, []);
 
 	useEffect(() => {
 		setSearch(params.get('q') ?? '');
@@ -714,6 +730,25 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 			else next.delete(itemId);
 			return next;
 		});
+	}
+
+	function hideCardTooltip() {
+		if (cardTooltipTimerRef.current !== null) window.clearTimeout(cardTooltipTimerRef.current);
+		cardTooltipTimerRef.current = null;
+		setCardTooltip(null);
+	}
+
+	function scheduleCardTooltip(itemId: string, card: HTMLElement) {
+		hideCardTooltip();
+		const bounds = card.getBoundingClientRect();
+		cardTooltipTimerRef.current = window.setTimeout(() => {
+			cardTooltipTimerRef.current = null;
+			setCardTooltip({
+				itemId,
+				left: Math.max(8, Math.min(bounds.left + 32, window.innerWidth - 236)),
+				top: bounds.top >= 44 ? bounds.top - 36 : bounds.top + 12,
+			});
+		}, 600);
 	}
 
 	function openCardMenu(itemId: string, left: number, top: number) {
@@ -979,15 +1014,12 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 					{!loading &&
 						items.map((item) => (
 							<article
-								className={[
-									'knowledge-card',
-									selectedItemIds.has(item.id) && 'knowledge-card--selected',
-									cardMenu?.itemId === item.id && 'knowledge-card--menu-open',
-								]
-									.filter(Boolean)
-									.join(' ')}
+								className={`knowledge-card ${selectedItemIds.has(item.id) ? 'knowledge-card--selected' : ''}`}
 								key={item.id}
+								onMouseEnter={(event) => scheduleCardTooltip(item.id, event.currentTarget)}
+								onMouseLeave={hideCardTooltip}
 								onContextMenu={(event) => {
+									hideCardTooltip();
 									if ((event.target as HTMLElement).closest('button, a, input, label')) return;
 									event.preventDefault();
 									openCardMenu(item.id, event.clientX, event.clientY);
@@ -1040,31 +1072,13 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 												<span className="knowledge-card__extraction-warning">{extractionStatusLabel(item)}</span>
 											)}
 										</div>
-										<div className="knowledge-card__head-actions">
-											<Checkbox
-												checked={item.isActive}
-												disabled={pendingItemIds.has(item.id)}
-												onChange={(checked) => void toggleItem(item, checked)}
-												label="Использовать в ответах"
-												className="knowledge-card__active-toggle"
-											/>
-											<button
-												className="knowledge-card__more"
-												type="button"
-												aria-label={`Действия с записью «${item.title}»`}
-												aria-expanded={cardMenu?.itemId === item.id}
-												onClick={(event) => {
-													if (cardMenu?.itemId === item.id) {
-														setCardMenu(null);
-														return;
-													}
-													const bounds = event.currentTarget.getBoundingClientRect();
-													openCardMenu(item.id, bounds.right - 220, bounds.bottom + 6);
-												}}
-											>
-												<MoreIcon />
-											</button>
-										</div>
+										<Checkbox
+											checked={item.isActive}
+											disabled={pendingItemIds.has(item.id)}
+											onChange={(checked) => void toggleItem(item, checked)}
+											label="Использовать в ответах"
+											className="knowledge-card__active-toggle"
+										/>
 									</div>
 									<p>{item.content || 'Текстовое содержимое не извлечено'}</p>
 								</div>
@@ -1081,6 +1095,16 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 						</button>
 					)}
 				</section>
+				{cardTooltip && !cardMenu && (
+					<div
+						key={cardTooltip.itemId}
+						className="knowledge-card__context-tooltip"
+						role="tooltip"
+						style={{ top: cardTooltip.top, left: cardTooltip.left }}
+					>
+						Правый клик — меню действий
+					</div>
+				)}
 				{cardMenu && cardMenuItem && (
 					<div
 						ref={cardMenuRef}
