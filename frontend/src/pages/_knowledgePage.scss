@@ -355,9 +355,9 @@
 }
 
 .knowledge-page__controls input:not(.knowledge-page__search-input),
-.knowledge-page__controls select,
+.knowledge-page__controls .custom-select__trigger,
 .knowledge-form input:not(.checkbox__input),
-.knowledge-form select,
+.knowledge-form .custom-select__trigger,
 .knowledge-form textarea {
 	@include knowledge-field-control;
 }
@@ -630,7 +630,15 @@
 }
 .knowledge-form__approach-create {
 	display: grid;
-	grid-template-columns: 1fr auto auto;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
+	gap: 10px 14px;
+}
+.knowledge-form__approach-create > input {
+	min-width: 0;
+}
+.knowledge-form__approach-actions {
+	display: grid;
+	grid-template-columns: repeat(2, minmax(0, 1fr));
 	gap: 6px;
 }
 .knowledge-form__approach-create button {
@@ -811,7 +819,7 @@
 	}
 
 	.knowledge-edit-modal__form input:not(.checkbox__input),
-	.knowledge-edit-modal__form select,
+	.knowledge-edit-modal__form .custom-select__trigger,
 	.knowledge-edit-modal__form textarea {
 		@include knowledge-field-control;
 	}
@@ -1145,7 +1153,8 @@
 		max-width: 480px;
 	}
 	.knowledge-page__dropdown-grid,
-	.knowledge-form .knowledge-filter-fields {
+	.knowledge-form .knowledge-filter-fields,
+	.knowledge-form__approach-create {
 		grid-template-columns: 1fr;
 	}
 	.knowledge-card__head {

@@ -19,6 +19,7 @@ import { useToast } from '../hooks/useToast';
 import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
 import { Rating } from '../components/ui/Rating/Rating';
 import { Checkbox } from '../components/ui/Checkbox/Checkbox';
+import { CustomSelect } from '../components/ui/CustomSelect/CustomSelect';
 import { KnowledgeFilterFields } from '../components/KnowledgeFilterFields/KnowledgeFilterFields';
 import type { AuthUser, KnowledgeApproach, KnowledgeFilters, KnowledgeItem } from '../types/chat';
 import { reportError } from '../utils/reportError';
@@ -305,18 +306,15 @@ function KnowledgeDataDialog({
 						<div className="knowledge-edit-modal__approach">
 							<label>
 								Подход
-								<select
+								<CustomSelect
 									value={selectedApproachId}
-									onChange={(event) => setSelectedApproachId(event.target.value)}
-									aria-label="Подход элемента"
-								>
-									<option value="">Без подхода</option>
-									{approaches.map((approach) => (
-										<option key={approach.id} value={approach.id}>
-											{approach.name}
-										</option>
-									))}
-								</select>
+									onChange={setSelectedApproachId}
+									ariaLabel="Подход элемента"
+									options={[
+										{ value: '', label: 'Без подхода' },
+										...approaches.map((approach) => ({ value: approach.id, label: approach.name })),
+									]}
+								/>
 							</label>
 							<button
 								className="knowledge-edit-modal__new-approach"
@@ -336,16 +334,18 @@ function KnowledgeDataDialog({
 									aria-label="Название нового подхода"
 									maxLength={80}
 								/>
-								<button
-									type="button"
-									disabled={!newApproachName.trim() || creatingApproach}
-									onClick={onAddApproach}
-								>
-									{creatingApproach ? 'Создание…' : 'Создать'}
-								</button>
-								<button type="button" onClick={onResetApproachCreator}>
-									Отмена
-								</button>
+								<div className="knowledge-form__approach-actions">
+									<button
+										type="button"
+										disabled={!newApproachName.trim() || creatingApproach}
+										onClick={onAddApproach}
+									>
+										{creatingApproach ? 'Создание…' : 'Создать'}
+									</button>
+									<button type="button" onClick={onResetApproachCreator}>
+										Отмена
+									</button>
+								</div>
 							</div>
 						)}
 					</section>
@@ -898,41 +898,57 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 							<div className="knowledge-page__dropdown-grid">
 								<label>
 									Источник
-									<select value={sourceType} onChange={(event) => setFilter('source', event.target.value)}>
-										<option value="">Все источники</option>
-										<option value="manual">Вручную</option>
-										<option value="uploaded_file">Файлы</option>
-										<option value="rated_content">Оценённые ответы</option>
-									</select>
+									<CustomSelect
+										value={sourceType}
+										onChange={(value) => setFilter('source', value)}
+										ariaLabel="Источник"
+										options={[
+											{ value: '', label: 'Все источники' },
+											{ value: 'manual', label: 'Вручную' },
+											{ value: 'uploaded_file', label: 'Файлы' },
+											{ value: 'rated_content', label: 'Оценённые ответы' },
+										]}
+									/>
 								</label>
 								<label>
 									Подход
-									<select value={approachId} onChange={(event) => setFilter('approach', event.target.value)}>
-										<option value="">Все подходы</option>
-										{approaches.map((approach) => (
-											<option key={approach.id} value={approach.id}>
-												{approach.name}
-											</option>
-										))}
-									</select>
+									<CustomSelect
+										value={approachId}
+										onChange={(value) => setFilter('approach', value)}
+										ariaLabel="Подход"
+										options={[
+											{ value: '', label: 'Все подходы' },
+											...approaches.map((approach) => ({ value: approach.id, label: approach.name })),
+										]}
+									/>
 								</label>
 								<label>
 									Рейтинг
-									<select value={ratingFilter} onChange={(event) => setFilter('rating', event.target.value, 'all')}>
-										<option value="all">Все рейтинги</option>
-										<option value="5">5 из 5</option>
-										<option value="4">4 и выше</option>
-										<option value="3">3 и выше</option>
-										<option value="unrated">Без рейтинга</option>
-									</select>
+									<CustomSelect
+										value={ratingFilter}
+										onChange={(value) => setFilter('rating', value, 'all')}
+										ariaLabel="Рейтинг"
+										options={[
+											{ value: 'all', label: 'Все рейтинги' },
+											{ value: '5', label: '5 из 5' },
+											{ value: '4', label: '4 и выше' },
+											{ value: '3', label: '3 и выше' },
+											{ value: 'unrated', label: 'Без рейтинга' },
+										]}
+									/>
 								</label>
 								<label>
 									Использование
-									<select value={activeFilter} onChange={(event) => setFilter('active', event.target.value, 'all')}>
-										<option value="all">Все состояния</option>
-										<option value="active">Используются агентом</option>
-										<option value="inactive">Отключены</option>
-									</select>
+									<CustomSelect
+										value={activeFilter}
+										onChange={(value) => setFilter('active', value, 'all')}
+										ariaLabel="Использование"
+										options={[
+											{ value: 'all', label: 'Все состояния' },
+											{ value: 'active', label: 'Используются агентом' },
+											{ value: 'inactive', label: 'Отключены' },
+										]}
+									/>
 								</label>
 								<label>
 									ГЕО

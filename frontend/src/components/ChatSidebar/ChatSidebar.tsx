@@ -27,6 +27,7 @@ import {
 } from '../icons/AppIcons';
 import { VelorianIcon } from '../icons/VelorianIcon';
 import { ModalDialog } from '../ui/ModalDialog/ModalDialog';
+import { CustomSelect } from '../ui/CustomSelect/CustomSelect';
 import './_chatSidebar.scss';
 import { SidebarButton } from '../ui/SidebarButton/SidebarButton';
 import { useSidebarStore } from '../../stores/sidebarStore';
@@ -453,13 +454,15 @@ export function ChatSidebar(props: ChatSidebarProps) {
 								<div className="chat-sidebar__settings-panel">
 									<label>
 										<span>Акцент интерфейса</span>
-										<select value={accentTheme} onChange={(event) => setAccent(event.target.value as AccentTheme)}>
-											{ACCENT_THEMES.map((theme) => (
-												<option value={theme} key={theme}>
-													{ACCENT_THEME_LABELS[theme]}
-												</option>
-											))}
-										</select>
+										<CustomSelect
+											value={accentTheme}
+											onChange={(value) => setAccent(value as AccentTheme)}
+											ariaLabel="Акцент интерфейса"
+											options={ACCENT_THEMES.map((theme) => ({
+												value: theme,
+												label: ACCENT_THEME_LABELS[theme],
+											}))}
+										/>
 									</label>
 									<div>
 										<button type="button" onClick={() => props.onExport('markdown')}>
