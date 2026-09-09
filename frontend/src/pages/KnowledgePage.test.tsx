@@ -105,6 +105,31 @@ function renderKnowledge(initialEntry = '/knowledge') {
 	);
 }
 
+async function openEditFromCard(title: string) {
+	const cardTitle = await screen.findByText(title, {
+		selector: 'strong',
+		exact: true,
+	});
+	const card = cardTitle.closest('article');
+
+	expect(card).not.toBeNull();
+
+	fireEvent.contextMenu(card as HTMLElement, {
+		clientX: 100,
+		clientY: 100,
+	});
+
+	const menu = await screen.findByRole('menu', {
+		name: `Действия с записью «${title}»`,
+	});
+
+	fireEvent.click(
+		within(menu).getByRole('menuitem', {
+			name: 'Редактировать',
+		}),
+	);
+}
+
 describe('KnowledgePage', () => {
 	beforeEach(() => {
 		useKnowledgeStore.getState().reset();
@@ -350,11 +375,7 @@ describe('KnowledgePage', () => {
 
 		renderKnowledge();
 
-		fireEvent.click(
-			await screen.findByRole('button', {
-				name: 'Редактировать',
-			}),
-		);
+		await openEditFromCard('Оффер');
 
 		const dialog = screen.getByRole('dialog');
 
@@ -426,11 +447,7 @@ describe('KnowledgePage', () => {
 
 		renderKnowledge();
 
-		fireEvent.click(
-			await screen.findByRole('button', {
-				name: 'Редактировать',
-			}),
-		);
+		await openEditFromCard('Оффер');
 
 		const dialog = screen.getByRole('dialog');
 

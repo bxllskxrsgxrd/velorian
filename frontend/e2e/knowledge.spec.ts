@@ -177,9 +177,26 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(page.getByText('3/5', { exact: true })).toHaveCount(0);
 
-	// Редактирование.
-	await page
-		.getByRole('button', {
+	// Редактирование через контекстное меню карточки.
+	const knowledgeCard = page.locator('article.knowledge-card').filter({
+		hasText: 'Проверенный оффер',
+	});
+
+	await expect(knowledgeCard).toBeVisible();
+
+	await knowledgeCard.click({
+		button: 'right',
+		position: { x: 120, y: 80 },
+	});
+
+	const cardMenu = page.getByRole('menu', {
+		name: 'Действия с записью «Проверенный оффер»',
+	});
+
+	await expect(cardMenu).toBeVisible();
+
+	await cardMenu
+		.getByRole('menuitem', {
 			name: 'Редактировать',
 		})
 		.click();
