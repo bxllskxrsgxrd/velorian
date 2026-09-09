@@ -445,7 +445,12 @@ export function ChatSidebar(props: ChatSidebarProps) {
 				<div className="chat-sidebar__account-wrap">
 					{accountOpen && (
 						<div className="chat-sidebar__account-menu">
-							<button type="button" onClick={() => setSettingsOpen((current) => !current)}>
+							<button
+								className="chat-sidebar__settings-toggle"
+								type="button"
+								aria-expanded={settingsOpen}
+								onClick={() => setSettingsOpen((current) => !current)}
+							>
 								<SettingsIcon />
 								<span>Настройки</span>
 								<ChevronIcon />

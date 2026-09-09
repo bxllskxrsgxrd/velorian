@@ -339,6 +339,7 @@ def create_manual_knowledge_item(payload: KnowledgeCreatePayload, user: User = D
 async def upload_knowledge_file(
 	file: UploadFile = File(...),
 	title: str = Form(default=""),
+	content: str | None = Form(default=None, max_length=2_000_000),
 	rating: int | None = Form(default=None, ge=1, le=5),
 	is_active: bool = Form(default=True),
 	approach_id: str | None = Form(default=None, max_length=36),
@@ -351,28 +352,34 @@ async def upload_knowledge_file(
 ):
 	approach = optional_owned_approach(db, approach_id, user.id)
 	name = validate_file_name(file.filename or "Без имени")
-	content = await file.read(settings.max_file_size + 1)
+	file_content = await file.read(settings.max_file_size + 1)
 	await file.close()
-	if len(content) > settings.max_file_size:
+	if len(file_content) > settings.max_file_size:
 		raise AppError(413, "FILE_SIZE_LIMIT_EXCEEDED", f"Файл {name} превышает лимит", {
-			"fileName": name, "actualSize": len(content), "maximumSize": settings.max_file_size,
+			"fileName": name, "actualSize": len(file_content), "maximumSize": settings.max_file_size,
 		})
-	extracted = extract_text(name, file.content_type or "application/octet-stream", content)
+	extracted = extract_text(name, file.content_type or "application/octet-stream", file_content)
 	if extracted.status not in {"ready", "empty", "ocr_unavailable"}:
 		raise AppError(422, "FILE_PROCESSING_FAILED", f"Не удалось обработать файл {name}")
-	checksum = hashlib.sha256(content).hexdigest()
+	checksum = hashlib.sha256(file_content).hexdigest()
+	item_title = title.strip()[:255] or name
+	item_content = content if content is not None else extracted.text
 	for existing in db.scalars(select(KnowledgeItem).where(
 		KnowledgeItem.user_id == user.id,
 		KnowledgeItem.source_type == "uploaded_file",
 		KnowledgeItem.deleted_at.is_(None),
 	)):
-		if (existing.item_metadata or {}).get("sha256") == checksum:
+		if (
+			(existing.item_metadata or {}).get("sha256") == checksum
+			and existing.title == item_title
+			and existing.content == item_content
+		):
 			raise AppError(409, "KNOWLEDGE_DUPLICATE", "Такой файл уже добавлен в базу знаний")
 	item = KnowledgeItem(
 		user_id=user.id,
 		source_type="uploaded_file",
-		title=title.strip()[:255] or name,
-		content=extracted.text,
+		title=item_title,
+		content=item_content,
 		mime_type=file.content_type or "application/octet-stream",
 		original_filename=name,
 		rating=rating,
@@ -388,7 +395,7 @@ async def upload_knowledge_file(
 	storage_key = build_storage_key(user.id, "knowledge", item.id)
 	storage = get_file_storage()
 	try:
-		await storage.save(storage_key, content, item.mime_type)
+		await storage.save(storage_key, file_content, item.mime_type)
 		item.storage_key = storage_key
 		db.commit()
 	except Exception:

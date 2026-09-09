@@ -553,6 +553,29 @@ def test_knowledge_manual_file_rated_message_and_ownership(client, monkeypatch):
 	assert client.get(f"/api/knowledge/{file_payload['id']}/file").status_code == 404
 
 
+def test_knowledge_file_upload_uses_edited_title_and_content(authenticated_client):
+	file_bytes = "исходный текст файла".encode()
+	files = {"file": ("draft.txt", file_bytes, "text/plain")}
+	data = {"title": "Отредактированный заголовок", "content": "Отредактированное содержимое"}
+
+	created = authenticated_client.post("/api/knowledge/files", data=data, files=files)
+	assert created.status_code == 200
+	assert created.json()["item"]["title"] == data["title"]
+	assert created.json()["item"]["content"] == data["content"]
+
+	duplicate = authenticated_client.post("/api/knowledge/files", data=data, files=files)
+	assert duplicate.status_code == 409
+	assert duplicate.json()["error"]["code"] == "KNOWLEDGE_DUPLICATE"
+
+	edited = authenticated_client.post(
+		"/api/knowledge/files",
+		data={"title": "Ещё один заголовок", "content": "Ещё одна редакция"},
+		files=files,
+	)
+	assert edited.status_code == 200
+	assert edited.json()["item"]["content"] == "Ещё одна редакция"
+
+
 def test_knowledge_rating_filters_sort_and_pagination(authenticated_client):
 	first = authenticated_client.post("/api/knowledge", json={"title": "Пять", "content": "Высокий рейтинг", "rating": 5})
 	second = authenticated_client.post("/api/knowledge", json={"title": "Три", "content": "Средний рейтинг", "rating": 3})

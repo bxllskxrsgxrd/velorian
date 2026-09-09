@@ -259,10 +259,11 @@ export async function createKnowledgeItem(title: string, content: string, rating
 	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>('/knowledge', { method: 'POST', body: JSON.stringify({ title, content, rating, is_active: isActive, approach_id: approachId, filters: cleanFilters(filters) }) })).item);
 }
 
-export async function uploadKnowledgeFile(file: File, title = '', rating: number | null = null, isActive = true, approachId: string | null = null, filters?: Partial<KnowledgeFilters>): Promise<KnowledgeItem> {
+export async function uploadKnowledgeFile(file: File, title = '', content = '', rating: number | null = null, isActive = true, approachId: string | null = null, filters?: Partial<KnowledgeFilters>): Promise<KnowledgeItem> {
 	const body = new FormData();
 	body.append('file', file);
 	body.append('title', title);
+	if (content.trim()) body.append('content', content);
 	if (rating !== null) body.append('rating', String(rating));
 	body.append('is_active', String(isActive));
 	if (approachId) body.append('approach_id', approachId);

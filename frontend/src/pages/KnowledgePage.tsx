@@ -185,6 +185,8 @@ function KnowledgeDataDialog({
 			return;
 		}
 
+		setTitle(nextFile.name);
+		setContent('');
 		setFilePreview({ status: 'loading', content: '' });
 		const dotIndex = nextFile.name.lastIndexOf('.');
 		const extension = dotIndex >= 0 ? nextFile.name.slice(dotIndex).toLowerCase() : '';
@@ -196,6 +198,7 @@ function KnowledgeDataDialog({
 		try {
 			const extractedContent = await nextFile.text();
 			if (requestId !== filePreviewRequestRef.current) return;
+			if (extractedContent.trim()) setContent(extractedContent);
 			setFilePreview(
 				extractedContent.trim()
 					? { status: 'ready', content: extractedContent }
@@ -375,7 +378,7 @@ function KnowledgeDataDialog({
 									<p>Загрузка содержимого файла…</p>
 								) : filePreview.status === 'ready' ? (
 									<Suspense fallback={<p>Загрузка содержимого файла…</p>}>
-										<MarkdownEditor value={filePreview.content} onChange={() => undefined} readonly />
+										<MarkdownEditor value={content} onChange={() => undefined} readonly />
 									</Suspense>
 								) : (
 									<p>Не удалось отобразить содержимое файла в предпросмотре</p>
@@ -646,7 +649,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 		try {
 			if (dialog?.type === 'add') {
 				const created = file
-					? await uploadKnowledgeFile(file, title, rating, isActive, selectedApproachId || null, formFilters)
+					? await uploadKnowledgeFile(file, title.trim(), content, rating, isActive, selectedApproachId || null, formFilters)
 					: await createKnowledgeItem(title.trim(), content, rating, isActive, selectedApproachId || null, formFilters);
 				setItems((current) => [created, ...current]);
 				showToast('Данные добавлены в базу знаний', 'success');

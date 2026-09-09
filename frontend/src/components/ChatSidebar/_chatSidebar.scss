@@ -133,6 +133,10 @@
 		border: 1px solid var(--color-border);
 
 		background: var(--color-bg-elevated);
+
+		&:hover {
+			border-color: var(--color-text-secondary);
+		}
 	}
 
 	&__search-trigger {
@@ -395,8 +399,14 @@
 		box-shadow: var(--shadow-surface);
 	}
 
-	&__account-menu > button svg:last-child {
+	&__settings-toggle svg:last-child {
 		margin-left: auto;
+		transform: rotate(90deg);
+		transition: transform var(--transition-normal);
+	}
+
+	&__settings-toggle[aria-expanded='true'] svg:last-child {
+		transform: rotate(-90deg);
 	}
 
 	&__settings-panel {
