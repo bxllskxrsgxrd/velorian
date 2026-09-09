@@ -1,6 +1,27 @@
-import { expect, test } from '@playwright/test';
+import { expect, test, type Locator, type Page } from '@playwright/test';
 
 import { installMockApi } from './mockApi';
+
+async function selectCustomOption(page: Page, trigger: Locator, optionName: string) {
+	await trigger.click();
+
+	const option = page.getByRole('option', {
+		name: optionName,
+		exact: true,
+	});
+
+	if (await option.isVisible().catch(() => false)) {
+		await option.click();
+		return;
+	}
+
+	await page
+		.getByText(optionName, {
+			exact: true,
+		})
+		.last()
+		.click();
+}
 
 test('opens Knowledge Base from sidebar and creates rated manual data', async ({ page }) => {
 	await installMockApi(page);
@@ -57,7 +78,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 		})
 		.click();
 
-	await expect(dialog.getByLabel('Подход элемента')).toHaveValue(/.+/);
+	await expect(dialog.getByLabel('Подход элемента')).toContainText('UGC-разбор');
 
 	// Выбираем рейтинг.
 	const ratingThree = dialog.getByRole('button', {
@@ -315,34 +336,29 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(filtersDropdown).toBeVisible();
 
-	const ratingSelect = filtersDropdown.locator('label').filter({ hasText: 'Рейтинг' }).locator('select');
-
-	const sourceSelect = filtersDropdown.locator('label').filter({ hasText: 'Источник' }).locator('select');
-
-	const approachSelect = filtersDropdown.locator('label').filter({ hasText: 'Подход' }).locator('select');
-
-	const activeSelect = filtersDropdown.locator('label').filter({ hasText: 'Использование' }).locator('select');
+	const ratingSelect = filtersDropdown.getByLabel('Рейтинг');
+	const sourceSelect = filtersDropdown.getByLabel('Источник');
+	const approachSelect = filtersDropdown.getByLabel('Подход');
+	const activeSelect = filtersDropdown.getByLabel('Использование');
 
 	await Promise.all([
 		page.waitForRequest((request) => request.url().includes('min_rating=4')),
-		ratingSelect.selectOption('4'),
+		selectCustomOption(page, ratingSelect, '4 и выше'),
 	]);
 
-	await expect(ratingSelect).toHaveValue('4');
+	await expect(ratingSelect).toContainText('4 и выше');
 
-	await sourceSelect.selectOption('manual');
+	await selectCustomOption(page, sourceSelect, 'Вручную');
 
-	await expect(sourceSelect).toHaveValue('manual');
+	await expect(sourceSelect).toContainText('Вручную');
 
-	await approachSelect.selectOption({
-		label: 'UGC-разбор',
-	});
+	await selectCustomOption(page, approachSelect, 'UGC-разбор');
 
-	await expect(approachSelect).not.toHaveValue('');
+	await expect(approachSelect).toContainText('UGC-разбор');
 
-	await activeSelect.selectOption('inactive');
+	await selectCustomOption(page, activeSelect, 'Отключены');
 
-	await expect(activeSelect).toHaveValue('inactive');
+	await expect(activeSelect).toContainText('Отключены');
 
 	await expect
 		.poll(() => {
