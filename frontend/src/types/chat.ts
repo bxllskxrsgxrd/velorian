@@ -119,7 +119,7 @@ export type KnowledgeItem = {
 	metadata: Record<string, unknown>;
 	filters: KnowledgeFilters;
 	createdAt: string;
-	updatedAt: string;
+	updatedAt?: string | null;
 	deletedAt?: string | null;
 	downloadUrl?: string | null;
 	originalDownloadUrl?: string | null;

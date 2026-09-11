@@ -20,6 +20,7 @@ import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
 import { Rating } from '../components/ui/Rating/Rating';
 import { Checkbox } from '../components/ui/Checkbox/Checkbox';
 import { CustomSelect } from '../components/ui/CustomSelect/CustomSelect';
+import { Tooltip } from '../components/ui/Tooltip/Tooltip';
 import { KnowledgeFilterFields } from '../components/KnowledgeFilterFields/KnowledgeFilterFields';
 import type { AuthUser, KnowledgeApproach, KnowledgeFilters, KnowledgeItem } from '../types/chat';
 import { reportError } from '../utils/reportError';
@@ -86,6 +87,50 @@ function extractionStatusLabel(item: KnowledgeItem) {
 	if (status === 'ocr_unavailable') return 'Текст изображения не извлечён: OCR недоступен';
 	if (status === 'unsupported') return 'Извлечение текста для формата не поддерживается';
 	return null;
+}
+
+const knowledgeDateFormatter = new Intl.DateTimeFormat('ru-RU', {
+	day: '2-digit',
+	month: '2-digit',
+	year: 'numeric',
+});
+
+function knowledgeSourceLabel(sourceType: KnowledgeItem['sourceType']) {
+	if (sourceType === 'rated_content') return 'Ответ агента';
+	if (sourceType === 'assistant_file') return 'Файл из диалога';
+	if (sourceType === 'uploaded_file') return 'Файл';
+	return 'Добавлено вручную';
+}
+
+function KnowledgeCardMetadata({
+	source,
+	createdAt,
+	updatedAt,
+}: {
+	source: string;
+	createdAt: string;
+	updatedAt?: string | null;
+}) {
+	const createdTimestamp = new Date(createdAt).getTime();
+	const updatedTimestamp = updatedAt ? new Date(updatedAt).getTime() : null;
+	const wasUpdated = updatedTimestamp !== null && updatedTimestamp !== createdTimestamp;
+	const createdDate = knowledgeDateFormatter.format(new Date(createdAt));
+	const updatedDate = updatedAt ? knowledgeDateFormatter.format(new Date(updatedAt)) : null;
+
+	return (
+		<Tooltip
+			className="knowledge-card__metadata-summary"
+			content={
+				<>
+					<span>{source}</span>
+					<span>Создано {createdDate}</span>
+					{wasUpdated && <span>Изменено {updatedDate}</span>}
+				</>
+			}
+		>
+			{source} · {wasUpdated ? `Изменено ${updatedDate}` : `Создано ${createdDate}`}
+		</Tooltip>
+	);
 }
 
 function storedFilters(item: KnowledgeItem): KnowledgeFilters {
@@ -163,8 +208,8 @@ function KnowledgeDataDialog({
 	const fileInputRef = useRef<HTMLInputElement>(null);
 	const filePreviewRequestRef = useRef(0);
 	const selectedApproachName = selectedApproachId
-		? approaches.find((approach) => approach.id === selectedApproachId)?.name ??
-			(item?.approach?.id === selectedApproachId ? item.approach.name : null)
+		? (approaches.find((approach) => approach.id === selectedApproachId)?.name ??
+			(item?.approach?.id === selectedApproachId ? item.approach.name : null))
 		: null;
 	const previewMetadata = [
 		{ label: 'ГЕО', value: formFilters.geo },
@@ -200,9 +245,7 @@ function KnowledgeDataDialog({
 			if (requestId !== filePreviewRequestRef.current) return;
 			if (extractedContent.trim()) setContent(extractedContent);
 			setFilePreview(
-				extractedContent.trim()
-					? { status: 'ready', content: extractedContent }
-					: { status: 'error', content: '' },
+				extractedContent.trim() ? { status: 'ready', content: extractedContent } : { status: 'error', content: '' },
 			);
 		} catch {
 			if (requestId === filePreviewRequestRef.current) setFilePreview({ status: 'error', content: '' });
@@ -218,13 +261,15 @@ function KnowledgeDataDialog({
 		? `Добавлено из файла · ${file.name}`
 		: mode === 'create'
 			? `Добавлено вручную · ${new Date().toLocaleDateString('ru-RU')}`
-			: `${item?.sourceType === 'rated_content'
-					? 'Ответ агента'
-					: item?.sourceType === 'assistant_file'
-						? 'Файл из диалога'
-						: item?.sourceType === 'uploaded_file'
-							? 'Файл'
-							: 'Добавлено вручную'} · ${item ? new Date(item.createdAt).toLocaleDateString('ru-RU') : ''}`;
+			: `${
+					item?.sourceType === 'rated_content'
+						? 'Ответ агента'
+						: item?.sourceType === 'assistant_file'
+							? 'Файл из диалога'
+							: item?.sourceType === 'uploaded_file'
+								? 'Файл'
+								: 'Добавлено вручную'
+				} · ${item ? new Date(item.createdAt).toLocaleDateString('ru-RU') : ''}`;
 
 	return (
 		<ModalDialog
@@ -237,7 +282,13 @@ function KnowledgeDataDialog({
 			}
 			showCloseButton
 			confirmLabel={
-				saving ? (mode === 'create' ? 'Добавление…' : 'Сохранение…') : mode === 'create' ? 'Добавить данные' : 'Сохранить изменения'
+				saving
+					? mode === 'create'
+						? 'Добавление…'
+						: 'Сохранение…'
+					: mode === 'create'
+						? 'Добавить данные'
+						: 'Сохранить изменения'
 			}
 			confirmDisabled={saving}
 			onClose={onClose}
@@ -338,11 +389,7 @@ function KnowledgeDataDialog({
 									maxLength={80}
 								/>
 								<div className="knowledge-form__approach-actions">
-									<button
-										type="button"
-										disabled={!newApproachName.trim() || creatingApproach}
-										onClick={onAddApproach}
-									>
+									<button type="button" disabled={!newApproachName.trim() || creatingApproach} onClick={onAddApproach}>
 										{creatingApproach ? 'Создание…' : 'Создать'}
 									</button>
 									<button type="button" onClick={onResetApproachCreator}>
@@ -649,7 +696,15 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 		try {
 			if (dialog?.type === 'add') {
 				const created = file
-					? await uploadKnowledgeFile(file, title.trim(), content, rating, isActive, selectedApproachId || null, formFilters)
+					? await uploadKnowledgeFile(
+							file,
+							title.trim(),
+							content,
+							rating,
+							isActive,
+							selectedApproachId || null,
+							formFilters,
+						)
 					: await createKnowledgeItem(title.trim(), content, rating, isActive, selectedApproachId || null, formFilters);
 				setItems((current) => [created, ...current]);
 				showToast('Данные добавлены в базу знаний', 'success');
@@ -741,7 +796,9 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 
 	function updateCardCursorIndicator(target: EventTarget | null, clientX: number, clientY: number) {
 		const indicator = cardCursorIndicatorRef.current;
-		const interactiveTarget = target instanceof Element && target.closest('button, a, input, label, select, textarea');
+		const interactiveTarget =
+			target instanceof Element &&
+			target.closest('button, a, input, label, select, textarea, .knowledge-card__metadata-summary');
 		hideCardCursorIndicator();
 		if (!indicator || interactiveTarget || !window.matchMedia('(hover: hover) and (pointer: fine)').matches) {
 			return;
@@ -1070,6 +1127,11 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 										<div>
 											<strong>{`${item.title}`}</strong>
 											<Rating value={item.rating} readonly size="small" ariaLabel={`Рейтинг ${item.title}`} />
+											<KnowledgeCardMetadata
+												source={knowledgeSourceLabel(item.sourceType)}
+												createdAt={item.createdAt}
+												updatedAt={item.updatedAt}
+											/>
 											{item.approach && <span className="knowledge-card__approach">Подход: {item.approach.name}</span>}
 											<div className="knowledge-card__metadata">
 												{Object.entries(storedFilters(item))
@@ -1090,16 +1152,6 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 														</span>
 													))}
 											</div>
-											<span>
-												{item.sourceType === 'rated_content'
-													? 'Ответ агента'
-													: item.sourceType === 'assistant_file'
-														? 'Файл из диалога'
-														: item.sourceType === 'uploaded_file'
-															? 'Файл'
-															: 'Добавлено вручную'}{' '}
-												· {new Date(item.createdAt).toLocaleDateString('ru-RU')}
-											</span>
 											{extractionStatusLabel(item) && (
 												<span className="knowledge-card__extraction-warning">{extractionStatusLabel(item)}</span>
 											)}

@@ -164,6 +164,58 @@ describe('KnowledgePage', () => {
 		api.updateKnowledgeItem.mockResolvedValue(item);
 	});
 
+	it('shows created and updated card metadata using full timestamps', async () => {
+		api.listKnowledge.mockResolvedValue({
+			items: [
+				{
+					...item,
+					id: 'updated-same-day',
+					title: 'Изменённая карточка',
+					createdAt: '2026-09-09T08:00:00.000Z',
+					updatedAt: '2026-09-09T12:00:00.000Z',
+				},
+				{
+					...item,
+					id: 'never-updated',
+					title: 'Новая карточка',
+					createdAt: '2026-09-09T08:00:00.000Z',
+					updatedAt: undefined,
+				},
+				{
+					...item,
+					id: 'timestamps-match',
+					title: 'Неизменённая карточка',
+					createdAt: '2026-09-09T08:00:00.000Z',
+					updatedAt: '2026-09-09T08:00:00.000Z',
+				},
+			],
+			pageInfo: { nextCursor: null, hasMore: false },
+		});
+
+		renderKnowledge();
+
+		const updatedTitle = await screen.findByText('Изменённая карточка', { selector: 'strong' });
+		const updatedCard = updatedTitle.closest('article');
+		const updatedMetadata = updatedCard?.querySelector<HTMLElement>('.knowledge-card__metadata-summary');
+		expect(updatedMetadata).toHaveTextContent('Добавлено вручную · Изменено 09.09.2026');
+		expect(within(updatedMetadata as HTMLElement).getByRole('tooltip', { hidden: true })).toHaveTextContent(
+			'Добавлено вручнуюСоздано 09.09.2026Изменено 09.09.2026',
+		);
+
+		const newTitle = screen.getByText('Новая карточка', { selector: 'strong' });
+		const newCard = newTitle.closest('article');
+		const newMetadata = newCard?.querySelector<HTMLElement>('.knowledge-card__metadata-summary');
+		expect(newMetadata).toHaveTextContent('Добавлено вручную · Создано 09.09.2026');
+		expect(within(newMetadata as HTMLElement).getByRole('tooltip', { hidden: true })).toHaveTextContent(
+			'Добавлено вручнуюСоздано 09.09.2026',
+		);
+
+		const unchangedTitle = screen.getByText('Неизменённая карточка', { selector: 'strong' });
+		const unchangedCard = unchangedTitle.closest('article');
+		const unchangedMetadata = unchangedCard?.querySelector<HTMLElement>('.knowledge-card__metadata-summary');
+		expect(unchangedMetadata).toHaveTextContent('Добавлено вручную · Создано 09.09.2026');
+	});
+
 	it('adds manual text without browser dialogs', async () => {
 		renderKnowledge();
 
