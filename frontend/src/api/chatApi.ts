@@ -282,6 +282,23 @@ export async function updateKnowledgeItem(id: string, patch: { title?: string; c
 	})).item);
 }
 
+export async function updateKnowledgeFile(id: string, file: File, title = '', content = '', rating: number | null = null, isActive = true, approachId: string | null = null, filters?: Partial<KnowledgeFilters>): Promise<KnowledgeItem> {
+	const body = new FormData();
+	body.append('file', file);
+	body.append('title', title);
+	if (content.trim()) body.append('content', content);
+	if (rating === null) body.append('clear_rating', 'true');
+	else body.append('rating', String(rating));
+	body.append('is_active', String(isActive));
+	body.append('approach_id', approachId ?? '');
+	const cleaned = cleanFilters(filters);
+	body.append('geo', cleaned.geo ?? '');
+	body.append('celebrity', cleaned.celebrity ?? '');
+	body.append('offer', cleaned.offer ?? '');
+	body.append('news_source', cleaned.news_source ?? '');
+	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>(`/knowledge/${id}/file`, { method: 'PUT', body })).item);
+}
+
 export async function listKnowledgeApproaches(): Promise<KnowledgeApproach[]> {
 	return (await requestJson<{ items: KnowledgeApproach[] }>('/knowledge/approaches')).items;
 }

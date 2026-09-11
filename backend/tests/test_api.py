@@ -576,6 +576,51 @@ def test_knowledge_file_upload_uses_edited_title_and_content(authenticated_clien
 	assert edited.json()["item"]["content"] == "Ещё одна редакция"
 
 
+def test_manual_knowledge_file_updates_keep_first_manual_version_as_original(authenticated_client):
+	created = authenticated_client.post(
+		"/api/knowledge",
+		json={"title": "Ручной оригинал", "content": "первоначальный ручной текст"},
+	).json()["item"]
+
+	first_update = authenticated_client.put(
+		f"/api/knowledge/{created['id']}/file",
+		data={"title": "Первая файловая версия"},
+		files={"file": ("first.txt", "первая текущая версия".encode(), "text/plain")},
+	)
+	assert first_update.status_code == 200
+	assert first_update.json()["item"]["sourceType"] == "uploaded_file"
+	assert first_update.json()["item"]["originalFilename"] == "Ручной оригинал.md"
+	assert first_update.json()["item"]["originalDownloadUrl"] is not None
+	assert authenticated_client.get(f"/api/knowledge/{created['id']}/file").content == "первая текущая версия".encode()
+	assert authenticated_client.get(f"/api/knowledge/{created['id']}/file?original=true").content == "первоначальный ручной текст".encode()
+
+	second_update = authenticated_client.put(
+		f"/api/knowledge/{created['id']}/file",
+		data={"title": "Вторая файловая версия"},
+		files={"file": ("second.txt", "вторая текущая версия".encode(), "text/plain")},
+	)
+	assert second_update.status_code == 200
+	assert authenticated_client.get(f"/api/knowledge/{created['id']}/file").content == "вторая текущая версия".encode()
+	assert authenticated_client.get(f"/api/knowledge/{created['id']}/file?original=true").content == "первоначальный ручной текст".encode()
+
+
+def test_uploaded_knowledge_file_updates_keep_first_file_as_original(authenticated_client):
+	created = authenticated_client.post(
+		"/api/knowledge/files",
+		files={"file": ("original.txt", b"first uploaded file", "text/plain")},
+	).json()["item"]
+
+	for name, content in (("second.txt", b"second uploaded file"), ("third.txt", b"third uploaded file")):
+		updated = authenticated_client.put(
+			f"/api/knowledge/{created['id']}/file",
+			files={"file": (name, content, "text/plain")},
+		)
+		assert updated.status_code == 200
+		assert updated.json()["item"]["originalFilename"] == "original.txt"
+		assert authenticated_client.get(f"/api/knowledge/{created['id']}/file").content == content
+		assert authenticated_client.get(f"/api/knowledge/{created['id']}/file?original=true").content == b"first uploaded file"
+
+
 def test_knowledge_rating_filters_sort_and_pagination(authenticated_client):
 	first = authenticated_client.post("/api/knowledge", json={"title": "Пять", "content": "Высокий рейтинг", "rating": 5})
 	second = authenticated_client.post("/api/knowledge", json={"title": "Три", "content": "Средний рейтинг", "rating": 3})

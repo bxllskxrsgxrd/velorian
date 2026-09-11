@@ -10,6 +10,7 @@ import {
 	listKnowledge,
 	listKnowledgeApproaches,
 	renameConversation,
+	updateKnowledgeFile,
 	updateKnowledgeItem,
 	uploadKnowledgeFile,
 } from '../api/chatApi';
@@ -709,14 +710,25 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 				setItems((current) => [created, ...current]);
 				showToast('Данные добавлены в базу знаний', 'success');
 			} else if (dialog?.type === 'edit') {
-				const updated = await updateKnowledgeItem(dialog.item.id, {
-					title: title.trim(),
-					content,
-					rating,
-					isActive,
-					approachId: selectedApproachId || null,
-					filters: formFilters,
-				});
+				const updated = file
+					? await updateKnowledgeFile(
+							dialog.item.id,
+							file,
+							title.trim(),
+							content,
+							rating,
+							isActive,
+							selectedApproachId || null,
+							formFilters,
+						)
+					: await updateKnowledgeItem(dialog.item.id, {
+							title: title.trim(),
+							content,
+							rating,
+							isActive,
+							approachId: selectedApproachId || null,
+							filters: formFilters,
+						});
 				setItems((current) => current.map((item) => (item.id === updated.id ? updated : item)));
 				showToast('Изменения сохранены', 'success');
 			}

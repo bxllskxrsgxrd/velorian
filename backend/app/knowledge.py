@@ -706,6 +706,78 @@ def update_knowledge_item(item_id: str, payload: KnowledgeUpdatePayload, user: U
 	return {"item": knowledge_payload(item)}
 
 
+@router.put("/{item_id}/file")
+async def update_knowledge_file(
+	item_id: str,
+	file: UploadFile = File(...),
+	title: str = Form(default="", max_length=255),
+	content: str | None = Form(default=None, max_length=2_000_000),
+	rating: int | None = Form(default=None, ge=1, le=5),
+	clear_rating: bool = Form(default=False),
+	is_active: bool = Form(default=True),
+	approach_id: str | None = Form(default=None, max_length=36),
+	geo: str | None = Form(default=None, max_length=160),
+	celebrity: str | None = Form(default=None, max_length=160),
+	offer: str | None = Form(default=None, max_length=160),
+	news_source: str | None = Form(default=None, max_length=160),
+	user: User = Depends(get_current_user),
+	db: Session = Depends(get_db),
+):
+	item = owned_knowledge_item(db, item_id, user.id)
+	approach = optional_owned_approach(db, approach_id, user.id)
+	name = validate_file_name(file.filename or "Без имени")
+	file_content = await file.read(settings.max_file_size + 1)
+	await file.close()
+	if len(file_content) > settings.max_file_size:
+		raise AppError(413, "FILE_SIZE_LIMIT_EXCEEDED", f"Файл {name} превышает лимит", {
+			"fileName": name, "actualSize": len(file_content), "maximumSize": settings.max_file_size,
+		})
+	extracted = extract_text(name, file.content_type or "application/octet-stream", file_content)
+	if extracted.status not in {"ready", "empty", "ocr_unavailable"}:
+		raise AppError(422, "FILE_PROCESSING_FAILED", f"Не удалось обработать файл {name}")
+
+	storage = get_file_storage()
+	created_original_key: str | None = None
+	try:
+		if not item.storage_key and not item.storage_path:
+			if item.source_file_id:
+				attachment = db.get(Attachment, item.source_file_id)
+				if attachment is None:
+					raise AppError(404, "ATTACHMENT_NOT_FOUND", "Исходный файл не найден")
+				created_original_key = await _persist_attachment_copy(db, item, attachment, commit=False)
+			else:
+				created_original_key = build_storage_key(user.id, "knowledge", item.id)
+				await storage.save(created_original_key, item.content.encode("utf-8"), "text/markdown")
+				item.storage_key = created_original_key
+				item.original_filename = markdown_file_name(item.title, "knowledge")
+
+		item.source_type = "uploaded_file"
+		item.title = title.strip()[:255] or name
+		item.content = content if content is not None else extracted.text
+		item.rating = None if clear_rating else rating
+		item.is_active = is_active
+		item.approach = approach
+		item.item_metadata = merge_knowledge_filters(
+			{
+				**(item.item_metadata or {}),
+				"sha256": hashlib.sha256(file_content).hexdigest(),
+				"extractionStatus": extracted.status,
+			},
+			KnowledgeFiltersPayload(geo=geo, celebrity=celebrity, offer=offer, news_source=news_source),
+		)
+		item.updated_at = utc_now()
+		db.commit()
+	except Exception:
+		db.rollback()
+		if created_original_key:
+			try:
+				await storage.delete(created_original_key)
+			except Exception:
+				logger.exception("Knowledge original cleanup failed: storage_key=%s", created_original_key)
+		raise
+	return {"item": knowledge_payload(item)}
+
+
 @router.delete("/{item_id}", status_code=204)
 def delete_knowledge_item(item_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	item = owned_knowledge_item(db, item_id, user.id)

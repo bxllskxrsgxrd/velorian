@@ -12,6 +12,7 @@ const api = vi.hoisted(() => ({
 	listKnowledge: vi.fn(),
 	createKnowledgeItem: vi.fn(),
 	uploadKnowledgeFile: vi.fn(),
+	updateKnowledgeFile: vi.fn(),
 	updateKnowledgeItem: vi.fn(),
 	deleteKnowledgeItem: vi.fn(),
 
@@ -162,6 +163,7 @@ describe('KnowledgePage', () => {
 
 		api.createKnowledgeItem.mockResolvedValue(item);
 		api.updateKnowledgeItem.mockResolvedValue(item);
+		api.updateKnowledgeFile.mockResolvedValue(item);
 	});
 
 	it('shows created and updated card metadata using full timestamps', async () => {
@@ -283,6 +285,41 @@ describe('KnowledgePage', () => {
 				exact: true,
 			}),
 		).toBeInTheDocument();
+	});
+
+	it('updates an existing card through the selected file', async () => {
+		api.listKnowledge.mockResolvedValue({
+			items: [item],
+			pageInfo: { nextCursor: null, hasMore: false },
+		});
+		const replacement = new File(['Новая файловая версия'], 'replacement.txt', { type: 'text/plain' });
+
+		renderKnowledge();
+		await openEditFromCard(item.title);
+
+		const dialog = screen.getByRole('dialog');
+		const fileInput = dialog.querySelector<HTMLInputElement>('input[type="file"]');
+		expect(fileInput).not.toBeNull();
+		fireEvent.change(fileInput as HTMLInputElement, { target: { files: [replacement] } });
+
+		await waitFor(() => {
+			expect(within(dialog).getByRole('textbox', { name: 'Содержимое' })).toHaveValue('Новая файловая версия');
+		});
+		fireEvent.click(within(dialog).getByRole('button', { name: 'Сохранить изменения' }));
+
+		await waitFor(() => {
+			expect(api.updateKnowledgeFile).toHaveBeenCalledWith(
+				item.id,
+				replacement,
+				'replacement.txt',
+				'Новая файловая версия',
+				item.rating,
+				item.isActive,
+				null,
+				item.filters,
+			);
+		});
+		expect(api.updateKnowledgeItem).not.toHaveBeenCalled();
 	});
 
 	it('shows manual data in add preview before saving', async () => {
