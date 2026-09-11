@@ -562,10 +562,13 @@ def test_knowledge_file_upload_uses_edited_title_and_content(authenticated_clien
 	assert created.status_code == 200
 	assert created.json()["item"]["title"] == data["title"]
 	assert created.json()["item"]["content"] == data["content"]
+	assert created.json()["item"]["fileName"] == "draft.txt"
+	assert authenticated_client.get(f"/api/knowledge/{created.json()['item']['id']}/file").content == file_bytes
+	assert authenticated_client.get(f"/api/knowledge/{created.json()['item']['id']}/file?original=true").content == file_bytes
 
 	duplicate = authenticated_client.post("/api/knowledge/files", data=data, files=files)
-	assert duplicate.status_code == 409
-	assert duplicate.json()["error"]["code"] == "KNOWLEDGE_DUPLICATE"
+	assert duplicate.status_code == 200
+	assert duplicate.json()["item"]["id"] != created.json()["item"]["id"]
 
 	edited = authenticated_client.post(
 		"/api/knowledge/files",
@@ -584,11 +587,13 @@ def test_manual_knowledge_file_updates_keep_first_manual_version_as_original(aut
 
 	first_update = authenticated_client.put(
 		f"/api/knowledge/{created['id']}/file",
-		data={"title": "Первая файловая версия"},
+		data={"title": "Первая файловая версия", "content": "отредактированное содержимое первой версии"},
 		files={"file": ("first.txt", "первая текущая версия".encode(), "text/plain")},
 	)
 	assert first_update.status_code == 200
 	assert first_update.json()["item"]["sourceType"] == "uploaded_file"
+	assert first_update.json()["item"]["content"] == "отредактированное содержимое первой версии"
+	assert first_update.json()["item"]["fileName"] == "first.txt"
 	assert first_update.json()["item"]["originalFilename"] == "Ручной оригинал.md"
 	assert first_update.json()["item"]["originalDownloadUrl"] is not None
 	assert authenticated_client.get(f"/api/knowledge/{created['id']}/file").content == "первая текущая версия".encode()
@@ -600,6 +605,7 @@ def test_manual_knowledge_file_updates_keep_first_manual_version_as_original(aut
 		files={"file": ("second.txt", "вторая текущая версия".encode(), "text/plain")},
 	)
 	assert second_update.status_code == 200
+	assert second_update.json()["item"]["fileName"] == "second.txt"
 	assert authenticated_client.get(f"/api/knowledge/{created['id']}/file").content == "вторая текущая версия".encode()
 	assert authenticated_client.get(f"/api/knowledge/{created['id']}/file?original=true").content == "первоначальный ручной текст".encode()
 
@@ -616,9 +622,14 @@ def test_uploaded_knowledge_file_updates_keep_first_file_as_original(authenticat
 			files={"file": (name, content, "text/plain")},
 		)
 		assert updated.status_code == 200
+		assert updated.json()["item"]["fileName"] == name
 		assert updated.json()["item"]["originalFilename"] == "original.txt"
-		assert authenticated_client.get(f"/api/knowledge/{created['id']}/file").content == content
-		assert authenticated_client.get(f"/api/knowledge/{created['id']}/file?original=true").content == b"first uploaded file"
+		current_download = authenticated_client.get(f"/api/knowledge/{created['id']}/file")
+		original_download = authenticated_client.get(f"/api/knowledge/{created['id']}/file?original=true")
+		assert current_download.content == content
+		assert f"filename*=UTF-8''{name}" in current_download.headers["content-disposition"]
+		assert original_download.content == b"first uploaded file"
+		assert "filename*=UTF-8''original.txt" in original_download.headers["content-disposition"]
 
 
 def test_knowledge_rating_filters_sort_and_pagination(authenticated_client):
@@ -665,6 +676,9 @@ def test_knowledge_schema_has_non_destructive_constraints_and_indexes():
 	assert columns["approach_id"]["nullable"] is True
 	assert columns["is_active"]["nullable"] is False
 	assert columns["deleted_at"]["nullable"] is True
+	assert columns["current_filename"]["nullable"] is True
+	assert columns["current_mime_type"]["nullable"] is True
+	assert columns["current_storage_key"]["nullable"] is True
 	index_names = {index["name"] for index in inspector.get_indexes("knowledge_items")}
 	assert {
 		"ix_knowledge_user_active",

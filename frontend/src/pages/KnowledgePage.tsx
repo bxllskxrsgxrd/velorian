@@ -1215,7 +1215,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 								role="menuitem"
 								onClick={() => setCardMenu(null)}
 							>
-								Скачать .md
+								Скачать файл
 							</a>
 						)}
 						{cardMenuItem.originalDownloadUrl && (

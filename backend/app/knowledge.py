@@ -149,7 +149,8 @@ def _knowledge_search_condition(db: Session, raw_term: str):
 
 
 def knowledge_payload(item: KnowledgeItem) -> dict:
-	file_name = markdown_file_name(item.title, "knowledge")
+	legacy_file_name = item.original_filename if item.source_type in {"uploaded_file", "assistant_file"} else None
+	file_name = item.current_filename or legacy_file_name or markdown_file_name(item.title, "knowledge")
 	return {
 		"id": item.id,
 		"sourceType": item.source_type,
@@ -157,7 +158,7 @@ def knowledge_payload(item: KnowledgeItem) -> dict:
 		"sourceFileId": item.source_file_id,
 		"title": item.title,
 		"content": item.content,
-		"mimeType": "text/markdown",
+		"mimeType": item.current_mime_type or (item.mime_type if legacy_file_name else "text/markdown"),
 		"fileName": file_name,
 		"originalFilename": item.original_filename,
 		"rating": item.rating,
@@ -361,20 +362,9 @@ async def upload_knowledge_file(
 	extracted = extract_text(name, file.content_type or "application/octet-stream", file_content)
 	if extracted.status not in {"ready", "empty", "ocr_unavailable"}:
 		raise AppError(422, "FILE_PROCESSING_FAILED", f"Не удалось обработать файл {name}")
-	checksum = hashlib.sha256(file_content).hexdigest()
 	item_title = title.strip()[:255] or name
 	item_content = content if content is not None else extracted.text
-	for existing in db.scalars(select(KnowledgeItem).where(
-		KnowledgeItem.user_id == user.id,
-		KnowledgeItem.source_type == "uploaded_file",
-		KnowledgeItem.deleted_at.is_(None),
-	)):
-		if (
-			(existing.item_metadata or {}).get("sha256") == checksum
-			and existing.title == item_title
-			and existing.content == item_content
-		):
-			raise AppError(409, "KNOWLEDGE_DUPLICATE", "Такой файл уже добавлен в базу знаний")
+	checksum = hashlib.sha256(file_content).hexdigest()
 	item = KnowledgeItem(
 		user_id=user.id,
 		source_type="uploaded_file",
@@ -397,6 +387,9 @@ async def upload_knowledge_file(
 	try:
 		await storage.save(storage_key, file_content, item.mime_type)
 		item.storage_key = storage_key
+		item.current_storage_key = storage_key
+		item.current_filename = name
+		item.current_mime_type = item.mime_type
 		db.commit()
 	except Exception:
 		db.rollback()
@@ -429,6 +422,9 @@ async def _persist_attachment_copy(
 		storage_key = build_storage_key(item.user_id, "knowledge", item.id)
 		await storage.save(storage_key, content, attachment.content_type)
 		item.storage_key = storage_key
+		item.current_storage_key = storage_key
+		item.current_filename = attachment.name
+		item.current_mime_type = attachment.content_type
 		if commit:
 			db.commit()
 		return storage_key
@@ -584,23 +580,43 @@ async def save_rated_message(message_id: str, user: User = Depends(get_current_u
 
 async def permanently_delete_knowledge_item(db: Session, item: KnowledgeItem) -> None:
 	storage_path = Path(item.storage_path) if item.storage_path else None
-	storage_key = item.storage_key
 	storage = get_file_storage()
-	file_backup: bytes | None = None
-	file_removed = False
+	storage_files = {
+		key: mime_type
+		for key, mime_type in (
+			(item.storage_key, item.mime_type),
+			(item.current_storage_key, item.current_mime_type or "application/octet-stream"),
+		)
+		if key
+	}
+	removed_storage_files: list[tuple[str, bytes | None, str]] = []
+	legacy_backup: bytes | None = None
+	legacy_removed = False
+
+	async def restore_removed_files() -> None:
+		for key, content, mime_type in removed_storage_files:
+			if content is not None:
+				await storage.save(key, content, mime_type)
+		if legacy_removed and legacy_backup is not None and storage_path is not None:
+			await asyncio.to_thread(storage_path.write_bytes, legacy_backup)
+
 	try:
-		if storage_key:
+		for storage_key, mime_type in storage_files.items():
 			try:
 				file_backup = await storage.get(storage_key)
 			except (FileNotFoundError, OSError):
 				file_backup = None
 			await storage.delete(storage_key)
-			file_removed = True
-		elif storage_path is not None and storage_path.exists():
-			file_backup = await asyncio.to_thread(storage_path.read_bytes)
+			removed_storage_files.append((storage_key, file_backup, mime_type))
+		if storage_path is not None and storage_path.exists():
+			legacy_backup = await asyncio.to_thread(storage_path.read_bytes)
 			await asyncio.to_thread(storage_path.unlink, missing_ok=True)
-			file_removed = True
+			legacy_removed = True
 	except Exception as error:
+		try:
+			await restore_removed_files()
+		except Exception:
+			logger.critical("Knowledge files restore failed after storage deletion error: item_id=%s", item.id, exc_info=True)
 		logger.exception("Knowledge file deletion failed; preserving database item: item_id=%s", item.id)
 		raise AppError(503, "KNOWLEDGE_FILE_DELETE_FAILED", "Не удалось удалить файл. Запись сохранена, повторите попытку.") from error
 	try:
@@ -608,14 +624,10 @@ async def permanently_delete_knowledge_item(db: Session, item: KnowledgeItem) ->
 		db.commit()
 	except Exception:
 		db.rollback()
-		if file_removed and file_backup is not None:
-			try:
-				if storage_key:
-					await storage.save(storage_key, file_backup, item.mime_type)
-				elif storage_path is not None:
-					await asyncio.to_thread(storage_path.write_bytes, file_backup)
-			except Exception:
-				logger.critical("Knowledge file restore failed after database rollback: item_id=%s", item.id, exc_info=True)
+		try:
+			await restore_removed_files()
+		except Exception:
+			logger.critical("Knowledge file restore failed after database rollback: item_id=%s", item.id, exc_info=True)
 		raise
 
 
@@ -738,6 +750,8 @@ async def update_knowledge_file(
 
 	storage = get_file_storage()
 	created_original_key: str | None = None
+	new_current_key = build_storage_key(user.id, "knowledge", item.id)
+	previous_current_key = item.current_storage_key
 	try:
 		if not item.storage_key and not item.storage_path:
 			if item.source_file_id:
@@ -751,9 +765,14 @@ async def update_knowledge_file(
 				item.storage_key = created_original_key
 				item.original_filename = markdown_file_name(item.title, "knowledge")
 
+		current_mime_type = file.content_type or "application/octet-stream"
+		await storage.save(new_current_key, file_content, current_mime_type)
 		item.source_type = "uploaded_file"
 		item.title = title.strip()[:255] or name
 		item.content = content if content is not None else extracted.text
+		item.current_storage_key = new_current_key
+		item.current_filename = name
+		item.current_mime_type = current_mime_type
 		item.rating = None if clear_rating else rating
 		item.is_active = is_active
 		item.approach = approach
@@ -769,12 +788,19 @@ async def update_knowledge_file(
 		db.commit()
 	except Exception:
 		db.rollback()
-		if created_original_key:
+		for storage_key in (new_current_key, created_original_key):
+			if not storage_key:
+				continue
 			try:
-				await storage.delete(created_original_key)
+				await storage.delete(storage_key)
 			except Exception:
-				logger.exception("Knowledge original cleanup failed: storage_key=%s", created_original_key)
+				logger.exception("Knowledge file update cleanup failed: storage_key=%s", storage_key)
 		raise
+	if previous_current_key and previous_current_key not in {item.storage_key, new_current_key}:
+		try:
+			await storage.delete(previous_current_key)
+		except Exception:
+			logger.exception("Previous Knowledge current file cleanup failed: storage_key=%s", previous_current_key)
 	return {"item": knowledge_payload(item)}
 
 
@@ -796,6 +822,32 @@ async def download_knowledge_file(
 ):
 	item = owned_knowledge_item(db, item_id, user.id)
 	if not original:
+		if item.current_storage_key:
+			try:
+				current_content = await get_file_storage().get(item.current_storage_key)
+			except (FileNotFoundError, OSError):
+				raise AppError(404, "KNOWLEDGE_CURRENT_FILE_MISSING", "Текущий файл отсутствует в хранилище")
+			name = item.current_filename or item.title
+			return Response(
+				current_content,
+				media_type=item.current_mime_type or "application/octet-stream",
+				headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"},
+			)
+		if item.storage_key and item.source_type in {"uploaded_file", "assistant_file"}:
+			try:
+				legacy_content = await get_file_storage().get(item.storage_key)
+			except (FileNotFoundError, OSError):
+				legacy_content = None
+			stored_checksum = (item.item_metadata or {}).get("sha256")
+			if legacy_content is not None and (
+				not stored_checksum or hashlib.sha256(legacy_content).hexdigest() == stored_checksum
+			):
+				name = item.original_filename or item.title
+				return Response(
+					legacy_content,
+					media_type=item.mime_type,
+					headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"},
+				)
 		name = markdown_file_name(item.title, "knowledge")
 		return Response(
 			item.content.encode("utf-8"),

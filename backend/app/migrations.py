@@ -108,6 +108,18 @@ def _add_trash_timestamps(connection: Connection) -> None:
 		))
 
 
+def _add_knowledge_current_files(connection: Connection) -> None:
+	columns = {column["name"] for column in inspect(connection).get_columns("knowledge_items")}
+	statements = {
+		"current_filename": "ALTER TABLE knowledge_items ADD COLUMN current_filename VARCHAR(255)",
+		"current_mime_type": "ALTER TABLE knowledge_items ADD COLUMN current_mime_type VARCHAR(160)",
+		"current_storage_key": "ALTER TABLE knowledge_items ADD COLUMN current_storage_key VARCHAR(1024)",
+	}
+	for column, statement in statements.items():
+		if column not in columns:
+			connection.execute(text(statement))
+
+
 MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260825_01_ratings_and_knowledge", _create_ratings_and_knowledge),
 	("20260825_02_storage_keys", _add_storage_keys),
@@ -117,6 +129,7 @@ MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260826_04_knowledge_created_index", _add_knowledge_created_index),
 	("20260827_01_knowledge_approaches", _add_knowledge_approaches),
 	("20260904_01_unified_trash", _add_trash_timestamps),
+	("20260911_01_knowledge_current_files", _add_knowledge_current_files),
 )
 
 
