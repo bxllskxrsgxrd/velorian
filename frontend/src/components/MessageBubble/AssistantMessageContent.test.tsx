@@ -26,6 +26,22 @@ describe('AssistantMessageContent', () => {
 		expect(container.querySelector('.token.tag')).toBeInTheDocument();
 	});
 
+	it('renders a complete source file as one code block without Markdown parsing', async () => {
+		const source = '<!doctype html>\n<html>\n<style>body { color: red; }</style>\n<script>const ready = true;</script>\n</html>';
+		const { container } = render(
+			<AssistantMessageContent content={source} isStreaming={false} sourceLanguage="markup" />,
+		);
+
+		expect(screen.getByText('HTML')).toBeInTheDocument();
+		expect(container.querySelectorAll('pre')).toHaveLength(1);
+		expect(container.querySelector('pre')?.textContent).toBe(source);
+		expect(container.querySelector('.token.tag')).toBeInTheDocument();
+		expect(container.querySelector('.token.selector')).toBeInTheDocument();
+		expect(container.querySelector('.token.keyword')).toBeInTheDocument();
+		fireEvent.click(screen.getByRole('button', { name: 'Копировать HTML' }));
+		await waitFor(() => expect(writeText).toHaveBeenCalledWith(source));
+	});
+
 	it('normalizes numbered headings and removes heading emoji', () => {
 		render(<AssistantMessageContent content={'## 1️⃣ 🚀 Настройка\n\nТекст'} isStreaming={false} />);
 

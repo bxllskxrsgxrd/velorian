@@ -8,7 +8,7 @@ import { CopyIcon } from '../icons/AppIcons';
 import { IconButton } from '../ui/IconButton/IconButton';
 import './_messageContent.scss';
 
-type AssistantMessageContentProps = { content: string; isStreaming: boolean };
+type AssistantMessageContentProps = { content: string; isStreaming: boolean; sourceLanguage?: string };
 
 const LANGUAGE_LABELS: Record<string, string> = {
 	markup: 'HTML', html: 'HTML', css: 'CSS', scss: 'SCSS', sass: 'Sass',
@@ -198,6 +198,10 @@ function MarkdownCopyButton({ label, getValue }: { label: string; getValue: () =
 
 function MarkdownPre({ children }: { children?: ReactNode }) {
 	const { code, language, label } = getCodeBlockData(children);
+	return <SourceCodeBlock code={code} language={language} label={label} />;
+}
+
+function SourceCodeBlock({ code, language, label = LANGUAGE_LABELS[language] || language.toUpperCase() }: { code: string; language: string; label?: string }) {
 	return (
 		<div className="message__markdown-block message__markdown-code-block">
 			<div className="message__markdown-toolbar"><span>{label}</span><MarkdownCopyButton label={label} getValue={() => code} /></div>
@@ -229,20 +233,24 @@ function heading(level: 1 | 2 | 3 | 4 | 5 | 6) {
 	};
 }
 
-export function AssistantMessageContent({ content, isStreaming }: AssistantMessageContentProps) {
+export function AssistantMessageContent({ content, isStreaming, sourceLanguage }: AssistantMessageContentProps) {
 	return (
 		<div className="message__text message__text--assistant message__markdown">
-			<ReactMarkdown
-				remarkPlugins={[remarkGfm]}
-				skipHtml
-				components={{
-					a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a>,
-					pre: MarkdownPre, table: MarkdownTable,
-					h1: heading(1), h2: heading(2), h3: heading(3), h4: heading(4), h5: heading(5), h6: heading(6),
-				}}
-			>
-				{normalizeMarkdown(content)}
-			</ReactMarkdown>
+			{sourceLanguage ? (
+				<SourceCodeBlock code={content} language={sourceLanguage} />
+			) : (
+				<ReactMarkdown
+					remarkPlugins={[remarkGfm]}
+					skipHtml
+					components={{
+						a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a>,
+						pre: MarkdownPre, table: MarkdownTable,
+						h1: heading(1), h2: heading(2), h3: heading(3), h4: heading(4), h5: heading(5), h6: heading(6),
+					}}
+				>
+					{normalizeMarkdown(content)}
+				</ReactMarkdown>
+			)}
 			{isStreaming && <span className="message__typing-cursor" aria-label="Ответ продолжается" />}
 		</div>
 	);

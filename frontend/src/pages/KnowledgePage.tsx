@@ -271,6 +271,7 @@ function KnowledgeDataDialog({
 								? 'Файл'
 								: 'Добавлено вручную'
 				} · ${item ? new Date(item.createdAt).toLocaleDateString('ru-RU') : ''}`;
+	const previewFileName = file?.name ?? item?.fileName ?? title;
 
 	return (
 		<ModalDialog
@@ -426,14 +427,14 @@ function KnowledgeDataDialog({
 									<p>Загрузка содержимого файла…</p>
 								) : filePreview.status === 'ready' ? (
 									<Suspense fallback={<p>Загрузка содержимого файла…</p>}>
-										<MarkdownEditor value={content} onChange={() => undefined} readonly />
+										<MarkdownEditor value={content} onChange={() => undefined} readonly fileName={previewFileName} />
 									</Suspense>
 								) : (
 									<p>Не удалось отобразить содержимое файла в предпросмотре</p>
 								)
 							) : content.trim() ? (
 								<Suspense fallback={<p>Загрузка предпросмотра…</p>}>
-									<MarkdownEditor value={content} onChange={() => undefined} readonly />
+									<MarkdownEditor value={content} onChange={() => undefined} readonly fileName={previewFileName} />
 								</Suspense>
 							) : (
 								<p>Текстовое содержимое не заполнено</p>
@@ -1299,7 +1300,12 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 						</div>
 						<div className="knowledge-view">
 							<Suspense fallback={<span>Загрузка предпросмотра…</span>}>
-								<MarkdownEditor value={dialog.item.content} onChange={() => undefined} readonly />
+								<MarkdownEditor
+									value={dialog.item.content}
+									onChange={() => undefined}
+									readonly
+									fileName={dialog.item.fileName}
+								/>
 							</Suspense>
 						</div>
 					</ModalDialog>
