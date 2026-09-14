@@ -170,7 +170,7 @@ def knowledge_payload(item: KnowledgeItem) -> dict:
 		"updatedAt": item.updated_at.isoformat(),
 		"deletedAt": item.deleted_at.isoformat() if item.deleted_at else None,
 		"downloadUrl": f"{settings.api_prefix}/knowledge/{item.id}/file",
-		"originalDownloadUrl": f"{settings.api_prefix}/knowledge/{item.id}/file?original=true" if item.storage_key or item.storage_path or item.source_file_id else None,
+		"originalDownloadUrl": f"{settings.api_prefix}/knowledge/{item.id}/file?original=true",
 	}
 
 
@@ -699,22 +699,61 @@ def get_knowledge_item(item_id: str, user: User = Depends(get_current_user), db:
 
 
 @router.patch("/{item_id}")
-def update_knowledge_item(item_id: str, payload: KnowledgeUpdatePayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def update_knowledge_item(item_id: str, payload: KnowledgeUpdatePayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	item = owned_knowledge_item(db, item_id, user.id)
-	if payload.title is not None:
-		item.title = payload.title.strip()
-	if payload.content is not None:
-		item.content = payload.content
-	if payload.is_active is not None:
-		item.is_active = payload.is_active
-	if "rating" in payload.model_fields_set:
-		item.rating = payload.rating
-	if "approach_id" in payload.model_fields_set:
-		item.approach = optional_owned_approach(db, payload.approach_id, user.id)
-	if "filters" in payload.model_fields_set:
-		item.item_metadata = merge_knowledge_filters(item.item_metadata, payload.filters)
-	item.updated_at = utc_now()
-	db.commit()
+	updates_file_content = payload.title is not None or payload.content is not None
+	storage = get_file_storage()
+	created_original_key: str | None = None
+	created_current_key: str | None = None
+	previous_current_key = item.current_storage_key
+	try:
+		if updates_file_content and not item.storage_key and not item.storage_path:
+			if item.source_file_id:
+				attachment = db.get(Attachment, item.source_file_id)
+				if attachment is None:
+					raise AppError(404, "ATTACHMENT_NOT_FOUND", "Исходный файл не найден")
+				created_original_key = await _persist_attachment_copy(db, item, attachment, commit=False)
+			else:
+				created_original_key = build_storage_key(user.id, "knowledge", item.id)
+				await storage.save(created_original_key, item.content.encode("utf-8"), "text/markdown")
+				item.storage_key = created_original_key
+				item.original_filename = markdown_file_name(item.title, "knowledge")
+
+		if payload.title is not None:
+			item.title = payload.title.strip()
+		if payload.content is not None:
+			item.content = payload.content
+		if updates_file_content:
+			created_current_key = build_storage_key(user.id, "knowledge", item.id)
+			await storage.save(created_current_key, item.content.encode("utf-8"), "text/markdown")
+			item.current_storage_key = created_current_key
+			item.current_filename = markdown_file_name(item.title, "knowledge")
+			item.current_mime_type = "text/markdown"
+		if payload.is_active is not None:
+			item.is_active = payload.is_active
+		if "rating" in payload.model_fields_set:
+			item.rating = payload.rating
+		if "approach_id" in payload.model_fields_set:
+			item.approach = optional_owned_approach(db, payload.approach_id, user.id)
+		if "filters" in payload.model_fields_set:
+			item.item_metadata = merge_knowledge_filters(item.item_metadata, payload.filters)
+		item.updated_at = utc_now()
+		db.commit()
+	except Exception:
+		db.rollback()
+		for storage_key in (created_current_key, created_original_key):
+			if not storage_key:
+				continue
+			try:
+				await storage.delete(storage_key)
+			except Exception:
+				logger.exception("Knowledge text update cleanup failed: storage_key=%s", storage_key)
+		raise
+	if updates_file_content and previous_current_key and previous_current_key not in {item.storage_key, created_current_key}:
+		try:
+			await storage.delete(previous_current_key)
+		except Exception:
+			logger.exception("Previous Knowledge current file cleanup failed: storage_key=%s", previous_current_key)
 	return {"item": knowledge_payload(item)}
 
 
@@ -872,7 +911,12 @@ async def download_knowledge_file(
 		legacy_path = Path(attachment.storage_path) if attachment.storage_path else None
 		name = attachment.name
 	else:
-		raise AppError(404, "KNOWLEDGE_FILE_NOT_FOUND", "У элемента нет файла")
+		name = item.original_filename or markdown_file_name(item.title, "knowledge")
+		return Response(
+			item.content.encode("utf-8"),
+			media_type=item.mime_type or "text/markdown",
+			headers={"Content-Disposition": f"attachment; filename*=UTF-8''{quote(name)}"},
+		)
 	try:
 		content = await get_file_storage().get(storage_key) if storage_key else await asyncio.to_thread(legacy_path.read_bytes) if legacy_path else None
 	except (FileNotFoundError, OSError):

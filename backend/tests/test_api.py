@@ -610,6 +610,42 @@ def test_manual_knowledge_file_updates_keep_first_manual_version_as_original(aut
 	assert authenticated_client.get(f"/api/knowledge/{created['id']}/file?original=true").content == "первоначальный ручной текст".encode()
 
 
+def test_manual_knowledge_edits_keep_first_version_as_original(authenticated_client):
+	created = authenticated_client.post(
+		"/api/knowledge",
+		json={"title": "Ручной оригинал", "content": "первоначальный ручной текст"},
+	).json()["item"]
+
+	assert created["originalDownloadUrl"] is not None
+	assert authenticated_client.get(f"/api/knowledge/{created['id']}/file").content == "первоначальный ручной текст".encode()
+	assert authenticated_client.get(f"/api/knowledge/{created['id']}/file?original=true").content == "первоначальный ручной текст".encode()
+
+	for title, content in (("Первая версия", "первое изменение"), ("Последняя версия", "последнее изменение")):
+		updated = authenticated_client.patch(
+			f"/api/knowledge/{created['id']}",
+			json={"title": title, "content": content},
+		)
+		assert updated.status_code == 200
+		assert authenticated_client.get(f"/api/knowledge/{created['id']}/file").content == content.encode()
+		assert authenticated_client.get(f"/api/knowledge/{created['id']}/file?original=true").content == "первоначальный ручной текст".encode()
+
+
+def test_uploaded_knowledge_manual_edits_download_as_current_version(authenticated_client):
+	created = authenticated_client.post(
+		"/api/knowledge/files",
+		files={"file": ("original.txt", b"first uploaded file", "text/plain")},
+	).json()["item"]
+
+	updated = authenticated_client.patch(
+		f"/api/knowledge/{created['id']}",
+		json={"title": "Отредактировано", "content": "текущая ручная версия"},
+	)
+	assert updated.status_code == 200
+	assert updated.json()["item"]["fileName"] == "Отредактировано.md"
+	assert authenticated_client.get(f"/api/knowledge/{created['id']}/file").content == "текущая ручная версия".encode()
+	assert authenticated_client.get(f"/api/knowledge/{created['id']}/file?original=true").content == b"first uploaded file"
+
+
 def test_uploaded_knowledge_file_updates_keep_first_file_as_original(authenticated_client):
 	created = authenticated_client.post(
 		"/api/knowledge/files",
