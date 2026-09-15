@@ -467,6 +467,7 @@
 	&__trash {
 		--trash-divider-color: var(--color-border-subtle);
 		--trash-row-inline-padding: 8px;
+		--trash-section-divider-inset: 0px;
 		--trash-scrollbar-space: 16px;
 
 		position: relative;
@@ -598,6 +599,8 @@
 	}
 
 	&__trash-toolbar {
+		position: relative;
+		z-index: 2;
 		display: flex;
 		align-items: center;
 		justify-content: space-between;
@@ -606,6 +609,17 @@
 		color: var(--color-text-secondary);
 
 		font-size: 13px;
+	}
+
+	&__trash-toolbar::after {
+		content: '';
+		position: absolute;
+		right: var(--trash-section-divider-inset);
+		bottom: -10px;
+		left: var(--trash-section-divider-inset);
+		height: 1px;
+		background: var(--trash-divider-color);
+		pointer-events: none;
 	}
 
 	&__trash-toolbar-selection,
@@ -685,7 +699,6 @@
 	}
 
 	&__trash-list-viewport {
-		position: relative;
 		min-height: 0;
 		overflow-y: auto;
 		width: calc(100% + var(--trash-scrollbar-space));
@@ -696,25 +709,6 @@
 		border: 0;
 
 		@include app-scrollbar;
-	}
-
-	&__trash-list-viewport::before,
-	&__trash-list-viewport::after {
-		content: '';
-		position: absolute;
-		right: calc(var(--trash-scrollbar-space) + var(--trash-row-inline-padding));
-		left: var(--trash-row-inline-padding);
-		height: 1px;
-		background: var(--trash-divider-color);
-		pointer-events: none;
-	}
-
-	&__trash-list-viewport::before {
-		top: 0;
-	}
-
-	&__trash-list-viewport::after {
-		bottom: 0;
 	}
 
 	&__trash-list {
