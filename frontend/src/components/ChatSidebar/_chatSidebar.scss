@@ -465,6 +465,13 @@
 	}
 
 	&__trash {
+		--trash-divider: linear-gradient(
+			to right,
+			transparent 0 2px,
+			var(--color-border-subtle) 2px calc(100% - 100px),
+			transparent calc(100% - 2px)
+		);
+
 		position: relative;
 
 		height: 100%;
@@ -508,7 +515,8 @@
 		padding: 0 0 18px;
 
 		border: 0;
-		border-bottom: 1px solid var(--color-border);
+		border-bottom: 1px solid transparent;
+		border-image: var(--trash-divider) 1;
 		border-radius: 0;
 
 		background: transparent;
@@ -690,8 +698,9 @@
 		padding-right: var(--trash-scrollbar-space);
 		box-sizing: border-box;
 
-		border-top: 1px solid var(--color-border-subtle);
-		border-bottom: 1px solid var(--color-border-subtle);
+		border: 0;
+		border-block: 1px solid transparent;
+		border-image: var(--trash-divider) 1;
 
 		@include app-scrollbar;
 	}
@@ -713,7 +722,9 @@
 		min-height: 72px;
 		padding: 10px 8px;
 
-		border-bottom: 1px solid var(--color-border-subtle);
+		border: 0;
+		border-bottom: 1px solid transparent;
+		border-image: var(--trash-divider) 1;
 		border-radius: 0;
 
 		transition:
@@ -722,8 +733,7 @@
 	}
 
 	&__trash-list li#{&}__trash-row--selected {
-		border-bottom-color: color-mix(in srgb, #edf7f0 14%, transparent);
-		background: color-mix(in srgb, #edf7f0 8%, transparent);
+		background-color: color-mix(in srgb, #edf7f0 8%, transparent);
 		box-shadow:
 			inset 1px 0 0 color-mix(in srgb, #e1f0e6 24%, transparent),
 			inset -1px 0 0 color-mix(in srgb, #e1f0e6 24%, transparent);
@@ -752,6 +762,7 @@
 
 	&__trash-list li:last-child {
 		border-bottom: 0;
+		border-image: none;
 	}
 
 	&__trash-copy {
@@ -1011,7 +1022,7 @@
 
 .modal-dialog__panel:has(.chat-sidebar__trash) .modal-dialog__content {
 	flex: 1;
-	overflow: hidden;
+	overflow: visible;
 }
 
 .modal-dialog__panel:has(.chat-sidebar__trash) .modal-dialog__actions {
