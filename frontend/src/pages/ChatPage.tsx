@@ -117,10 +117,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	const conversationCreationRef = useRef<Promise<ConversationSummary> | null>(null);
 	const sendOperationsRef = useRef(new Map<string, Promise<void>>());
 	const {
-		isDragging,
-		handleDragOver,
-		handleDragLeave,
-		handleDrop,
+		addFiles,
 		clearFiles,
 	} = useDragAndDrop(activeConversationId);
 
@@ -704,7 +701,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 				onLogout={() => void onLogout()}
 				onOpenKnowledge={onOpenKnowledge}
 			/>
-			<DropZone isDragging={isDragging} onDragOver={handleDragOver} onDragLeave={handleDragLeave} onDrop={handleDrop}>
+			<DropZone onFilesDrop={addFiles}>
 				<div
 					ref={chatPageRef}
 					onScroll={handleScroll}

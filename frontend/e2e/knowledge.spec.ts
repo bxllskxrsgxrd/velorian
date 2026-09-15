@@ -145,7 +145,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(
 		page.getByRole('checkbox', {
-			name: 'Использовать',
+			name: 'Использовать в ответах',
 		}),
 	).toBeChecked();
 
@@ -303,13 +303,13 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	await page
 		.locator('label.checkbox')
 		.filter({
-			hasText: 'Использовать',
+			hasText: 'Использовать в ответах',
 		})
 		.click();
 
 	await expect(
 		page.getByRole('checkbox', {
-			name: 'Использовать',
+			name: 'Использовать в ответах',
 		}),
 	).not.toBeChecked();
 
@@ -317,7 +317,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(
 		page.getByRole('checkbox', {
-			name: 'Использовать',
+			name: 'Использовать в ответах',
 		}),
 	).not.toBeChecked();
 
@@ -464,6 +464,35 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 		});
 
 	await expect(reset).toBeDisabled();
+});
+
+test('file picker accepts drag and drop without overlay text collisions', async ({ page }) => {
+	await installMockApi(page);
+	await page.goto('/knowledge');
+	await page.getByRole('button', { name: 'Добавить данные' }).click();
+
+	const dialog = page.getByRole('dialog');
+	const dropZone = dialog.locator('.knowledge-edit-modal__file-drop-zone');
+	const dataTransfer = await page.evaluateHandle(() => {
+		const transfer = new DataTransfer();
+		transfer.items.add(new File(['Текст из перетаскивания'], 'dropped.txt', { type: 'text/plain' }));
+		return transfer;
+	});
+
+	await dropZone.dispatchEvent('dragenter', { dataTransfer });
+	await dropZone.dispatchEvent('dragover', { dataTransfer });
+
+	await expect(dialog.getByRole('button', { name: 'Отпустите файл' })).toBeVisible();
+	await expect(dropZone.locator('.drop-zone__overlay')).toHaveCount(0);
+
+	await dropZone.dispatchEvent('drop', { dataTransfer });
+
+	await expect(dialog.getByRole('button', { name: 'Выбрать файл' })).toBeVisible();
+	await expect(dialog.getByLabel('Название')).toHaveValue('dropped.txt');
+	await expect(dialog.getByLabel('Содержимое')).toHaveValue('Текст из перетаскивания');
+	await expect(dialog.getByRole('button', { name: 'Убрать файл dropped.txt' })).toBeVisible();
+
+	await dataTransfer.dispose();
 });
 
 test('agent can browse and search the current user knowledge through chat', async ({ page }) => {

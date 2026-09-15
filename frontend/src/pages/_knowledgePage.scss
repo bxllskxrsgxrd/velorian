@@ -876,6 +876,17 @@
 		gap: 8px;
 	}
 
+	.knowledge-edit-modal__file-drop-zone {
+		min-width: 0;
+		flex: 1;
+	}
+
+	.knowledge-edit-modal__file-drop-zone > button.is-dragging {
+		border-color: var(--color-accent);
+		color: var(--color-accent);
+		background: var(--color-accent-soft);
+	}
+
 	.knowledge-edit-modal__file-picker button {
 		min-width: 0;
 		min-height: 42px;
@@ -892,11 +903,12 @@
 		font: inherit;
 	}
 
-	.knowledge-edit-modal__file-picker button:first-child {
-		flex: 1;
+	.knowledge-edit-modal__file-drop-zone > button {
+		width: 100%;
+		border-style: dashed;
 	}
 
-	.knowledge-edit-modal__file-picker button:first-child span {
+	.knowledge-edit-modal__file-drop-zone > button span {
 		min-width: 0;
 		overflow: hidden;
 		text-overflow: ellipsis;

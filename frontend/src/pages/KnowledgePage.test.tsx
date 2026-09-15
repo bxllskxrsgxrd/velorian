@@ -56,6 +56,32 @@ vi.mock('../components/MarkdownEditor/MarkdownEditor', () => ({
 	),
 }));
 
+function createTextFile(content: string, name: string, type = 'text/plain') {
+	const file = new File([content], name, { type });
+
+	// jsdom/File support differs between environments; keep file.text() deterministic.
+	Object.defineProperty(file, 'text', {
+		configurable: true,
+		value: vi.fn().mockResolvedValue(content),
+	});
+
+	return file;
+}
+
+function createFileDataTransfer(file: File) {
+	return {
+		files: [file],
+		items: [
+			{
+				kind: 'file',
+				type: file.type,
+				getAsFile: () => file,
+			},
+		],
+		types: ['Files'],
+	};
+}
+
 const item = {
 	id: 'knowledge-1',
 	sourceType: 'manual' as const,
@@ -292,7 +318,7 @@ describe('KnowledgePage', () => {
 			items: [item],
 			pageInfo: { nextCursor: null, hasMore: false },
 		});
-		const replacement = new File(['Новая файловая версия'], 'replacement.txt', { type: 'text/plain' });
+		const replacement = createTextFile('Новая файловая версия', 'replacement.txt');
 
 		renderKnowledge();
 		await openEditFromCard(item.title);
@@ -300,6 +326,9 @@ describe('KnowledgePage', () => {
 		const dialog = screen.getByRole('dialog');
 		const fileInput = dialog.querySelector<HTMLInputElement>('input[type="file"]');
 		expect(fileInput).not.toBeNull();
+		const inputClick = vi.spyOn(fileInput as HTMLInputElement, 'click');
+		fireEvent.click(within(dialog).getByRole('button', { name: 'Выбрать файл' }));
+		expect(inputClick).toHaveBeenCalledOnce();
 		fireEvent.change(fileInput as HTMLInputElement, { target: { files: [replacement] } });
 
 		await waitFor(() => {
@@ -320,6 +349,49 @@ describe('KnowledgePage', () => {
 			);
 		});
 		expect(api.updateKnowledgeItem).not.toHaveBeenCalled();
+	});
+
+	it('selects a file dropped into the picker while creating a card', async () => {
+		const droppedFile = createTextFile('Текст из перетаскивания', 'dropped.txt');
+		const dataTransfer = createFileDataTransfer(droppedFile);
+
+		renderKnowledge();
+		await screen.findByText('Сохранённых данных пока нет');
+		fireEvent.click(screen.getByRole('button', { name: 'Добавить данные' }));
+
+		const dialog = screen.getByRole('dialog');
+		const dropZone = dialog.querySelector<HTMLElement>('.knowledge-edit-modal__file-drop-zone');
+		expect(dropZone).not.toBeNull();
+		fireEvent.dragEnter(dropZone as HTMLElement, {
+			dataTransfer,
+		});
+		fireEvent.dragOver(dropZone as HTMLElement, {
+			dataTransfer,
+		});
+		expect(within(dialog).getByRole('button', { name: 'Отпустите файл' })).toBeInTheDocument();
+		expect(dropZone?.querySelector('.drop-zone__overlay')).not.toBeInTheDocument();
+		fireEvent.dragLeave(dropZone as HTMLElement, {
+			dataTransfer,
+		});
+		expect(within(dialog).getByRole('button', { name: 'Выбрать файл' })).toBeInTheDocument();
+
+		fireEvent.dragEnter(dropZone as HTMLElement, {
+			dataTransfer,
+		});
+		fireEvent.dragOver(dropZone as HTMLElement, {
+			dataTransfer,
+		});
+		fireEvent.drop(dropZone as HTMLElement, {
+			dataTransfer,
+		});
+		expect(within(dialog).getByRole('button', { name: 'Выбрать файл' })).toBeInTheDocument();
+
+		await waitFor(() => {
+			expect(within(dialog).getByRole('textbox', { name: 'Название' })).toHaveValue('dropped.txt');
+			expect(within(dialog).getByRole('textbox', { name: 'Содержимое' })).toHaveValue('Текст из перетаскивания');
+		});
+
+		expect(within(dialog).getByRole('button', { name: 'Убрать файл dropped.txt' })).toBeInTheDocument();
 	});
 
 	it('shows manual data in add preview before saving', async () => {

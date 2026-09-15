@@ -21,6 +21,7 @@ import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
 import { Rating } from '../components/ui/Rating/Rating';
 import { Checkbox } from '../components/ui/Checkbox/Checkbox';
 import { CustomSelect } from '../components/ui/CustomSelect/CustomSelect';
+import { DropZone } from '../components/ui/DropZone/DropZone';
 import { Tooltip } from '../components/ui/Tooltip/Tooltip';
 import { KnowledgeFilterFields } from '../components/KnowledgeFilterFields/KnowledgeFilterFields';
 import type { AuthUser, KnowledgeApproach, KnowledgeFilters, KnowledgeItem } from '../types/chat';
@@ -339,10 +340,18 @@ function KnowledgeDataDialog({
 							onChange={(event) => void handleFileChange(event.target.files?.[0] ?? null)}
 						/>
 						<div className="knowledge-edit-modal__file-picker">
-							<button type="button" onClick={() => fileInputRef.current?.click()}>
-								<DocumentIcon />
-								<span>{file ? file.name : 'Выбрать файл'}</span>
-							</button>
+							<DropZone
+								className="knowledge-edit-modal__file-drop-zone"
+								showOverlay={false}
+								onFilesDrop={(files) => void handleFileChange(files[0] ?? null)}
+							>
+								{(isDragging) => (
+									<button type="button" className={isDragging ? 'is-dragging' : undefined} onClick={() => fileInputRef.current?.click()}>
+										<DocumentIcon />
+										<span>{isDragging ? 'Отпустите файл' : 'Выбрать файл'}</span>
+									</button>
+								)}
+							</DropZone>
 							{file && (
 								<button
 									className="knowledge-edit-modal__file-remove"
