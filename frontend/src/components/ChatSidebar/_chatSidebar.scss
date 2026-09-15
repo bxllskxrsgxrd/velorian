@@ -465,12 +465,9 @@
 	}
 
 	&__trash {
-		--trash-divider: linear-gradient(
-			to right,
-			transparent 0 2px,
-			var(--color-border-subtle) 2px calc(100% - 100px),
-			transparent calc(100% - 2px)
-		);
+		--trash-divider-color: var(--color-border-subtle);
+		--trash-row-inline-padding: 8px;
+		--trash-scrollbar-space: 16px;
 
 		position: relative;
 
@@ -515,8 +512,7 @@
 		padding: 0 0 18px;
 
 		border: 0;
-		border-bottom: 1px solid transparent;
-		border-image: var(--trash-divider) 1;
+		border-bottom: 1px solid var(--trash-divider-color);
 		border-radius: 0;
 
 		background: transparent;
@@ -689,8 +685,7 @@
 	}
 
 	&__trash-list-viewport {
-		--trash-scrollbar-space: 16px;
-
+		position: relative;
 		min-height: 0;
 		overflow-y: auto;
 		width: calc(100% + var(--trash-scrollbar-space));
@@ -699,10 +694,27 @@
 		box-sizing: border-box;
 
 		border: 0;
-		border-block: 1px solid transparent;
-		border-image: var(--trash-divider) 1;
 
 		@include app-scrollbar;
+	}
+
+	&__trash-list-viewport::before,
+	&__trash-list-viewport::after {
+		content: '';
+		position: absolute;
+		right: calc(var(--trash-scrollbar-space) + var(--trash-row-inline-padding));
+		left: var(--trash-row-inline-padding);
+		height: 1px;
+		background: var(--trash-divider-color);
+		pointer-events: none;
+	}
+
+	&__trash-list-viewport::before {
+		top: 0;
+	}
+
+	&__trash-list-viewport::after {
+		bottom: 0;
 	}
 
 	&__trash-list {
@@ -714,22 +726,32 @@
 	}
 
 	&__trash-list li {
+		position: relative;
 		display: grid;
 		grid-template-columns: 20px minmax(0, 1fr) 74px;
 		align-items: center;
 		gap: 12px;
 
 		min-height: 72px;
-		padding: 10px 8px;
+		padding: 10px var(--trash-row-inline-padding);
 
 		border: 0;
-		border-bottom: 1px solid transparent;
-		border-image: var(--trash-divider) 1;
 		border-radius: 0;
 
 		transition:
 			background-color var(--transition-fast),
 			box-shadow var(--transition-fast);
+	}
+
+	&__trash-list li::after {
+		content: '';
+		position: absolute;
+		right: var(--trash-row-inline-padding);
+		bottom: 0;
+		left: var(--trash-row-inline-padding);
+		height: 1px;
+		background: var(--trash-divider-color);
+		pointer-events: none;
 	}
 
 	&__trash-list li#{&}__trash-row--selected {
@@ -760,9 +782,8 @@
 		box-shadow: inset 0 0 0 1px color-mix(in srgb, #e1f0e6 24%, transparent);
 	}
 
-	&__trash-list li:last-child {
-		border-bottom: 0;
-		border-image: none;
+	&__trash-list li:last-child::after {
+		display: none;
 	}
 
 	&__trash-copy {
