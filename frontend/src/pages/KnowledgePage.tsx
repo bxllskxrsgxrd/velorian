@@ -1104,7 +1104,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 							</button>
 							<button className="knowledge-page__bulk-delete" type="button" onClick={() => setBulkDeleteOpen(true)}>
 								<TrashIcon />
-								Удалить {selectedItems.length}
+								В корзину {selectedItems.length}
 							</button>
 						</div>
 					)}
@@ -1243,7 +1243,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 							role="menuitem"
 							onClick={() => runCardMenuAction(() => setDialog({ type: 'delete', item: cardMenuItem }))}
 						>
-							Удалить
+							Переместить в корзину
 						</button>
 					</div>
 				)}
@@ -1312,8 +1312,8 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 				)}
 				{dialog?.type === 'delete' && (
 					<ModalDialog
-						title="Удалить элемент?"
-						confirmLabel="Удалить"
+						title="Переместить элемент в корзину?"
+						confirmLabel="Переместить в корзину"
 						danger
 						onClose={() => setDialog(null)}
 						onConfirm={() => void removeItem(dialog.item)}
@@ -1323,8 +1323,8 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 				)}
 				{bulkDeleteOpen && (
 					<ModalDialog
-						title="Удалить выбранные элементы?"
-						confirmLabel={bulkDeleting ? 'Удаление…' : `Удалить ${selectedItems.length}`}
+						title="Переместить выбранные элементы в корзину?"
+						confirmLabel={bulkDeleting ? 'Удаление…' : `Переместить в корзину`}
 						confirmDisabled={bulkDeleting}
 						danger
 						onClose={() => setBulkDeleteOpen(false)}

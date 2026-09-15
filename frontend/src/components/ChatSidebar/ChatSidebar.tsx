@@ -603,7 +603,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 							{trashError && <p className="chat-sidebar__trash-error">{trashError}</p>}
 						</div>
 						<div className="chat-sidebar__trash-toolbar">
-							<span>Удалённых объектов: {activeTrashItems.length}</span>
+							<span>Объектов в корзине: {activeTrashItems.length}</span>
 							<button
 								className="chat-sidebar__trash-clear"
 								type="button"
@@ -616,7 +616,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 									)
 								}
 							>
-								Очистить
+								Очистить корзину
 							</button>
 						</div>
 						<div className="chat-sidebar__trash-list-viewport" role="tabpanel">
@@ -700,7 +700,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 				>
 					<p>
 						{'count' in trashConfirmation
-							? `Все ${trashConfirmation.count} удалённых объектов будут удалены без возможности восстановления`
+							? `Все ${trashConfirmation.count} объектов в корзине будут удалены без возможности восстановления`
 							: `«${trashConfirmation.title}» будет удалён без возможности восстановления`}
 					</p>
 				</ModalDialog>

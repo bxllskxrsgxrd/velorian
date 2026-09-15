@@ -401,12 +401,12 @@
 
 	&__settings-toggle svg:last-child {
 		margin-left: auto;
-		transform: rotate(90deg);
+		transform: rotate(-90deg);
 		transition: transform var(--transition-normal);
 	}
 
 	&__settings-toggle[aria-expanded='true'] svg:last-child {
-		transform: rotate(-90deg);
+		transform: rotate(90deg);
 	}
 
 	&__settings-panel {
