@@ -28,7 +28,6 @@ import { VelorianIcon } from '../icons/VelorianIcon';
 import { ModalDialog } from '../ui/ModalDialog/ModalDialog';
 import { Checkbox } from '../ui/Checkbox/Checkbox';
 import { CustomSelect } from '../ui/CustomSelect/CustomSelect';
-import { Tooltip } from '../ui/Tooltip/Tooltip';
 import './_chatSidebar.scss';
 import { SidebarButton } from '../ui/SidebarButton/SidebarButton';
 import { useSidebarStore } from '../../stores/sidebarStore';
@@ -606,22 +605,21 @@ export function ChatSidebar(props: ChatSidebarProps) {
 								<span>Выбрано: {selectedTrashItems.length} из {activeTrashItems.length}</span>
 							</div>
 							<div className="chat-sidebar__trash-toolbar-actions">
-								<Tooltip content={`Восстановить выбранные (${selectedTrashItems.length})`}>
-									<button
-										className="chat-sidebar__trash-restore-selected"
-										type="button"
-										aria-label={`Восстановить выбранные (${selectedTrashItems.length})`}
-										disabled={selectedTrashItems.length === 0 || trashBusyId !== null}
-										onClick={() =>
-											void handleRestoreItems(
-												trashTab,
-												selectedTrashItems.map((item) => item.id),
-											)
-										}
-									>
-										<UndoIcon />
-									</button>
-								</Tooltip>
+								<button
+									className="chat-sidebar__trash-restore-selected"
+									type="button"
+									aria-label={`Восстановить выбранные (${selectedTrashItems.length})`}
+									disabled={selectedTrashItems.length === 0 || trashBusyId !== null}
+									onClick={() =>
+										void handleRestoreItems(
+											trashTab,
+											selectedTrashItems.map((item) => item.id),
+										)
+									}
+								>
+									<UndoIcon />
+									Восстановить
+								</button>
 								<button
 									className="chat-sidebar__trash-delete-selected"
 									type="button"
@@ -640,13 +638,29 @@ export function ChatSidebar(props: ChatSidebarProps) {
 								<p className="chat-sidebar__trash-empty">Корзина пуста</p>
 							) : (
 								<ul className="chat-sidebar__trash-list">
-									{activeTrashItems.map((item) => {
+									{activeTrashItems.map((item, index) => {
 										const selected = selectedTrashIds.has(item.id);
+										const previousSelected = index > 0 && selectedTrashIds.has(activeTrashItems[index - 1].id);
+										const nextSelected =
+											index < activeTrashItems.length - 1 && selectedTrashIds.has(activeTrashItems[index + 1].id);
+										const selectedPosition = !selected
+											? null
+											: !previousSelected && !nextSelected
+												? 'single'
+												: !previousSelected
+													? 'start'
+													: !nextSelected
+														? 'end'
+														: 'middle';
 
 										return (
 											<li
 												key={`${trashTab}:${item.id}`}
-												className={selected ? 'chat-sidebar__trash-row--selected' : undefined}
+												className={
+													selectedPosition
+														? `chat-sidebar__trash-row--selected chat-sidebar__trash-row--selected-${selectedPosition}`
+														: undefined
+												}
 											>
 												<Checkbox
 													checked={selected}
@@ -667,28 +681,24 @@ export function ChatSidebar(props: ChatSidebarProps) {
 													<small>{trashDateLabel(item.deletedAt)}</small>
 												</div>
 												<div className="chat-sidebar__trash-actions">
-													<Tooltip content="Восстановить">
-														<button
-															className="chat-sidebar__trash-action chat-sidebar__trash-action--restore"
-															type="button"
-															aria-label="Восстановить"
-															disabled={trashBusyId !== null}
-															onClick={() => void handleRestoreItems(trashTab, [item.id])}
-														>
-															<UndoIcon />
-														</button>
-													</Tooltip>
-													<Tooltip content="Удалить навсегда">
-														<button
-															className="chat-sidebar__trash-action chat-sidebar__trash-action--delete"
-															type="button"
-															aria-label="Удалить навсегда"
-															disabled={trashBusyId !== null}
-															onClick={() => setTrashConfirmation({ type: trashTab, items: [{ id: item.id, title: item.title }] })}
-														>
-															<TrashIcon />
-														</button>
-													</Tooltip>
+													<button
+														className="chat-sidebar__trash-action chat-sidebar__trash-action--restore"
+														type="button"
+														aria-label="Восстановить"
+														disabled={trashBusyId !== null}
+														onClick={() => void handleRestoreItems(trashTab, [item.id])}
+													>
+														<UndoIcon />
+													</button>
+													<button
+														className="chat-sidebar__trash-action chat-sidebar__trash-action--delete"
+														type="button"
+														aria-label="Удалить навсегда"
+														disabled={trashBusyId !== null}
+														onClick={() => setTrashConfirmation({ type: trashTab, items: [{ id: item.id, title: item.title }] })}
+													>
+														<TrashIcon />
+													</button>
 												</div>
 											</li>
 										);
