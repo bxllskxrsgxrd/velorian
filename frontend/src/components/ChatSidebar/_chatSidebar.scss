@@ -466,9 +466,10 @@
 
 	&__trash {
 		--trash-divider-color: var(--color-border-subtle);
+		--trash-list-inline-inset: 8px;
 		--trash-row-inline-padding: 8px;
 		--trash-section-divider-inset: 0px;
-		--trash-scrollbar-space: 16px;
+		--trash-scrollbar-space: 11px;
 
 		position: relative;
 
@@ -700,10 +701,11 @@
 
 	&__trash-list-viewport {
 		min-height: 0;
+		overflow-x: hidden;
 		overflow-y: auto;
 		width: calc(100% + var(--trash-scrollbar-space));
 		margin-right: calc(var(--trash-scrollbar-space) * -1);
-		padding-right: var(--trash-scrollbar-space);
+		// padding-right: var(--trash-scrollbar-space);
 		box-sizing: border-box;
 
 		border: 0;
@@ -712,8 +714,8 @@
 	}
 
 	&__trash-list {
-		width: 100%;
-		margin: 0;
+		width: auto;
+		margin: 0 var(--trash-list-inline-inset);
 		padding: 0;
 
 		list-style: none;
