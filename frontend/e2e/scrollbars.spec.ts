@@ -27,7 +27,7 @@ function expectSharedScrollbar(snapshot: Awaited<ReturnType<typeof scrollbarSnap
 	expect(snapshot.webkitHeight).toBe('10px');
 }
 
-test('Knowledge, Sidebar and modal share one scrollbar at a small viewport', async ({ page }) => {
+test('Knowledge, Sidebar and editor share one scrollbar at a small viewport', async ({ page }) => {
 	await page.setViewportSize({ width: 1280, height: 600 });
 	await installMockApi(page, { manyChats: true, manyKnowledge: true });
 	await page.goto('/knowledge');
@@ -42,13 +42,16 @@ test('Knowledge, Sidebar and modal share one scrollbar at a small viewport', asy
 	expect(await page.evaluate(() => document.body.scrollHeight)).toBeLessThanOrEqual(600);
 
 	await page.getByRole('button', { name: 'Добавить данные' }).click();
+	await expect(page).toHaveURL(/\/knowledge\/new$/);
 	await page.setViewportSize({ width: 1280, height: 430 });
-	const modal = await scrollbarSnapshot(page.locator('.modal-dialog.knowledge-edit-modal .knowledge-edit-modal__form'));
-	expectSharedScrollbar(modal);
-	expect(modal.overflowY).toBe('auto');
-	expect(modal.scrollHeight).toBeGreaterThan(modal.clientHeight);
+	const editor = page.getByRole('region', { name: 'Добавить данные' });
+	const editorForm = await scrollbarSnapshot(editor.locator('.knowledge-edit-modal__form'));
+	expectSharedScrollbar(editorForm);
+	expect(editorForm.overflowY).toBe('auto');
+	expect(editorForm.scrollHeight).toBeGreaterThan(editorForm.clientHeight);
 
-	await page.getByRole('dialog').getByRole('button', { name: 'Отмена' }).click();
+	await editor.getByRole('button', { name: 'Закрыть' }).click();
+	await expect(page).toHaveURL(/\/knowledge$/);
 	await page.setViewportSize({ width: 1280, height: 600 });
 	await page.getByRole('button', { name: 'Свернуть боковую панель' }).click();
 	await expect(page.locator('.chat-sidebar')).toHaveCSS('width', '68px');
