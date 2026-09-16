@@ -47,10 +47,22 @@ export type KnowledgeSource = {
 export type KnowledgeApproach = {
 	id: string;
 	name: string;
-	slug: string;
+	slug?: string;
+	description: string;
+	purpose: string;
+	characteristics: string[];
+	structure: string[];
+	writingGuidelines: string[];
+	avoid: string[];
+	exampleKnowledgeItemIds: string[];
+	isActive: boolean;
+	linkedKnowledgeItemsCount?: number;
 	createdAt: string;
 	updatedAt: string;
 };
+
+export type Approach = KnowledgeApproach;
+export type ApproachInput = Omit<Approach, 'id' | 'createdAt' | 'updatedAt' | 'linkedKnowledgeItemsCount' | 'slug'>;
 
 export type KnowledgeFilters = {
 	geo: string | null;

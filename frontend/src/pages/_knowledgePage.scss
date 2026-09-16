@@ -102,6 +102,12 @@
 	justify-content: space-between;
 	gap: 20px;
 }
+
+.knowledge-page__header-actions {
+	display: flex;
+	align-items: center;
+	gap: 8px;
+}
 .knowledge-page header h1 {
 	margin: 12px 0 4px;
 	font-size: 34px;

@@ -13,7 +13,6 @@ export type ChatGenerationState = {
 type ChatStore = {
 	messagesByConversation: Record<string, ChatMessage[]>;
 	generationByConversation: Record<string, ChatGenerationState>;
-	activeConversationId: string | null;
 	messages: ChatMessage[];
 	isLoadingConversation: boolean;
 	isCreatingConversation: boolean;
@@ -23,7 +22,6 @@ type ChatStore = {
 	knowledgeFilters: KnowledgeFilters;
 	knowledgeSaveState: KnowledgeSaveState;
 	setConversationMessages: (conversationId: string, value: StateValue<ChatMessage[]>) => void;
-	setActiveConversation: (conversationId: string | null) => void;
 	setMessages: (value: StateValue<ChatMessage[]>) => void;
 	setConversationGeneration: (conversationId: string, value: ChatGenerationState) => void;
 	clearConversationGeneration: (conversationId: string) => void;
@@ -42,7 +40,6 @@ type ChatStore = {
 export const useChatStore = create<ChatStore>((set) => ({
 	messagesByConversation: {},
 	generationByConversation: {},
-	activeConversationId: null,
 	messages: [],
 	isLoadingConversation: false,
 	isCreatingConversation: false,
@@ -54,31 +51,9 @@ export const useChatStore = create<ChatStore>((set) => ({
 	setConversationMessages: (conversationId, value) =>
 		set((state) => {
 			const messages = resolveStateValue(value, state.messagesByConversation[conversationId] ?? []);
-			return {
-				messagesByConversation: { ...state.messagesByConversation, [conversationId]: messages },
-				...(state.activeConversationId === conversationId ? { messages } : {}),
-			};
+			return { messagesByConversation: { ...state.messagesByConversation, [conversationId]: messages } };
 		}),
-	setActiveConversation: (activeConversationId) =>
-		set((state) => ({
-			activeConversationId,
-			messages: activeConversationId ? (state.messagesByConversation[activeConversationId] ?? []) : [],
-		})),
-	setMessages: (value) =>
-		set((state) => {
-			const messages = resolveStateValue(value, state.messages);
-			return {
-				messages,
-				...(state.activeConversationId
-					? {
-							messagesByConversation: {
-								...state.messagesByConversation,
-								[state.activeConversationId]: messages,
-							},
-						}
-					: {}),
-			};
-		}),
+	setMessages: (value) => set((state) => ({ messages: resolveStateValue(value, state.messages) })),
 	setConversationGeneration: (conversationId, value) =>
 		set((state) => ({
 			generationByConversation: { ...state.generationByConversation, [conversationId]: value },
@@ -114,7 +89,6 @@ export const useChatStore = create<ChatStore>((set) => ({
 		set({
 			messagesByConversation: {},
 			generationByConversation: {},
-			activeConversationId: null,
 			messages: [],
 			isLoadingConversation: false,
 			isCreatingConversation: false,

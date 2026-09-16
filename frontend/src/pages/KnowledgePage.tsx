@@ -2,19 +2,10 @@ import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import {
-	createKnowledgeApproach,
-	createKnowledgeItem,
-	deleteConversation,
 	deleteKnowledgeItem,
-	listConversations,
 	listKnowledge,
-	listKnowledgeApproaches,
-	renameConversation,
-	updateKnowledgeFile,
 	updateKnowledgeItem,
-	uploadKnowledgeFile,
 } from '../api/chatApi';
-import { ChatSidebar } from '../components/ChatSidebar/ChatSidebar';
 import { useDebounce } from '../hooks/useDebounce';
 import { useToast } from '../hooks/useToast';
 import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
@@ -27,10 +18,10 @@ import { KnowledgeFilterFields } from '../components/KnowledgeFilterFields/Knowl
 import type { AuthUser, KnowledgeApproach, KnowledgeFilters, KnowledgeItem } from '../types/chat';
 import { reportError } from '../utils/reportError';
 import { useKnowledgeStore } from '../stores/knowledgeStore';
-import { useConversationsStore } from '../stores/conversationsStore';
 import { useUiStore } from '../stores/uiStore';
+import { useApproachesStore } from '../stores/approachesStore';
 import './_knowledgePage.scss';
-import { CrossIcon, DocumentIcon, ListIcon, PlusIcon, SearchIcon, TrashIcon } from '../components/icons/AppIcons';
+import { CrossIcon, DocumentIcon, ListIcon, SearchIcon, TrashIcon } from '../components/icons/AppIcons';
 
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor/MarkdownEditor'));
 
@@ -146,8 +137,9 @@ function storedFilters(item: KnowledgeItem): KnowledgeFilters {
 	);
 }
 
-type KnowledgeDataDialogProps = {
+export type KnowledgeDataDialogProps = {
 	mode: 'create' | 'edit';
+	page?: boolean;
 	item?: KnowledgeItem;
 	title: string;
 	setTitle: (value: string) => void;
@@ -162,13 +154,6 @@ type KnowledgeDataDialogProps = {
 	formFilters: KnowledgeFilters;
 	setFormFilters: (value: KnowledgeFilters) => void;
 	approaches: KnowledgeApproach[];
-	newApproachName: string;
-	setNewApproachName: (value: string) => void;
-	showApproachCreator: boolean;
-	setShowApproachCreator: (value: boolean) => void;
-	creatingApproach: boolean;
-	onAddApproach: () => void;
-	onResetApproachCreator: () => void;
 	file: File | null;
 	setFile: (value: File | null) => void;
 	saving: boolean;
@@ -176,8 +161,9 @@ type KnowledgeDataDialogProps = {
 	onConfirm: () => void;
 };
 
-function KnowledgeDataDialog({
+export function KnowledgeDataDialog({
 	mode,
+	page = false,
 	item,
 	title,
 	setTitle,
@@ -192,13 +178,6 @@ function KnowledgeDataDialog({
 	formFilters,
 	setFormFilters,
 	approaches,
-	newApproachName,
-	setNewApproachName,
-	showApproachCreator,
-	setShowApproachCreator,
-	creatingApproach,
-	onAddApproach,
-	onResetApproachCreator,
 	file,
 	setFile,
 	saving,
@@ -277,6 +256,7 @@ function KnowledgeDataDialog({
 	return (
 		<ModalDialog
 			className="knowledge-edit-modal"
+			page={page}
 			title={mode === 'create' ? 'Добавить данные' : 'Редактировать данные'}
 			subtitle={
 				mode === 'create'
@@ -377,38 +357,13 @@ function KnowledgeDataDialog({
 									ariaLabel="Подход элемента"
 									options={[
 										{ value: '', label: 'Без подхода' },
-										...approaches.map((approach) => ({ value: approach.id, label: approach.name })),
+										...approaches
+											.filter((approach) => approach.isActive || approach.id === selectedApproachId)
+											.map((approach) => ({ value: approach.id, label: approach.name })),
 									]}
 								/>
 							</label>
-							<button
-								className="knowledge-edit-modal__new-approach"
-								type="button"
-								onClick={() => setShowApproachCreator(true)}
-							>
-								<PlusIcon />
-								Новый подход
-							</button>
 						</div>
-						{showApproachCreator && (
-							<div className="knowledge-form__approach-create">
-								<input
-									value={newApproachName}
-									onChange={(event) => setNewApproachName(event.target.value)}
-									placeholder="Название нового подхода"
-									aria-label="Название нового подхода"
-									maxLength={80}
-								/>
-								<div className="knowledge-form__approach-actions">
-									<button type="button" disabled={!newApproachName.trim() || creatingApproach} onClick={onAddApproach}>
-										{creatingApproach ? 'Создание…' : 'Создать'}
-									</button>
-									<button type="button" onClick={onResetApproachCreator}>
-										Отмена
-									</button>
-								</div>
-							</div>
-						)}
 					</section>
 					<div className="knowledge-edit-modal__divider" />
 					<div className="knowledge-edit-modal__settings">
@@ -465,7 +420,7 @@ function KnowledgeDataDialog({
 	);
 }
 
-export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: () => Promise<void> }) {
+export function KnowledgePage({ user }: { user: AuthUser }) {
 	const navigate = useNavigate();
 	const [params, setParams] = useSearchParams();
 	const debouncedSearch = useDebounce(params.get('q') ?? '', 250);
@@ -490,37 +445,10 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	const setLoadingMore = useKnowledgeStore((state) => state.setLoadingMore);
 	const dialog = useKnowledgeStore((state) => state.dialog);
 	const setDialog = useKnowledgeStore((state) => state.setDialog);
-	const title = useKnowledgeStore((state) => state.title);
-	const setTitle = useKnowledgeStore((state) => state.setTitle);
-	const content = useKnowledgeStore((state) => state.content);
-	const setContent = useKnowledgeStore((state) => state.setContent);
-	const rating = useKnowledgeStore((state) => state.rating);
-	const setRating = useKnowledgeStore((state) => state.setRating);
-	const isActive = useKnowledgeStore((state) => state.isActive);
-	const setIsActive = useKnowledgeStore((state) => state.setActive);
-	const selectedApproachId = useKnowledgeStore((state) => state.selectedApproachId);
-	const setSelectedApproachId = useKnowledgeStore((state) => state.setSelectedApproachId);
-	const formFilters = useKnowledgeStore((state) => state.formFilters);
-	const setFormFilters = useKnowledgeStore((state) => state.setFormFilters);
-	const saving = useKnowledgeStore((state) => state.isSaving);
-	const setSaving = useKnowledgeStore((state) => state.setSaving);
-	const approaches = useKnowledgeStore((state) => state.approaches);
-	const setApproaches = useKnowledgeStore((state) => state.setApproaches);
-	const newApproachName = useKnowledgeStore((state) => state.newApproachName);
-	const setNewApproachName = useKnowledgeStore((state) => state.setNewApproachName);
-	const showApproachCreator = useKnowledgeStore((state) => state.showApproachCreator);
-	const setShowApproachCreator = useKnowledgeStore((state) => state.setShowApproachCreator);
-	const creatingApproach = useKnowledgeStore((state) => state.isCreatingApproach);
-	const setCreatingApproach = useKnowledgeStore((state) => state.setCreatingApproach);
-	const file = useKnowledgeStore((state) => state.file);
-	const setFile = useKnowledgeStore((state) => state.setFile);
+	const approaches = useApproachesStore((state) => state.items);
+	const loadApproaches = useApproachesStore((state) => state.load);
 	const pendingItemIds = useKnowledgeStore((state) => state.pendingItemIds);
 	const markPending = useKnowledgeStore((state) => state.markPending);
-	const openAdd = useKnowledgeStore((state) => state.openAdd);
-	const openEdit = useKnowledgeStore((state) => state.openEdit);
-	const resetApproachCreator = useKnowledgeStore((state) => state.resetApproachCreator);
-	const setConversations = useConversationsStore((state) => state.setConversations);
-	const sidebarOpen = useUiStore((state) => state.isSidebarOpen);
 	const setSidebarOpen = useUiStore((state) => state.setSidebarOpen);
 	const { showToast } = useToast();
 
@@ -586,16 +514,12 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	}, []);
 
 	useEffect(() => {
-		listConversations()
-			.then(setConversations)
-			.catch((error: unknown) => reportError('KNOWLEDGE_SIDEBAR_CHATS_FAILED', error));
-		listKnowledgeApproaches()
-			.then(setApproaches)
+		loadApproaches()
 			.catch((error: unknown) => {
 				reportError('KNOWLEDGE_APPROACHES_FAILED', error);
 				showToast(error instanceof Error ? error.message : 'Не удалось загрузить подходы', 'error');
 			});
-	}, [setApproaches, setConversations, showToast]);
+	}, [loadApproaches, showToast]);
 
 	useEffect(() => {
 		let cancelled = false;
@@ -682,74 +606,6 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 		ratingFilter !== 'all' ? ratingFilter : '',
 		activeFilter !== 'all' ? activeFilter : '',
 	].filter(Boolean).length;
-
-	async function addApproach() {
-		const name = newApproachName.trim();
-		if (!name || creatingApproach) return;
-		setCreatingApproach(true);
-		try {
-			const created = await createKnowledgeApproach(name);
-			setApproaches((current) =>
-				[...current, created].sort((left, right) => left.name.localeCompare(right.name, 'ru')),
-			);
-			setSelectedApproachId(created.id);
-			resetApproachCreator();
-			showToast('Подход создан', 'success');
-		} catch (error) {
-			showToast(error instanceof Error ? error.message : 'Не удалось создать подход', 'error');
-		} finally {
-			setCreatingApproach(false);
-		}
-	}
-	async function saveDialog() {
-		if (saving) return;
-		setSaving(true);
-		try {
-			if (dialog?.type === 'add') {
-				const created = file
-					? await uploadKnowledgeFile(
-							file,
-							title.trim(),
-							content,
-							rating,
-							isActive,
-							selectedApproachId || null,
-							formFilters,
-						)
-					: await createKnowledgeItem(title.trim(), content, rating, isActive, selectedApproachId || null, formFilters);
-				setItems((current) => [created, ...current]);
-				showToast('Данные добавлены в базу знаний', 'success');
-			} else if (dialog?.type === 'edit') {
-				const updated = file
-					? await updateKnowledgeFile(
-							dialog.item.id,
-							file,
-							title.trim(),
-							content,
-							rating,
-							isActive,
-							selectedApproachId || null,
-							formFilters,
-						)
-					: await updateKnowledgeItem(dialog.item.id, {
-							title: title.trim(),
-							content,
-							rating,
-							isActive,
-							approachId: selectedApproachId || null,
-							filters: formFilters,
-						});
-				setItems((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-				showToast('Изменения сохранены', 'success');
-			}
-			setDialog(null);
-		} catch (error) {
-			reportError('KNOWLEDGE_SAVE_FAILED', error);
-			showToast(error instanceof Error ? error.message : 'Не удалось сохранить данные', 'error');
-		} finally {
-			setSaving(false);
-		}
-	}
 
 	async function changeRating(item: KnowledgeItem, value: number | null) {
 		if (pendingItemIds.has(item.id)) return;
@@ -907,26 +763,6 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 	}
 	return (
 		<div className="knowledge-shell">
-			<ChatSidebar
-				user={user}
-				activeConversationId={null}
-				activeSection="knowledge"
-				onSelect={(id) => navigate(`/chat/${encodeURIComponent(id)}`)}
-				onNew={() => navigate('/chat/new')}
-				onDelete={(id) =>
-					void deleteConversation(id).then(() =>
-						setConversations((current) => current.filter((item) => item.id !== id)),
-					)
-				}
-				onRename={(conversation, nextTitle) =>
-					void renameConversation(conversation.id, nextTitle).then((updated) =>
-						setConversations((current) => current.map((item) => (item.id === updated.id ? updated : item))),
-					)
-				}
-				onExport={() => showToast('Откройте чат для экспорта', 'info')}
-				onLogout={() => void onLogout()}
-				onOpenKnowledge={() => undefined}
-			/>
 			<main className="knowledge-page">
 				<header>
 					<div>
@@ -938,9 +774,12 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 							{user.email} · на странице активно {counts.active} из {counts.total}
 						</p>
 					</div>
-					<button className="knowledge-page__add" type="button" onClick={openAdd}>
-						Добавить данные
-					</button>
+					<div className="knowledge-page__header-actions">
+						<button type="button" onClick={() => navigate('/knowledge/approaches')}>Подходы</button>
+						<button className="knowledge-page__add" type="button" onClick={() => navigate('/knowledge/new')}>
+							Добавить данные
+						</button>
+					</div>
 				</header>
 				<section className="knowledge-page__controls" aria-label="Управление базой знаний" ref={dropdownRef}>
 					<div className="knowledge-page__search-row">
@@ -1135,6 +974,9 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 									event.preventDefault();
 									openCardMenu(item.id, event.clientX, event.clientY);
 								}}
+								onClick={(event) => {
+									if (!(event.target as HTMLElement).closest('button, a, input, label')) navigate(`/knowledge/${item.id}`);
+								}}
 							>
 								<div className="knowledge-card__select-column">
 									<Checkbox
@@ -1215,7 +1057,7 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 						aria-label={`Действия с записью «${cardMenuItem.title}»`}
 						style={{ top: cardMenu.top, left: cardMenu.left }}
 					>
-						<button type="button" role="menuitem" onClick={() => runCardMenuAction(() => openEdit(cardMenuItem))}>
+						<button type="button" role="menuitem" onClick={() => runCardMenuAction(() => navigate(`/knowledge/${cardMenuItem.id}`))}>
 							Редактировать
 						</button>
 						{cardMenuItem.downloadUrl && (
@@ -1257,68 +1099,6 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 					</div>
 				)}
 
-				{(dialog?.type === 'add' || dialog?.type === 'edit') && (
-					<KnowledgeDataDialog
-						key={dialog.type === 'edit' ? `edit:${dialog.item.id}` : 'create'}
-						mode={dialog.type === 'edit' ? 'edit' : 'create'}
-						item={dialog.type === 'edit' ? dialog.item : undefined}
-						title={title}
-						setTitle={setTitle}
-						content={content}
-						setContent={setContent}
-						rating={rating}
-						setRating={setRating}
-						isActive={isActive}
-						setIsActive={setIsActive}
-						selectedApproachId={selectedApproachId}
-						setSelectedApproachId={setSelectedApproachId}
-						formFilters={formFilters}
-						setFormFilters={setFormFilters}
-						approaches={approaches}
-						newApproachName={newApproachName}
-						setNewApproachName={setNewApproachName}
-						showApproachCreator={showApproachCreator}
-						setShowApproachCreator={setShowApproachCreator}
-						creatingApproach={creatingApproach}
-						onAddApproach={() => void addApproach()}
-						onResetApproachCreator={resetApproachCreator}
-						file={file}
-						setFile={setFile}
-						saving={saving}
-						onClose={() => setDialog(null)}
-						onConfirm={() => void saveDialog()}
-					/>
-				)}
-				{dialog?.type === 'view' && (
-					<ModalDialog
-						title={`${dialog.item.title}`}
-						confirmLabel="Закрыть"
-						onClose={() => setDialog(null)}
-						onConfirm={() => setDialog(null)}
-					>
-						<Rating value={dialog.item.rating} readonly />
-						{dialog.item.approach && <p>Подход: {dialog.item.approach.name}</p>}
-						<div className="knowledge-card__metadata knowledge-card__metadata--view">
-							{Object.entries(storedFilters(dialog.item))
-								.filter((entry): entry is [string, string] => Boolean(entry[1]))
-								.map(([key, value]) => (
-									<span key={key}>
-										{key}: {value}
-									</span>
-								))}
-						</div>
-						<div className="knowledge-view">
-							<Suspense fallback={<span>Загрузка предпросмотра…</span>}>
-								<MarkdownEditor
-									value={dialog.item.content}
-									onChange={() => undefined}
-									readonly
-									fileName={dialog.item.fileName}
-								/>
-							</Suspense>
-						</div>
-					</ModalDialog>
-				)}
 				{dialog?.type === 'delete' && (
 					<ModalDialog
 						title="Переместить элемент в корзину?"
@@ -1343,14 +1123,6 @@ export function KnowledgePage({ user, onLogout }: { user: AuthUser; onLogout: ()
 					</ModalDialog>
 				)}
 			</main>
-			{sidebarOpen && (
-				<button
-					className="chat-shell__backdrop"
-					type="button"
-					onClick={() => setSidebarOpen(false)}
-					aria-label="Закрыть меню"
-				/>
-			)}
 		</div>
 	);
 }

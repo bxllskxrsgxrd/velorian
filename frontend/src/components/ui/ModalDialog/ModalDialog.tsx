@@ -13,6 +13,7 @@ type ModalDialogProps = {
 	danger?: boolean;
 	confirmDisabled?: boolean;
 	closeDisabled?: boolean;
+	page?: boolean;
 	onConfirm: () => void;
 	onClose: () => void;
 };
@@ -27,18 +28,19 @@ export function ModalDialog({
 	danger,
 	confirmDisabled = false,
 	closeDisabled = false,
+	page = false,
 	onConfirm,
 	onClose,
 }: ModalDialogProps) {
 	return (
 		<div
-			className={['modal-dialog', className].filter(Boolean).join(' ')}
+			className={['modal-dialog', page && 'modal-dialog--page', className].filter(Boolean).join(' ')}
 			role="presentation"
 			onMouseDown={(event) => {
 				if (!closeDisabled && event.target === event.currentTarget) onClose();
 			}}
 		>
-			<div className="modal-dialog__panel" role="dialog" aria-modal="true" aria-labelledby="modal-dialog-title">
+			<div className="modal-dialog__panel" role={page ? 'region' : 'dialog'} aria-modal={page ? undefined : true} aria-labelledby="modal-dialog-title">
 				{subtitle || showCloseButton ? (
 					<div className="modal-dialog__header">
 						<div>

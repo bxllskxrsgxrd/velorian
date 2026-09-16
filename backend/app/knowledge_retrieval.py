@@ -6,7 +6,7 @@ from abc import ABC, abstractmethod
 from dataclasses import dataclass
 from typing import Literal
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from .config import settings
@@ -61,6 +61,7 @@ class KnowledgeSearchOptions:
 	approach_name: str | None = None
 	requested_approach: str | None = None
 	approach_exists: bool | None = None
+	approach_profile: dict[str, object] | None = None
 	geo: str | None = None
 	celebrity: str | None = None
 	offer: str | None = None
@@ -141,6 +142,17 @@ def resolve_knowledge_query(db: Session, user_id: str, query: str, *, explicit_s
 		approach_name=approach.name if approach else None,
 		requested_approach=requested,
 		approach_exists=approach_exists,
+		approach_profile={
+			"id": approach.id,
+			"name": approach.name,
+			"description": approach.description or "",
+			"purpose": approach.purpose or "",
+			"characteristics": approach.characteristics or [],
+			"structure": approach.structure or [],
+			"writingGuidelines": approach.writing_guidelines or [],
+			"avoid": approach.avoid or [],
+			"exampleKnowledgeItemIds": approach.example_knowledge_item_ids or [],
+		} if approach else None,
 		**metadata_filters,
 	))
 
@@ -166,6 +178,7 @@ class KnowledgeRetrievalResult:
 	approach_name: str | None = None
 	requested_approach: str | None = None
 	approach_exists: bool | None = None
+	approach_profile: dict[str, object] | None = None
 	fallback_used: bool = False
 	applied_filters: tuple[tuple[str, str], ...] = ()
 
@@ -176,6 +189,7 @@ def _empty_result(mode: KnowledgeIntent, options: KnowledgeSearchOptions, owned_
 		candidate_count=candidate_count, matched_count=0, reason=reason,
 		approach_id=options.approach_id, approach_name=options.approach_name,
 		requested_approach=options.requested_approach, approach_exists=options.approach_exists,
+		approach_profile=options.approach_profile,
 		applied_filters=tuple(options.metadata_filters.items()),
 	)
 
@@ -203,7 +217,11 @@ class TextKnowledgeRetriever(KnowledgeRetriever):
 			KnowledgeItem.deleted_at.is_(None),
 		]
 		if options.approach_id:
-			conditions.append(KnowledgeItem.approach_id == options.approach_id)
+			example_ids = (options.approach_profile or {}).get("exampleKnowledgeItemIds", [])
+			conditions.append(or_(
+				KnowledgeItem.approach_id == options.approach_id,
+				KnowledgeItem.id.in_(example_ids) if example_ids else KnowledgeItem.approach_id == options.approach_id,
+			))
 		for key, value in options.metadata_filters.items():
 			normalized_value = " ".join(value.split())
 			conditions.append(KnowledgeItem.item_metadata[key].as_string().ilike(f"%{normalized_value}%"))
@@ -226,6 +244,7 @@ class TextKnowledgeRetriever(KnowledgeRetriever):
 				reason="metadata_scope_only" if options.metadata_filters else "approach_scope_only" if options.approach_id else "no_meaningful_search_terms",
 				approach_id=options.approach_id, approach_name=options.approach_name,
 				requested_approach=options.requested_approach, approach_exists=options.approach_exists,
+				approach_profile=options.approach_profile,
 				applied_filters=tuple(options.metadata_filters.items()),
 			)
 
@@ -262,6 +281,7 @@ class TextKnowledgeRetriever(KnowledgeRetriever):
 			matched_count=len(scored), reason="matched" if selected else "no_textual_overlap",
 			approach_id=options.approach_id, approach_name=options.approach_name,
 			requested_approach=options.requested_approach, approach_exists=options.approach_exists,
+			approach_profile=options.approach_profile,
 			fallback_used=any(match.score < 1 for match in selected),
 			applied_filters=tuple(options.metadata_filters.items()),
 		)
@@ -289,7 +309,11 @@ class KnowledgeRetrievalService:
 			KnowledgeItem.deleted_at.is_(None),
 		]
 		if options.approach_id:
-			conditions.append(KnowledgeItem.approach_id == options.approach_id)
+			example_ids = (options.approach_profile or {}).get("exampleKnowledgeItemIds", [])
+			conditions.append(or_(
+				KnowledgeItem.approach_id == options.approach_id,
+				KnowledgeItem.id.in_(example_ids) if example_ids else KnowledgeItem.approach_id == options.approach_id,
+			))
 		for key, value in options.metadata_filters.items():
 			normalized_value = " ".join(value.split())
 			conditions.append(KnowledgeItem.item_metadata[key].as_string().ilike(f"%{normalized_value}%"))
@@ -303,6 +327,7 @@ class KnowledgeRetrievalService:
 			active_items_count=active_count, candidate_count=len(items), matched_count=len(items), reason="listed",
 			approach_id=options.approach_id, approach_name=options.approach_name,
 			requested_approach=options.requested_approach, approach_exists=options.approach_exists,
+			approach_profile=options.approach_profile,
 			applied_filters=tuple(options.metadata_filters.items()),
 		)
 

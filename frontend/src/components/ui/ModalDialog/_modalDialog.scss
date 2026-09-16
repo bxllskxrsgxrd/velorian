@@ -70,3 +70,25 @@
 		background: var(--color-error) !important;
 	}
 }
+
+.modal-dialog--page {
+	position: relative;
+	inset: auto;
+	min-width: 0;
+	height: 100dvh;
+	flex: 1;
+	display: block;
+	padding: 28px clamp(18px, 4vw, 64px);
+	background: var(--color-bg-canvas);
+	overflow-y: auto;
+
+	.modal-dialog__panel {
+		width: min(1100px, 100%);
+		max-height: none;
+		margin: 0 auto;
+	}
+
+	.modal-dialog__content {
+		overflow: visible;
+	}
+}

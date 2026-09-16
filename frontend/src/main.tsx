@@ -5,16 +5,16 @@ import "./scss/default/_index.scss";
 import "./scss/default/_reset.scss"
 import { initializeAccentTheme } from "./theme/accentTheme";
 import { ToastProvider } from "./components/Toast/ToastProvider";
-import { BrowserRouter } from "react-router-dom";
+import { createBrowserRouter, RouterProvider } from "react-router-dom";
 
 initializeAccentTheme();
+
+const router = createBrowserRouter([{ path: '*', element: <App /> }]);
 
 createRoot(document.getElementById("root")!).render(
   <StrictMode>
     <ToastProvider>
-      <BrowserRouter>
-        <App />
-      </BrowserRouter>
+      <RouterProvider router={router} />
     </ToastProvider>
   </StrictMode>,
 );

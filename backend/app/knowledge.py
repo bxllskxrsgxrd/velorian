@@ -12,7 +12,7 @@ from urllib.parse import quote
 
 from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
 from pydantic import BaseModel, Field, field_validator
-from sqlalchemy import and_, asc, desc, func, or_, select, update
+from sqlalchemy import and_, asc, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -114,6 +114,14 @@ def approach_payload(approach: KnowledgeApproach) -> dict:
 		"id": approach.id,
 		"name": approach.name,
 		"slug": approach.slug,
+		"description": approach.description or "",
+		"purpose": approach.purpose or "",
+		"characteristics": approach.characteristics or [],
+		"structure": approach.structure or [],
+		"writingGuidelines": approach.writing_guidelines or [],
+		"avoid": approach.avoid or [],
+		"exampleKnowledgeItemIds": approach.example_knowledge_item_ids or [],
+		"isActive": approach.is_active,
 		"createdAt": approach.created_at.isoformat(),
 		"updatedAt": approach.updated_at.isoformat(),
 	}
@@ -229,11 +237,15 @@ def rename_approach(approach_id: str, payload: ApproachPayload, user: User = Dep
 @router.delete("/approaches/{approach_id}", status_code=204)
 def delete_approach(approach_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	item = owned_approach(db, approach_id, user.id)
-	db.execute(update(KnowledgeItem).where(
+	linked = db.scalar(select(func.count()).select_from(KnowledgeItem).where(
 		KnowledgeItem.user_id == user.id,
 		KnowledgeItem.approach_id == item.id,
-	).values(approach_id=None, updated_at=utc_now()))
-	db.delete(item)
+	)) or 0
+	if linked:
+		item.is_active = False
+		item.updated_at = utc_now()
+	else:
+		db.delete(item)
 	db.commit()
 	return Response(status_code=204)
 

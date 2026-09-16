@@ -1,9 +1,11 @@
 import './_requestMap.scss';
 import { useChatStore } from '../../stores/chatStore';
+import type { ChatMessage } from '../../types/chat';
 
+const EMPTY_MESSAGES: ChatMessage[] = [];
 
-export function RequestMap() {
-	const messages = useChatStore((state) => state.messages);
+export function RequestMap({ conversationId }: { conversationId?: string | null }) {
+	const messages = useChatStore((state) => conversationId ? (state.messagesByConversation[conversationId] ?? EMPTY_MESSAGES) : state.messages);
 	const requests = messages.filter((message) => message.role === 'user' && message.isActive !== false);
 	if (requests.length < 2) return null;
 

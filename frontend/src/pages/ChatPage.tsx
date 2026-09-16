@@ -1,13 +1,11 @@
-import { useEffect, useLayoutEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import { useNavigate, useParams } from 'react-router-dom';
 import {
 	activateMessageBranch,
 	createMessageMarkdownFile,
 	createConversation,
-	deleteConversation,
 	getConversation,
 	listConversations,
-	renameConversation,
 	removeMessageRating,
 	saveAttachmentToKnowledge,
 	saveMessageToKnowledge,
@@ -15,8 +13,6 @@ import {
 	streamChat,
 } from '../api/chatApi';
 import { ApiError } from '../api/httpClient';
-import { ChatSidebar } from '../components/ChatSidebar/ChatSidebar';
-import { FilePreviewModal } from '../components/FilePreviewModal/FilePreviewModal';
 import { MessageList } from '../components/MessageList/MessageList';
 import { PromptBar } from '../components/PromptBar/PromptBar';
 import { RequestMap } from '../components/RequestMap/RequestMap';
@@ -27,11 +23,9 @@ import { CHAT_MESSAGE_STATUSES } from '../constants/chatMessageStatuses';
 import { CHAT_ROLES } from '../constants/chatRoles';
 import { useDragAndDrop } from '../hooks/useDragAndDrop';
 import type {
-	AuthUser,
 	ChatAttachment,
 	ChatMessage,
 	ConversationSummary,
-	PreviewFile,
 	SearchMode,
 } from '../types/chat';
 import { attachmentToPreviewFile, createChatAttachment, fileToPreviewFile } from '../utils/files';
@@ -45,29 +39,13 @@ import { useChatStore } from '../stores/chatStore';
 import { useConversationsStore } from '../stores/conversationsStore';
 import { useFilesStore } from '../stores/filesStore';
 import { useUiStore } from '../stores/uiStore';
-import { usePromptStore } from '../stores/promptStore';
-
-type ChatPageProps = {
-	user: AuthUser;
-	onLogout: () => Promise<void>;
-	onOpenKnowledge: () => void;
-};
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
 
-function downloadText(name: string, content: string, type: string) {
-	const url = URL.createObjectURL(new Blob([content], { type }));
-	const link = document.createElement('a');
-	link.href = url;
-	link.download = name;
-	link.click();
-	URL.revokeObjectURL(url);
-}
-
-export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
+export function ChatPage() {
 	const { showToast } = useToast();
 	const navigate = useNavigate();
-	const { conversationId: routeConversationId } = useParams<{ conversationId: string }>();
+	const { chatId: routeConversationId } = useParams<{ chatId: string }>();
 	const isNewConversationRoute = routeConversationId === 'new';
 	const conversations = useConversationsStore((state) => state.conversations);
 	const setConversations = useConversationsStore((state) => state.setConversations);
@@ -80,10 +58,8 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 		activeConversationId ? Boolean(state.generationByConversation[activeConversationId]) : false,
 	);
 	const setConversationMessages = useChatStore((state) => state.setConversationMessages);
-	const setActiveConversation = useChatStore((state) => state.setActiveConversation);
 	const setConversationGeneration = useChatStore((state) => state.setConversationGeneration);
 	const clearConversationGeneration = useChatStore((state) => state.clearConversationGeneration);
-	const removeConversationState = useChatStore((state) => state.removeConversationState);
 	const isLoadingConversation = useChatStore((state) => state.isLoadingConversation);
 	const setIsLoadingConversation = useChatStore((state) => state.setLoadingConversation);
 	const isCreatingConversation = useChatStore((state) => state.isCreatingConversation);
@@ -97,52 +73,28 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	const closeKnowledgeAttachment = useChatStore((state) => state.closeKnowledgeAttachment);
 	const setKnowledgeFilters = useChatStore((state) => state.setKnowledgeFilters);
 	const setKnowledgeSaveState = useChatStore((state) => state.setKnowledgeSaveState);
-	const previewFile = useFilesStore((state) => state.previewFile);
 	const setPreviewFile = useFilesStore((state) => state.setPreviewFile);
-	const isSidebarOpen = useUiStore((state) => state.isSidebarOpen);
 	const setIsSidebarOpen = useUiStore((state) => state.setSidebarOpen);
 	const showScrollButton = useUiStore((state) => state.showScrollButton);
 	const setShowScrollButton = useUiStore((state) => state.setShowScrollButton);
-	const resetPromptInput = usePromptStore((state) => state.reset);
 	const chatPageRef = useRef<HTMLDivElement | null>(null);
 	const attachmentUrlsRef = useRef(new Set<string>());
-	const previewFileRef = useRef<PreviewFile | null>(null);
 	const requestControllersRef = useRef(new Map<string, AbortController>());
 	const isNearBottomRef = useRef(true);
 	const loadSequenceRef = useRef(0);
 	const ratingSequenceRef = useRef(new Map<string, number>());
 	const localRetryPayloadsRef = useRef(new Map<string, { prompt: string; files: File[]; searchMode: SearchMode }>());
-	const initialRouteConversationIdRef = useRef(isNewConversationRoute ? 'new' : routeConversationId);
-	const suppressInitialFallbackRef = useRef(false);
 	const conversationCreationRef = useRef<Promise<ConversationSummary> | null>(null);
 	const sendOperationsRef = useRef(new Map<string, Promise<void>>());
-	const {
-		addFiles,
-		clearFiles,
-	} = useDragAndDrop(activeConversationId);
+	const previousConversationIdRef = useRef<string | null>(activeConversationId);
+	const { addFiles } = useDragAndDrop(activeConversationId);
 
 	const hasMessages = messages.length > 0;
-	useLayoutEffect(() => {
-		setActiveConversation(activeConversationId);
-	}, [activeConversationId, setActiveConversation]);
-
 	useEffect(() => {
-		let cancelled = false;
-		listConversations()
-			.then((items) => {
-				if (cancelled) return;
-				setConversations(items);
-				if (!initialRouteConversationIdRef.current && !suppressInitialFallbackRef.current && items[0])
-					navigate(`/chat/${items[0].id}`, { replace: true });
-			})
-			.catch((error: unknown) => {
-				reportError('Не удалось загрузить историю диалогов', error);
-				if (!cancelled) setPageError(error instanceof Error ? error.message : 'Не удалось загрузить историю');
-			});
-		return () => {
-			cancelled = true;
-		};
-	}, [navigate, setConversations, setPageError, user.id]);
+		const previousId = previousConversationIdRef.current;
+		if (previousId && previousId !== activeConversationId) requestControllersRef.current.get(previousId)?.abort();
+		previousConversationIdRef.current = activeConversationId;
+	}, [activeConversationId]);
 
 	useEffect(() => {
 		if (!activeConversationId) return;
@@ -195,7 +147,6 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 		return () => {
 			requestControllers.forEach((controller) => controller.abort());
 			attachmentUrls.forEach((url) => URL.revokeObjectURL(url));
-			if (previewFileRef.current?.revokeOnClose) URL.revokeObjectURL(previewFileRef.current.url);
 		};
 	}, []);
 
@@ -213,13 +164,12 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 		chatPageRef.current?.scrollTo({ top: chatPageRef.current.scrollHeight, behavior: 'smooth' });
 	}
 
-	function revokePreviewFile(file: PreviewFile | null) {
+	function revokePreviewFile(file: import('../types/chat').PreviewFile | null) {
 		if (file?.revokeOnClose) URL.revokeObjectURL(file.url);
 	}
 
-	function setNextPreview(next: PreviewFile) {
-		revokePreviewFile(previewFileRef.current);
-		previewFileRef.current = next;
+	function setNextPreview(next: import('../types/chat').PreviewFile) {
+		revokePreviewFile(useFilesStore.getState().previewFile);
 		setPreviewFile(next);
 	}
 
@@ -228,11 +178,6 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 	}
 	function openMessageAttachment(attachment: ChatAttachment) {
 		setNextPreview(attachmentToPreviewFile(attachment));
-	}
-	function closePreview() {
-		revokePreviewFile(previewFileRef.current);
-		previewFileRef.current = null;
-		setPreviewFile(null);
 	}
 
 	function updateConversationSummary(id: string, title?: string) {
@@ -632,45 +577,6 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 		}
 	}
 
-	function handleNewConversation() {
-		suppressInitialFallbackRef.current = true;
-		clearFiles();
-		resetPromptInput();
-		setIsSidebarOpen(false);
-		navigate('/chat/new');
-	}
-
-	async function handleDeleteConversation(id: string) {
-		requestControllersRef.current.get(id)?.abort();
-		await deleteConversation(id);
-		const remaining = conversations.filter((item) => item.id !== id);
-		setConversations(remaining);
-		removeConversationState(id);
-		if (activeConversationId === id) {
-			navigate(remaining[0] ? `/chat/${remaining[0].id}` : '/', { replace: true });
-		}
-	}
-
-	async function handleRenameConversation(conversation: ConversationSummary, title: string) {
-		if (title === conversation.title) return;
-		const updated = await renameConversation(conversation.id, title);
-		setConversations((current) => current.map((item) => (item.id === updated.id ? updated : item)));
-	}
-
-	function handleExport(format: 'markdown' | 'json') {
-		if (!hasMessages) return;
-		const active = conversations.find((item) => item.id === activeConversationId);
-		const safeName = (active?.title ?? 'velorian-dialog').replace(/[^\p{L}\p{N}_-]+/gu, '-').slice(0, 60);
-		if (format === 'json') {
-			downloadText(`${safeName}.json`, JSON.stringify({ conversation: active, messages }, null, 2), 'application/json');
-			return;
-		}
-		const markdown = messages
-			.map((message) => `## ${message.role === CHAT_ROLES.USER ? 'Вы' : 'Velorian'}\n\n${message.content}\n`)
-			.join('\n');
-		downloadText(`${safeName}.md`, `# ${active?.title ?? 'Диалог'}\n\n${markdown}`, 'text/markdown');
-	}
-
 	function reportActionError(error: unknown, fallback: string) {
 		reportError(fallback, error);
 		setPageError(error instanceof Error ? error.message : fallback);
@@ -678,29 +584,6 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 
 	return (
 		<div className="chat-shell">
-			<ChatSidebar
-				user={user}
-				activeConversationId={activeConversationId}
-				activeSection="chat"
-				onSelect={(id) => {
-					navigate(`/chat/${id}`);
-					setIsSidebarOpen(false);
-				}}
-				onNew={handleNewConversation}
-				onDelete={(id) =>
-					void handleDeleteConversation(id).catch((error: unknown) =>
-						reportActionError(error, 'Не удалось удалить диалог'),
-					)
-				}
-				onRename={(conversation, title) =>
-					void handleRenameConversation(conversation, title).catch((error: unknown) =>
-						reportActionError(error, 'Не удалось переименовать диалог'),
-					)
-				}
-				onExport={handleExport}
-				onLogout={() => void onLogout()}
-				onOpenKnowledge={onOpenKnowledge}
-			/>
 			<DropZone onFilesDrop={addFiles}>
 				<div
 					ref={chatPageRef}
@@ -726,6 +609,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 							<div className="chat-page__loading">Загрузка диалога…</div>
 						) : hasMessages ? (
 							<MessageList
+								conversationId={activeConversationId}
 								onOpenAttachment={openMessageAttachment}
 								onRetry={handleRetry}
 								onEdit={handleEditMessage}
@@ -770,16 +654,7 @@ export function ChatPage({ user, onLogout, onOpenKnowledge }: ChatPageProps) {
 					</div>
 				</div>
 			</DropZone>
-			<RequestMap />
-			{isSidebarOpen && (
-				<button
-					className="chat-shell__backdrop"
-					type="button"
-					onClick={() => setIsSidebarOpen(false)}
-					aria-label="Закрыть меню"
-				/>
-			)}
-			{previewFile && <FilePreviewModal file={previewFile} onClose={closePreview} />}
+			<RequestMap conversationId={activeConversationId} />
 			{knowledgeAttachment && (
 				<ModalDialog
 					title={`Добавить «${knowledgeAttachment.name}» в БД`}

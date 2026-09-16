@@ -120,6 +120,26 @@ def _add_knowledge_current_files(connection: Connection) -> None:
 			connection.execute(text(statement))
 
 
+def _expand_knowledge_approaches(connection: Connection) -> None:
+	columns = {column["name"] for column in inspect(connection).get_columns("knowledge_approaches")}
+	statements = {
+		"description": "ALTER TABLE knowledge_approaches ADD COLUMN description TEXT NOT NULL DEFAULT ''",
+		"purpose": "ALTER TABLE knowledge_approaches ADD COLUMN purpose TEXT NOT NULL DEFAULT ''",
+		"characteristics": "ALTER TABLE knowledge_approaches ADD COLUMN characteristics JSON NOT NULL DEFAULT '[]'",
+		"structure": "ALTER TABLE knowledge_approaches ADD COLUMN structure JSON NOT NULL DEFAULT '[]'",
+		"writing_guidelines": "ALTER TABLE knowledge_approaches ADD COLUMN writing_guidelines JSON NOT NULL DEFAULT '[]'",
+		"avoid": "ALTER TABLE knowledge_approaches ADD COLUMN avoid JSON NOT NULL DEFAULT '[]'",
+		"example_knowledge_item_ids": "ALTER TABLE knowledge_approaches ADD COLUMN example_knowledge_item_ids JSON NOT NULL DEFAULT '[]'",
+		"is_active": "ALTER TABLE knowledge_approaches ADD COLUMN is_active BOOLEAN NOT NULL DEFAULT TRUE",
+	}
+	for column, statement in statements.items():
+		if column not in columns:
+			connection.execute(text(statement))
+	connection.execute(text(
+		"CREATE INDEX IF NOT EXISTS ix_knowledge_approaches_is_active ON knowledge_approaches (is_active)"
+	))
+
+
 MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260825_01_ratings_and_knowledge", _create_ratings_and_knowledge),
 	("20260825_02_storage_keys", _add_storage_keys),
@@ -130,6 +150,7 @@ MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260827_01_knowledge_approaches", _add_knowledge_approaches),
 	("20260904_01_unified_trash", _add_trash_timestamps),
 	("20260911_01_knowledge_current_files", _add_knowledge_current_files),
+	("20260916_01_expand_knowledge_approaches", _expand_knowledge_approaches),
 )
 
 

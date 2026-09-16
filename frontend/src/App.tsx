@@ -3,11 +3,15 @@ import { Navigate, Route, Routes, useLocation, useNavigate } from 'react-router-
 import { getCurrentUser, getRuntimeConfig, logout } from './api/chatApi';
 import { AuthPage } from './components/AuthPage/AuthPage';
 import { ChatPage } from './pages/ChatPage';
+import { AppLayout } from './components/AppLayout/AppLayout';
 import { reportError } from './utils/reportError';
 import { configureAttachmentLimits } from './constants/attachmentLimits';
 import { useAuthStore } from './stores/authStore';
 
 const KnowledgePage = lazy(() => import('./pages/KnowledgePage'));
+const KnowledgeEditorPage = lazy(() => import('./pages/KnowledgeEditorPage').then((module) => ({ default: module.KnowledgeEditorPage })));
+const ApproachesPage = lazy(() => import('./pages/ApproachesPage').then((module) => ({ default: module.ApproachesPage })));
+const ApproachEditorPage = lazy(() => import('./pages/ApproachEditorPage').then((module) => ({ default: module.ApproachEditorPage })));
 
 function App() {
 	const user = useAuthStore((state) => state.user);
@@ -40,14 +44,21 @@ function App() {
 	if (!user) return <AuthPage onAuthenticated={setUser} />;
 	const handleLogout = async () => { await logout(); setUser(null); navigate('/'); };
 	const legacyConversationId = new URLSearchParams(location.search).get('conversation');
-	const chatPage = <ChatPage user={user} onLogout={handleLogout} onOpenKnowledge={() => navigate('/knowledge')} />;
 
 	return <Suspense fallback={<div className="app-loading">Загрузка раздела…</div>}><Routes>
-		<Route path="/" element={legacyConversationId ? <Navigate to={`/chat/${encodeURIComponent(legacyConversationId)}`} replace /> : chatPage} />
-		<Route path="/chat/:conversationId" element={chatPage} />
-		<Route path="/chats/:conversationId" element={chatPage} />
-		<Route path="/knowledge" element={<KnowledgePage user={user} onLogout={handleLogout} />} />
-		<Route path="*" element={<Navigate to="/" replace />} />
+		<Route path="/" element={<Navigate to={legacyConversationId ? `/chat/${encodeURIComponent(legacyConversationId)}` : '/chat/new'} replace />} />
+		<Route element={<AppLayout user={user} onLogout={handleLogout} />}>
+			<Route path="/chat/new" element={<ChatPage />} />
+			<Route path="/chat/:chatId" element={<ChatPage />} />
+			<Route path="/chats/:conversationId" element={<Navigate to={`/chat/${location.pathname.split('/').pop() ?? 'new'}`} replace />} />
+			<Route path="/knowledge" element={<KnowledgePage user={user} />} />
+			<Route path="/knowledge/new" element={<KnowledgeEditorPage />} />
+			<Route path="/knowledge/approaches" element={<ApproachesPage />} />
+			<Route path="/knowledge/approaches/new" element={<ApproachEditorPage />} />
+			<Route path="/knowledge/approaches/:approachId" element={<ApproachEditorPage />} />
+			<Route path="/knowledge/:knowledgeId" element={<KnowledgeEditorPage />} />
+		</Route>
+		<Route path="*" element={<Navigate to="/chat/new" replace />} />
 	</Routes></Suspense>;
 }
 

@@ -1,4 +1,4 @@
-import type { AuthUser, ChatAttachment, ChatMessage, Conversation, ConversationSummary, KnowledgeApproach, KnowledgeFilters, KnowledgeItem, KnowledgePageResult, MessageRating, SearchMode } from '../types/chat';
+import type { Approach, ApproachInput, AuthUser, ChatAttachment, ChatMessage, Conversation, ConversationSummary, KnowledgeApproach, KnowledgeFilters, KnowledgeItem, KnowledgePageResult, MessageRating, SearchMode } from '../types/chat';
 import type { AttachmentLimits } from '../constants/attachmentLimits';
 import { getUserFacingError } from '../errors/userErrorMessages';
 import { reportError } from '../utils/reportError';
@@ -297,6 +297,48 @@ export async function updateKnowledgeFile(id: string, file: File, title = '', co
 	body.append('offer', cleaned.offer ?? '');
 	body.append('news_source', cleaned.news_source ?? '');
 	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>(`/knowledge/${id}/file`, { method: 'PUT', body })).item);
+}
+
+export async function getKnowledgeItem(id: string): Promise<KnowledgeItem> {
+	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>(`/knowledge/${id}`)).item);
+}
+
+function approachBody(value: Partial<ApproachInput>) {
+	return {
+		name: value.name,
+		description: value.description,
+		purpose: value.purpose,
+		characteristics: value.characteristics,
+		structure: value.structure,
+		writing_guidelines: value.writingGuidelines,
+		avoid: value.avoid,
+		example_knowledge_item_ids: value.exampleKnowledgeItemIds,
+		is_active: value.isActive,
+	};
+}
+
+export async function listApproaches(): Promise<Approach[]> {
+	return (await requestJson<{ items: Approach[] }>('/approaches')).items;
+}
+
+export async function getApproach(id: string): Promise<Approach> {
+	return (await requestJson<{ item: Approach }>(`/approaches/${id}`)).item;
+}
+
+export async function createApproach(value: ApproachInput): Promise<Approach> {
+	return (await requestJson<{ item: Approach }>('/approaches', {
+		method: 'POST', body: JSON.stringify(approachBody(value)),
+	})).item;
+}
+
+export async function updateApproach(id: string, value: Partial<ApproachInput>): Promise<Approach> {
+	return (await requestJson<{ item: Approach }>(`/approaches/${id}`, {
+		method: 'PATCH', body: JSON.stringify(approachBody(value)),
+	})).item;
+}
+
+export async function deleteApproach(id: string): Promise<void> {
+	await apiFetch(`/approaches/${id}`, { method: 'DELETE' });
 }
 
 export async function listKnowledgeApproaches(): Promise<KnowledgeApproach[]> {

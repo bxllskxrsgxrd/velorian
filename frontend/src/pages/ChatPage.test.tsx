@@ -10,6 +10,7 @@ import { usePromptStore } from '../stores/promptStore';
 import { useFilesStore } from '../stores/filesStore';
 import { useConversationsStore } from '../stores/conversationsStore';
 import { useMessageUiStore } from '../stores/messageUiStore';
+import { AppLayout } from '../components/AppLayout/AppLayout';
 
 const api = vi.hoisted(() => ({
 	createConversation: vi.fn(),
@@ -35,7 +36,7 @@ const conversation = {
 function renderChatPage(initialEntry = `/chat/${conversation.id}`) {
 	return render(
 		<MemoryRouter initialEntries={[initialEntry]}>
-			<ToastProvider><Routes><Route path="/chat/:conversationId" element={<ChatPage user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn()} onOpenKnowledge={vi.fn()} />} /></Routes></ToastProvider>
+			<ToastProvider><Routes><Route element={<AppLayout user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn()} />}><Route path="/chat/:chatId" element={<ChatPage />} /></Route></Routes></ToastProvider>
 		</MemoryRouter>,
 	);
 }

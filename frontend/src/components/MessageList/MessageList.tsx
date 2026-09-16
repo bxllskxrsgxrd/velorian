@@ -5,6 +5,7 @@ import './_messageList.scss';
 import { useChatStore } from '../../stores/chatStore';
 
 type MessageListProps = {
+	conversationId?: string | null;
 	onOpenAttachment: (attachment: ChatAttachment) => void;
 	onRetry: (userMessageId: string) => void;
 	onEdit: (message: ChatMessage, content: string) => void;
@@ -18,6 +19,7 @@ type MessageListProps = {
 };
 
 type BranchInfo = { variants: ChatMessage[]; active: ChatMessage };
+const EMPTY_MESSAGES: ChatMessage[] = [];
 
 function branchGroupId(message: ChatMessage) {
 	return message.branchGroupId || message.id;
@@ -66,8 +68,8 @@ function getRetryMessageIds(messages: ChatMessage[]) {
 }
 
 
-export function MessageList({ onOpenAttachment, onRetry, onEdit, onActivateBranch, onRate, onRemoveRating, onSaveToKnowledge, onCreateFile, onAddAttachmentToKnowledge, canEdit = true }: MessageListProps) {
-	const messages = useChatStore((state) => state.messages);
+export function MessageList({ conversationId, onOpenAttachment, onRetry, onEdit, onActivateBranch, onRate, onRemoveRating, onSaveToKnowledge, onCreateFile, onAddAttachmentToKnowledge, canEdit = true }: MessageListProps) {
+	const messages = useChatStore((state) => conversationId ? (state.messagesByConversation[conversationId] ?? EMPTY_MESSAGES) : state.messages);
 	const { displayed, branches } = buildDisplay(messages);
 	const retryMessageIds = getRetryMessageIds(displayed);
 	return (

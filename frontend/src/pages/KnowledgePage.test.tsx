@@ -1,15 +1,18 @@
 import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
-import { MemoryRouter, useLocation } from 'react-router-dom';
+import { createMemoryRouter, Outlet, RouterProvider, useLocation } from 'react-router-dom';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ToastProvider } from '../components/Toast/ToastProvider';
 import { useConversationsStore } from '../stores/conversationsStore';
 import { useKnowledgeStore } from '../stores/knowledgeStore';
+import { useApproachesStore } from '../stores/approachesStore';
 
 import { KnowledgePage } from './KnowledgePage';
+import { KnowledgeEditorPage } from './KnowledgeEditorPage';
 
 const api = vi.hoisted(() => ({
 	listKnowledge: vi.fn(),
+	getKnowledgeItem: vi.fn(),
 	createKnowledgeItem: vi.fn(),
 	uploadKnowledgeFile: vi.fn(),
 	updateKnowledgeFile: vi.fn(),
@@ -26,6 +29,7 @@ const api = vi.hoisted(() => ({
 	restoreKnowledgeItem: vi.fn(),
 
 	listKnowledgeApproaches: vi.fn(),
+	listApproaches: vi.fn(),
 	createKnowledgeApproach: vi.fn(),
 
 	listConversations: vi.fn(),
@@ -114,22 +118,21 @@ function LocationProbe() {
 	);
 }
 
-function renderKnowledge(initialEntry = '/knowledge') {
-	return render(
-		<MemoryRouter initialEntries={[initialEntry]}>
-			<ToastProvider>
-				<KnowledgePage
-					user={{
-						id: 'user',
-						email: 'user@example.com',
-					}}
-					onLogout={vi.fn().mockResolvedValue(undefined)}
-				/>
+function TestShell() {
+	return <ToastProvider><Outlet /><LocationProbe /></ToastProvider>;
+}
 
-				<LocationProbe />
-			</ToastProvider>
-		</MemoryRouter>,
-	);
+function renderKnowledge(initialEntry = '/knowledge') {
+	const router = createMemoryRouter([{
+		path: '/',
+		element: <TestShell />,
+		children: [
+			{ path: 'knowledge', element: <KnowledgePage user={{ id: 'user', email: 'user@example.com' }} /> },
+			{ path: 'knowledge/new', element: <KnowledgeEditorPage /> },
+			{ path: 'knowledge/:knowledgeId', element: <KnowledgeEditorPage /> },
+		],
+	}], { initialEntries: [initialEntry] });
+	return render(<RouterProvider router={router} />);
 }
 
 async function openEditFromCard(title: string) {
@@ -160,6 +163,7 @@ async function openEditFromCard(title: string) {
 describe('KnowledgePage', () => {
 	beforeEach(() => {
 		useKnowledgeStore.getState().reset();
+		useApproachesStore.getState().reset();
 		useConversationsStore.getState().reset();
 
 		vi.clearAllMocks();
@@ -171,9 +175,10 @@ describe('KnowledgePage', () => {
 				hasMore: false,
 			},
 		});
-
 		api.listConversations.mockResolvedValue([]);
 		api.listKnowledgeApproaches.mockResolvedValue([]);
+		api.listApproaches.mockResolvedValue([]);
+		api.getKnowledgeItem.mockResolvedValue(item);
 
 		api.listDeletedConversations.mockResolvedValue([]);
 		api.listDeletedKnowledgeItems.mockResolvedValue([]);
@@ -255,7 +260,7 @@ describe('KnowledgePage', () => {
 			}),
 		);
 
-		const dialog = screen.getByRole('dialog');
+		const dialog = await screen.findByRole('region', { name: /^(Добавить|Редактировать) данные$/ });
 
 		expect(
 			within(dialog).getByRole('tab', {
@@ -306,11 +311,7 @@ describe('KnowledgePage', () => {
 			});
 		});
 
-		expect(
-			await screen.findByText('Оффер', {
-				exact: true,
-			}),
-		).toBeInTheDocument();
+		expect(screen.getByLabelText('Текущий URL')).toHaveTextContent('/knowledge/knowledge-1');
 	});
 
 	it('updates an existing card through the selected file', async () => {
@@ -323,7 +324,7 @@ describe('KnowledgePage', () => {
 		renderKnowledge();
 		await openEditFromCard(item.title);
 
-		const dialog = screen.getByRole('dialog');
+		const dialog = await screen.findByRole('region', { name: /^(Добавить|Редактировать) данные$/ });
 		const fileInput = dialog.querySelector<HTMLInputElement>('input[type="file"]');
 		expect(fileInput).not.toBeNull();
 		const inputClick = vi.spyOn(fileInput as HTMLInputElement, 'click');
@@ -359,7 +360,7 @@ describe('KnowledgePage', () => {
 		await screen.findByText('Сохранённых данных пока нет');
 		fireEvent.click(screen.getByRole('button', { name: 'Добавить данные' }));
 
-		const dialog = screen.getByRole('dialog');
+		const dialog = await screen.findByRole('region', { name: /^(Добавить|Редактировать) данные$/ });
 		const dropZone = dialog.querySelector<HTMLElement>('.knowledge-edit-modal__file-drop-zone');
 		expect(dropZone).not.toBeNull();
 		fireEvent.dragEnter(dropZone as HTMLElement, {
@@ -405,7 +406,7 @@ describe('KnowledgePage', () => {
 			}),
 		);
 
-		const dialog = screen.getByRole('dialog');
+		const dialog = await screen.findByRole('region', { name: /^(Добавить|Редактировать) данные$/ });
 
 		fireEvent.change(
 			within(dialog).getByRole('textbox', {
@@ -533,12 +534,13 @@ describe('KnowledgePage', () => {
 			...stored,
 			rating: 5,
 		});
+		api.getKnowledgeItem.mockResolvedValue(stored);
 
 		renderKnowledge();
 
 		await openEditFromCard('Оффер');
 
-		const dialog = screen.getByRole('dialog');
+		const dialog = await screen.findByRole('region', { name: /^(Добавить|Редактировать) данные$/ });
 
 		expect(
 			within(dialog).getByRole('tab', {
@@ -578,11 +580,7 @@ describe('KnowledgePage', () => {
 			);
 		});
 
-		expect(
-			await screen.findByRole('img', {
-				name: /Рейтинг Оффер: 5 из 5/,
-			}),
-		).toBeInTheDocument();
+		expect(within(dialog).getByRole('button', { name: 'Поставить рейтинг 5 из 5' })).toHaveAttribute('aria-pressed', 'true');
 	});
 
 	it('switches to edit preview and shows only filled metadata', async () => {
@@ -605,12 +603,13 @@ describe('KnowledgePage', () => {
 				hasMore: false,
 			},
 		});
+		api.getKnowledgeItem.mockResolvedValue(stored);
 
 		renderKnowledge();
 
 		await openEditFromCard('Оффер');
 
-		const dialog = screen.getByRole('dialog');
+		const dialog = await screen.findByRole('region', { name: /^(Добавить|Редактировать) данные$/ });
 
 		const editTab = within(dialog).getByRole('tab', {
 			name: 'Редактирование',

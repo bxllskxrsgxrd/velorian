@@ -971,7 +971,8 @@ def test_knowledge_approach_crud_filter_delete_and_user_isolation(authenticated_
 	assert authenticated_client.delete(f"/api/knowledge/approaches/{approach['id']}").status_code == 204
 	preserved = authenticated_client.get(f"/api/knowledge/{matching['id']}")
 	assert preserved.status_code == 200
-	assert preserved.json()["item"]["approach"] is None
+	assert preserved.json()["item"]["approach"]["id"] == approach["id"]
+	assert preserved.json()["item"]["approach"]["isActive"] is False
 
 	second = authenticated_client.post("/api/auth/register", json={
 		"email": "approach-isolation@example.com", "password": "strong-password",
@@ -982,6 +983,48 @@ def test_knowledge_approach_crud_filter_delete_and_user_isolation(authenticated_
 	assert authenticated_client.post("/api/knowledge", json={
 		"title": "Чужой подход", "content": "Запрещено", "approach_id": foreign_approach_id,
 	}).status_code == 404
+
+
+def test_global_approach_crud_preserves_linked_items(authenticated_client):
+	example = authenticated_client.post("/api/knowledge", json={
+		"title": "Референс", "content": "Пример материала",
+	}).json()["item"]
+	payload = {
+		"name": "Документальный разбор",
+		"description": "Спокойный разбор фактов",
+		"purpose": "Объяснить тему",
+		"characteristics": ["точность", "контекст"],
+		"structure": ["введение", "факты", "вывод"],
+		"writing_guidelines": ["ссылаться на источники"],
+		"avoid": ["сенсационность"],
+		"example_knowledge_item_ids": [example["id"]],
+		"is_active": True,
+	}
+	created_response = authenticated_client.post("/api/approaches", json=payload)
+	assert created_response.status_code == 201
+	created = created_response.json()["item"]
+	assert created["writingGuidelines"] == payload["writing_guidelines"]
+	assert created["exampleKnowledgeItemIds"] == [example["id"]]
+
+	linked = authenticated_client.post("/api/knowledge", json={
+		"title": "Связанный материал", "content": "Содержимое", "approach_id": created["id"],
+	}).json()["item"]
+	updated = authenticated_client.patch(f"/api/approaches/{created['id']}", json={
+		"description": "Обновлённое описание", "is_active": True,
+	})
+	assert updated.status_code == 200
+	assert updated.json()["item"]["description"] == "Обновлённое описание"
+	assert updated.json()["item"]["linkedKnowledgeItemsCount"] == 1
+
+	assert authenticated_client.delete(f"/api/approaches/{created['id']}").status_code == 204
+	deactivated = authenticated_client.get(f"/api/approaches/{created['id']}")
+	assert deactivated.status_code == 200
+	assert deactivated.json()["item"]["isActive"] is False
+	assert authenticated_client.get(f"/api/knowledge/{linked['id']}").json()["item"]["approach"]["id"] == created["id"]
+
+	disposable = authenticated_client.post("/api/approaches", json={"name": "Временный"}).json()["item"]
+	assert authenticated_client.delete(f"/api/approaches/{disposable['id']}").status_code == 204
+	assert authenticated_client.get(f"/api/approaches/{disposable['id']}").status_code == 404
 
 
 def test_dynamic_approach_resolver_scopes_context_and_distinguishes_empty(authenticated_client, monkeypatch):
