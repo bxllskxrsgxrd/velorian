@@ -116,7 +116,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	await expect(page).toHaveURL(/\/knowledge\/k1$/);
 
 	const savedEditor = page.getByRole('region', { name: 'Редактировать данные' });
-	await savedEditor.getByRole('button', { name: 'Закрыть' }).click();
+	await savedEditor.getByRole('button', { name: 'Отмена' }).click();
 	await expect(page).toHaveURL(/\/knowledge$/);
 
 	await expect(
@@ -280,7 +280,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 		})
 		.click();
 	await expect(page.getByRole('status').filter({ hasText: 'Изменения сохранены' })).toBeVisible();
-	await editPage.getByRole('button', { name: 'Закрыть' }).click();
+	await editPage.getByRole('button', { name: 'Отмена' }).click();
 	await expect(page).toHaveURL(/\/knowledge$/);
 
 	await expect(
