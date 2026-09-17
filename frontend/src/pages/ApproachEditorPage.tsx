@@ -4,7 +4,6 @@ import { listKnowledge } from '../api/chatApi';
 import { CrossIcon, MoreIcon, PlusIcon } from '../components/icons/AppIcons';
 import { Checkbox } from '../components/ui/Checkbox/Checkbox';
 import { CustomSelect } from '../components/ui/CustomSelect/CustomSelect';
-import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
 import { useToast } from '../hooks/useToast';
 import { useApproachesStore } from '../stores/approachesStore';
 import type { ApproachInput, KnowledgeItem } from '../types/chat';
@@ -49,11 +48,9 @@ export function ApproachEditorPage() {
 	const loadOne = useApproachesStore((state) => state.loadOne);
 	const create = useApproachesStore((state) => state.create);
 	const update = useApproachesStore((state) => state.update);
-	const remove = useApproachesStore((state) => state.delete);
 	const saving = useApproachesStore((state) => state.isSaving);
 	const [form, setForm] = useState<ApproachInput>(EMPTY_APPROACH);
 	const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
-	const [deleteOpen, setDeleteOpen] = useState(false);
 	const [baseline, setBaseline] = useState(JSON.stringify(EMPTY_APPROACH));
 	const allowNavigationRef = useRef(false);
 	const { showToast } = useToast();
@@ -136,44 +133,34 @@ export function ApproachEditorPage() {
 		}
 	}
 
-	async function deleteCurrent() {
-		if (!approachId) return;
-		try {
-			await remove(approachId);
-			allowNavigationRef.current = true;
-			navigate('/knowledge/approaches', { replace: true });
-		} catch (error) {
-			showToast(error instanceof Error ? error.message : 'Не удалось удалить подход', 'error');
-		}
-	}
-
 	return (
 		<main className="approach-editor knowledge-page">
 			<header>
 				<div><button className="approaches-page__back" type="button" onClick={() => navigate('/knowledge/approaches')}>← Подходы</button><h1>{isCreate ? 'Создать подход' : 'Редактировать подход'}</h1></div>
-				<div className="approach-editor__actions">
-					{!isCreate && <button className="approach-editor__delete" type="button" onClick={() => setDeleteOpen(true)}>Удалить</button>}
-					<button className="approach-editor__save" type="button" disabled={!form.name.trim() || saving} onClick={() => void save()}>{saving ? 'Сохранение…' : 'Сохранить'}</button>
-				</div>
 			</header>
 			<div className="approach-editor__form">
-				<label className="approach-editor__field">Название<input value={form.name} maxLength={80} onChange={(event) => setField('name', event.target.value)} /></label>
-				<div className="approach-editor__summary">
-					<label className="approach-editor__field">Описание<textarea value={form.description} onChange={(event) => setField('description', event.target.value)} /></label>
-					<label className="approach-editor__field">Цель<textarea value={form.purpose} onChange={(event) => setField('purpose', event.target.value)} /></label>
+				<div className="approach-editor__body">
+					<label className="approach-editor__field">Название<input value={form.name} maxLength={80} onChange={(event) => setField('name', event.target.value)} /></label>
+					<div className="approach-editor__summary">
+						<label className="approach-editor__field">Описание<textarea value={form.description} onChange={(event) => setField('description', event.target.value)} /></label>
+						<label className="approach-editor__field">Цель<textarea value={form.purpose} onChange={(event) => setField('purpose', event.target.value)} /></label>
+					</div>
+					<ListEditor label="Характеристики" value={form.characteristics} onChange={(value) => setField('characteristics', value)} />
+					<ListEditor label="Структура" value={form.structure} onChange={(value) => setField('structure', value)} />
+					<ListEditor label="Рекомендации по написанию" value={form.writingGuidelines} onChange={(value) => setField('writingGuidelines', value)} />
+					<ListEditor label="Избегать" value={form.avoid} onChange={(value) => setField('avoid', value)} />
+					<fieldset className="approach-editor__examples">
+						<legend>Примеры из базы знаний</legend>
+						<CustomSelect value="" onChange={addExample} ariaLabel="Материал-пример" options={[{ value: '', label: 'Выберите материал' }, ...availableExamples.map((item) => ({ value: item.id, label: item.title }))]} />
+						<ul>{form.exampleKnowledgeItemIds.map((id) => <li key={id}><span>{knowledgeItems.find((item) => item.id === id)?.title ?? id}</span><button type="button" aria-label={`Удалить материал ${knowledgeItems.find((item) => item.id === id)?.title ?? id}`} onClick={() => setField('exampleKnowledgeItemIds', form.exampleKnowledgeItemIds.filter((item) => item !== id))}><CrossIcon /></button></li>)}</ul>
+					</fieldset>
+					<Checkbox checked={form.isActive} onChange={(value) => setField('isActive', value)} label="Подход активен" className="approach-editor__active-toggle" />
 				</div>
-				<ListEditor label="Характеристики" value={form.characteristics} onChange={(value) => setField('characteristics', value)} />
-				<ListEditor label="Структура" value={form.structure} onChange={(value) => setField('structure', value)} />
-				<ListEditor label="Рекомендации по написанию" value={form.writingGuidelines} onChange={(value) => setField('writingGuidelines', value)} />
-				<ListEditor label="Избегать" value={form.avoid} onChange={(value) => setField('avoid', value)} />
-				<fieldset className="approach-editor__examples">
-					<legend>Примеры из базы знаний</legend>
-					<CustomSelect value="" onChange={addExample} ariaLabel="Материал-пример" options={[{ value: '', label: 'Выберите материал' }, ...availableExamples.map((item) => ({ value: item.id, label: item.title }))]} />
-					<ul>{form.exampleKnowledgeItemIds.map((id) => <li key={id}><span>{knowledgeItems.find((item) => item.id === id)?.title ?? id}</span><button type="button" aria-label={`Удалить материал ${knowledgeItems.find((item) => item.id === id)?.title ?? id}`} onClick={() => setField('exampleKnowledgeItemIds', form.exampleKnowledgeItemIds.filter((item) => item !== id))}><CrossIcon /></button></li>)}</ul>
-				</fieldset>
-				<Checkbox checked={form.isActive} onChange={(value) => setField('isActive', value)} label="Подход активен" className="approach-editor__active-toggle" />
+				<div className="approach-editor__actions">
+					<button type="button" disabled={saving} onClick={() => navigate('/knowledge/approaches')}>Отмена</button>
+					<button className="approach-editor__save" type="button" disabled={!form.name.trim() || saving} onClick={() => void save()}>{saving ? 'Сохранение…' : 'Сохранить'}</button>
+				</div>
 			</div>
-			{deleteOpen && <ModalDialog title="Удалить подход?" confirmLabel="Удалить" danger onClose={() => setDeleteOpen(false)} onConfirm={() => void deleteCurrent()}><p>Если подход используется, он будет деактивирован и связи материалов сохранятся.</p></ModalDialog>}
 		</main>
 	);
 }
