@@ -137,9 +137,8 @@ function storedFilters(item: KnowledgeItem): KnowledgeFilters {
 	);
 }
 
-export type KnowledgeDataDialogProps = {
+export type KnowledgeDataEditorProps = {
 	mode: 'create' | 'edit';
-	page?: boolean;
 	item?: KnowledgeItem;
 	title: string;
 	setTitle: (value: string) => void;
@@ -157,13 +156,12 @@ export type KnowledgeDataDialogProps = {
 	file: File | null;
 	setFile: (value: File | null) => void;
 	saving: boolean;
-	onClose: () => void;
+	onCancel: () => void;
 	onConfirm: () => void;
 };
 
-export function KnowledgeDataDialog({
+export function KnowledgeDataEditor({
 	mode,
-	page = false,
 	item,
 	title,
 	setTitle,
@@ -181,9 +179,9 @@ export function KnowledgeDataDialog({
 	file,
 	setFile,
 	saving,
-	onClose,
+	onCancel,
 	onConfirm,
-}: KnowledgeDataDialogProps) {
+}: KnowledgeDataEditorProps) {
 	const [activeTab, setActiveTab] = useState<'edit' | 'preview'>('edit');
 	const [filePreview, setFilePreview] = useState<FilePreviewState>({ status: 'idle', content: '' });
 	const fileInputRef = useRef<HTMLInputElement>(null);
@@ -253,31 +251,23 @@ export function KnowledgeDataDialog({
 				} · ${item ? new Date(item.createdAt).toLocaleDateString('ru-RU') : ''}`;
 	const previewFileName = file?.name ?? item?.fileName ?? title;
 
+	const confirmLabel = saving
+		? mode === 'create'
+			? 'Добавление…'
+			: 'Сохранение…'
+		: mode === 'create'
+			? 'Добавить данные'
+			: 'Сохранить изменения';
+
 	return (
-		<ModalDialog
-			className="knowledge-edit-modal"
-			page={page}
-			title={mode === 'create' ? 'Добавить данные' : 'Редактировать данные'}
-			subtitle={
-				mode === 'create'
-					? 'Добавьте текст вручную или загрузите файл'
-					: 'Все изменения будут применены после сохранения'
-			}
-			showCloseButton
-			confirmLabel={
-				saving
-					? mode === 'create'
-						? 'Добавление…'
-						: 'Сохранение…'
-					: mode === 'create'
-						? 'Добавить данные'
-						: 'Сохранить изменения'
-			}
-			confirmDisabled={saving}
-			onClose={onClose}
-			onConfirm={onConfirm}
-		>
-			<div className="knowledge-edit-modal__tabs" role="tablist" aria-label="Режим модального окна">
+		<main className="knowledge-editor-page knowledge-page">
+			<header className="knowledge-editor-page__header">
+				<button className="knowledge-editor-page__back" type="button" onClick={onCancel}>← База знаний</button>
+				<h1 id="knowledge-editor-title">{mode === 'create' ? 'Добавить данные' : 'Редактировать данные'}</h1>
+				<p>{mode === 'create' ? 'Заполните материал и его метаданные' : 'Все изменения будут применены после сохранения'}</p>
+			</header>
+			<div className="knowledge-editor-page__content" role="region" aria-labelledby="knowledge-editor-title">
+			<div className="knowledge-edit-modal__tabs" role="tablist" aria-label="Режим редактора">
 				<button
 					className={activeTab === 'edit' ? 'active' : ''}
 					type="button"
@@ -297,91 +287,99 @@ export function KnowledgeDataDialog({
 					Предпросмотр
 				</button>
 			</div>
-			{activeTab === 'edit' ? (
-				<div className="knowledge-edit-modal__form" role="tabpanel">
-					<label>
-						Название
-						<input value={title} onChange={(event) => setTitle(event.target.value)} />
-					</label>
-					<label>
-						Содержимое
-						<textarea
-							value={content}
-							onChange={(event) => setContent(event.target.value)}
-							placeholder="Вставьте текст"
-						/>
-					</label>
-					<div className="knowledge-edit-modal__file-field">
-						<span>Файл</span>
-						<input
-							ref={fileInputRef}
-							className="knowledge-edit-modal__file-input"
-							type="file"
-							onChange={(event) => void handleFileChange(event.target.files?.[0] ?? null)}
-						/>
-						<div className="knowledge-edit-modal__file-picker">
-							<DropZone
-								className="knowledge-edit-modal__file-drop-zone"
-								showOverlay={false}
-								onFilesDrop={(files) => void handleFileChange(files[0] ?? null)}
-							>
-								{(isDragging) => (
-									<button type="button" className={isDragging ? 'is-dragging' : undefined} onClick={() => fileInputRef.current?.click()}>
-										<DocumentIcon />
-										<span>{isDragging ? 'Отпустите файл' : 'Выбрать файл'}</span>
-									</button>
-								)}
-							</DropZone>
-							{file && (
-								<button
-									className="knowledge-edit-modal__file-remove"
-									type="button"
-									onClick={clearSelectedFile}
-									aria-label={`Убрать файл ${file.name}`}
-								>
-									<CrossIcon />
-								</button>
-							)}
-						</div>
-					</div>
-					<div className="knowledge-edit-modal__divider" />
-					<section className="knowledge-edit-modal__metadata" aria-labelledby="knowledge-data-metadata-title">
-						<h3 id="knowledge-data-metadata-title">Метаданные</h3>
-						<KnowledgeFilterFields value={formFilters} onChange={setFormFilters} disabled={saving} />
-						<div className="knowledge-edit-modal__approach">
+			<section className="knowledge-editor-page__card">
+				{activeTab === 'edit' ? (
+					<div className="knowledge-edit-modal__form" role="tabpanel">
+						<section className="knowledge-editor-page__section" aria-labelledby="knowledge-data-main-title">
+							<h2 id="knowledge-data-main-title">Основные данные</h2>
 							<label>
-								Подход
-								<CustomSelect
-									value={selectedApproachId}
-									onChange={setSelectedApproachId}
-									ariaLabel="Подход элемента"
-									options={[
-										{ value: '', label: 'Без подхода' },
-										...approaches
-											.filter((approach) => approach.isActive || approach.id === selectedApproachId)
-											.map((approach) => ({ value: approach.id, label: approach.name })),
-									]}
+								Название
+								<input value={title} onChange={(event) => setTitle(event.target.value)} />
+							</label>
+							<label>
+								Содержимое
+								<textarea
+									value={content}
+									onChange={(event) => setContent(event.target.value)}
+									placeholder="Вставьте текст"
 								/>
 							</label>
-						</div>
-					</section>
-					<div className="knowledge-edit-modal__divider" />
-					<div className="knowledge-edit-modal__settings">
-						<div className="knowledge-edit-modal__rating">
-							<span>Рейтинг</span>
-							<Rating value={rating} onChange={setRating} ariaLabel="Рейтинг элемента" />
-						</div>
-						<Checkbox
-							checked={isActive}
-							onChange={setIsActive}
-							label="Использовать в ответах"
-							className="knowledge-edit-modal__switch knowledge-card__active-toggle"
-						/>
+							<div className="knowledge-edit-modal__file-field">
+								<span>Файл</span>
+								<input
+									ref={fileInputRef}
+									className="knowledge-edit-modal__file-input"
+									type="file"
+									onChange={(event) => void handleFileChange(event.target.files?.[0] ?? null)}
+								/>
+								<div className="knowledge-edit-modal__file-picker">
+									<DropZone
+										className="knowledge-edit-modal__file-drop-zone"
+										showOverlay={false}
+										onFilesDrop={(files) => void handleFileChange(files[0] ?? null)}
+									>
+										{(isDragging) => (
+											<button
+												type="button"
+												className={isDragging ? 'is-dragging' : undefined}
+												aria-label={isDragging ? 'Отпустите файл' : 'Выбрать файл'}
+												onClick={() => fileInputRef.current?.click()}
+											>
+												<DocumentIcon />
+												<span>{isDragging ? 'Отпустите файл' : file?.name ?? 'Перетащите файл сюда или выберите файл'}</span>
+											</button>
+										)}
+									</DropZone>
+									{file && (
+										<button
+											className="knowledge-edit-modal__file-remove"
+											type="button"
+											onClick={clearSelectedFile}
+											aria-label={`Убрать файл ${file.name}`}
+										>
+											<CrossIcon />
+										</button>
+									)}
+								</div>
+							</div>
+						</section>
+						<div className="knowledge-edit-modal__divider" />
+						<section className="knowledge-edit-modal__metadata" aria-labelledby="knowledge-data-metadata-title">
+							<h2 id="knowledge-data-metadata-title">Метаданные</h2>
+							<div className="knowledge-edit-modal__metadata-grid">
+								<KnowledgeFilterFields value={formFilters} onChange={setFormFilters} disabled={saving} />
+								<div className="knowledge-edit-modal__approach">
+									<label>
+										Подход
+										<CustomSelect
+											value={selectedApproachId}
+											onChange={setSelectedApproachId}
+											ariaLabel="Подход элемента"
+											options={[
+												{ value: '', label: 'Без подхода' },
+												...approaches
+													.filter((approach) => approach.isActive || approach.id === selectedApproachId)
+													.map((approach) => ({ value: approach.id, label: approach.name })),
+											]}
+										/>
+									</label>
+								</div>
+								<div className="knowledge-edit-modal__rating">
+									<span>Рейтинг</span>
+									<Rating value={rating} onChange={setRating} ariaLabel="Рейтинг элемента" />
+								</div>
+							</div>
+							<Checkbox
+								checked={isActive}
+								onChange={setIsActive}
+								label="Использовать в ответах"
+								className="knowledge-edit-modal__switch knowledge-card__active-toggle"
+							/>
+						</section>
 					</div>
-				</div>
-			) : (
-				<div className="knowledge-edit-modal__preview" role="tabpanel">
-					<article className="knowledge-edit-modal__preview-card">
+				) : (
+					<div className="knowledge-edit-modal__preview" role="tabpanel">
+						<article className="knowledge-edit-modal__preview-card">
 						<h3>{title.trim() || file?.name || 'Без названия'}</h3>
 						<Rating value={rating} readonly ariaLabel="Рейтинг элемента" />
 						<span className="knowledge-edit-modal__preview-source">{sourceLabel}</span>
@@ -413,10 +411,16 @@ export function KnowledgeDataDialog({
 								))}
 							</div>
 						)}
-					</article>
+						</article>
+					</div>
+				)}
+				<div className="knowledge-editor-page__actions">
+					<button type="button" disabled={saving} onClick={onCancel}>Отмена</button>
+					<button className="knowledge-editor-page__confirm" type="button" disabled={saving} onClick={onConfirm}>{confirmLabel}</button>
 				</div>
-			)}
-		</ModalDialog>
+			</section>
+			</div>
+		</main>
 	);
 }
 

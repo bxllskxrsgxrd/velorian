@@ -13,7 +13,7 @@ import { useApproachesStore } from '../stores/approachesStore';
 import { useKnowledgeStore } from '../stores/knowledgeStore';
 import type { KnowledgeItem } from '../types/chat';
 import { reportError } from '../utils/reportError';
-import { KnowledgeDataDialog } from './KnowledgePage';
+import { KnowledgeDataEditor } from './KnowledgePage';
 
 function itemFilters(item: KnowledgeItem) {
 	return item.filters ?? { ...EMPTY_KNOWLEDGE_FILTERS };
@@ -163,11 +163,10 @@ export function KnowledgeEditorPage() {
 		}
 	}
 
-	if (!isCreate && !item) return <div className="knowledge-page"><p>Загрузка материала…</p></div>;
+	if (!isCreate && !item) return <main className="knowledge-editor-page knowledge-page"><p>Загрузка материала…</p></main>;
 
 	return (
-		<KnowledgeDataDialog
-			page
+		<KnowledgeDataEditor
 			mode={isCreate ? 'create' : 'edit'}
 			item={item}
 			title={title}
@@ -186,7 +185,7 @@ export function KnowledgeEditorPage() {
 			file={file}
 			setFile={setFile}
 			saving={saving}
-			onClose={() => navigate('/knowledge')}
+			onCancel={() => navigate('/knowledge')}
 			onConfirm={() => void save()}
 		/>
 	);
