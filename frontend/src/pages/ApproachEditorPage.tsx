@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBlocker, useNavigate, useParams } from 'react-router-dom';
 import { listKnowledge } from '../api/chatApi';
+import { CrossIcon, MoreIcon, PlusIcon } from '../components/icons/AppIcons';
 import { Checkbox } from '../components/ui/Checkbox/Checkbox';
 import { CustomSelect } from '../components/ui/CustomSelect/CustomSelect';
 import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
@@ -8,6 +9,7 @@ import { useToast } from '../hooks/useToast';
 import { useApproachesStore } from '../stores/approachesStore';
 import type { ApproachInput, KnowledgeItem } from '../types/chat';
 import { reportError } from '../utils/reportError';
+import './_knowledgePage.scss';
 import './_approaches.scss';
 
 const EMPTY_APPROACH: ApproachInput = {
@@ -18,13 +20,24 @@ function ListEditor({ label, value, onChange }: { label: string; value: string[]
 	return (
 		<fieldset className="approach-editor__list">
 			<legend>{label}</legend>
-			{value.map((entry, index) => (
-				<div key={index}>
-					<input value={entry} onChange={(event) => onChange(value.map((item, current) => current === index ? event.target.value : item))} />
-					<button type="button" onClick={() => onChange(value.filter((_, current) => current !== index))} aria-label={`Удалить пункт ${index + 1}`}>×</button>
+			{value.length > 0 && (
+				<div className="approach-editor__list-items">
+					{value.map((entry, index) => (
+						<div className="approach-editor__list-row" key={index}>
+							<span className="approach-editor__drag-handle" aria-hidden="true"><MoreIcon /></span>
+							<input
+								aria-label={`${label}, пункт ${index + 1}`}
+								value={entry}
+								onChange={(event) => onChange(value.map((item, current) => current === index ? event.target.value : item))}
+							/>
+							<button className="approach-editor__remove-item" type="button" onClick={() => onChange(value.filter((_, current) => current !== index))} aria-label={`Удалить пункт ${index + 1}`}>
+								<CrossIcon />
+							</button>
+						</div>
+					))}
 				</div>
-			))}
-			<button type="button" onClick={() => onChange([...value, ''])}>Добавить пункт</button>
+			)}
+			<button className="approach-editor__add-item" type="button" onClick={() => onChange([...value, ''])}><PlusIcon /><span>Добавить пункт</span></button>
 		</fieldset>
 	);
 }
@@ -40,7 +53,6 @@ export function ApproachEditorPage() {
 	const saving = useApproachesStore((state) => state.isSaving);
 	const [form, setForm] = useState<ApproachInput>(EMPTY_APPROACH);
 	const [knowledgeItems, setKnowledgeItems] = useState<KnowledgeItem[]>([]);
-	const [exampleCandidate, setExampleCandidate] = useState('');
 	const [deleteOpen, setDeleteOpen] = useState(false);
 	const [baseline, setBaseline] = useState(JSON.stringify(EMPTY_APPROACH));
 	const allowNavigationRef = useRef(false);
@@ -101,6 +113,11 @@ export function ApproachEditorPage() {
 		setForm((current) => ({ ...current, [field]: value }));
 	}
 
+	function addExample(itemId: string) {
+		if (!itemId) return;
+		setField('exampleKnowledgeItemIds', [...form.exampleKnowledgeItemIds, itemId]);
+	}
+
 	async function save() {
 		if (!form.name.trim() || saving) return;
 		try {
@@ -136,23 +153,25 @@ export function ApproachEditorPage() {
 				<div><button className="approaches-page__back" type="button" onClick={() => navigate('/knowledge/approaches')}>← Подходы</button><h1>{isCreate ? 'Создать подход' : 'Редактировать подход'}</h1></div>
 				<div className="approach-editor__actions">
 					{!isCreate && <button className="approach-editor__delete" type="button" onClick={() => setDeleteOpen(true)}>Удалить</button>}
-					<button type="button" disabled={!form.name.trim() || saving} onClick={() => void save()}>{saving ? 'Сохранение…' : 'Сохранить'}</button>
+					<button className="approach-editor__save" type="button" disabled={!form.name.trim() || saving} onClick={() => void save()}>{saving ? 'Сохранение…' : 'Сохранить'}</button>
 				</div>
 			</header>
 			<div className="approach-editor__form">
-				<label>Название<input value={form.name} maxLength={80} onChange={(event) => setField('name', event.target.value)} /></label>
-				<label>Описание<textarea value={form.description} onChange={(event) => setField('description', event.target.value)} /></label>
-				<label>Цель<textarea value={form.purpose} onChange={(event) => setField('purpose', event.target.value)} /></label>
+				<label className="approach-editor__field">Название<input value={form.name} maxLength={80} onChange={(event) => setField('name', event.target.value)} /></label>
+				<div className="approach-editor__summary">
+					<label className="approach-editor__field">Описание<textarea value={form.description} onChange={(event) => setField('description', event.target.value)} /></label>
+					<label className="approach-editor__field">Цель<textarea value={form.purpose} onChange={(event) => setField('purpose', event.target.value)} /></label>
+				</div>
 				<ListEditor label="Характеристики" value={form.characteristics} onChange={(value) => setField('characteristics', value)} />
 				<ListEditor label="Структура" value={form.structure} onChange={(value) => setField('structure', value)} />
 				<ListEditor label="Рекомендации по написанию" value={form.writingGuidelines} onChange={(value) => setField('writingGuidelines', value)} />
 				<ListEditor label="Избегать" value={form.avoid} onChange={(value) => setField('avoid', value)} />
 				<fieldset className="approach-editor__examples">
 					<legend>Примеры из базы знаний</legend>
-					<div><CustomSelect value={exampleCandidate} onChange={setExampleCandidate} ariaLabel="Материал-пример" options={[{ value: '', label: 'Выберите материал' }, ...availableExamples.map((item) => ({ value: item.id, label: item.title }))]} /><button type="button" disabled={!exampleCandidate} onClick={() => { setField('exampleKnowledgeItemIds', [...form.exampleKnowledgeItemIds, exampleCandidate]); setExampleCandidate(''); }}>Добавить</button></div>
-					<ul>{form.exampleKnowledgeItemIds.map((id) => <li key={id}><span>{knowledgeItems.find((item) => item.id === id)?.title ?? id}</span><button type="button" onClick={() => setField('exampleKnowledgeItemIds', form.exampleKnowledgeItemIds.filter((item) => item !== id))}>Удалить</button></li>)}</ul>
+					<CustomSelect value="" onChange={addExample} ariaLabel="Материал-пример" options={[{ value: '', label: 'Выберите материал' }, ...availableExamples.map((item) => ({ value: item.id, label: item.title }))]} />
+					<ul>{form.exampleKnowledgeItemIds.map((id) => <li key={id}><span>{knowledgeItems.find((item) => item.id === id)?.title ?? id}</span><button type="button" aria-label={`Удалить материал ${knowledgeItems.find((item) => item.id === id)?.title ?? id}`} onClick={() => setField('exampleKnowledgeItemIds', form.exampleKnowledgeItemIds.filter((item) => item !== id))}><CrossIcon /></button></li>)}</ul>
 				</fieldset>
-				<Checkbox checked={form.isActive} onChange={(value) => setField('isActive', value)} label="Подход активен" />
+				<Checkbox checked={form.isActive} onChange={(value) => setField('isActive', value)} label="Подход активен" className="approach-editor__active-toggle" />
 			</div>
 			{deleteOpen && <ModalDialog title="Удалить подход?" confirmLabel="Удалить" danger onClose={() => setDeleteOpen(false)} onConfirm={() => void deleteCurrent()}><p>Если подход используется, он будет деактивирован и связи материалов сохранятся.</p></ModalDialog>}
 		</main>

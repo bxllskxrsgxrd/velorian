@@ -4,6 +4,7 @@ import { useToast } from '../hooks/useToast';
 import { useApproachesStore } from '../stores/approachesStore';
 import { useUiStore } from '../stores/uiStore';
 import { reportError } from '../utils/reportError';
+import './_knowledgePage.scss';
 import './_approaches.scss';
 
 export function ApproachesPage() {
