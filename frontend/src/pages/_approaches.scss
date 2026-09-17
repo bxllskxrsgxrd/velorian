@@ -22,18 +22,21 @@
 	color: var(--color-text-secondary);
 	background: var(--color-bg-surface);
 	text-align: left;
-	cursor: pointer;
+	cursor: default;
 }
 
 .approach-card__head {
 	display: flex;
+	align-items: flex-start;
 	justify-content: space-between;
 	gap: 16px;
 	color: var(--color-text-primary);
 }
 
-.approach-card__head small { color: var(--color-text-secondary); }
-.approach-card__head small.is-active { color: var(--color-accent); }
+.approach-card__active-toggle.checkbox {
+	flex: 0 0 auto;
+	flex-direction: row-reverse;
+}
 
 .approach-editor__actions {
 	display: flex;
@@ -311,7 +314,8 @@
 	font-size: inherit;
 }
 
-.approach-editor__active-toggle .checkbox__control {
+.approach-editor__active-toggle .checkbox__control,
+.approach-card__active-toggle .checkbox__control {
 	position: relative;
 	display: block;
 	width: 38px;
@@ -319,7 +323,8 @@
 	border-radius: 999px;
 }
 
-.approach-editor__active-toggle .checkbox__control::after {
+.approach-editor__active-toggle .checkbox__control::after,
+.approach-card__active-toggle .checkbox__control::after {
 	position: absolute;
 	top: 2px;
 	left: 2px;
@@ -331,11 +336,13 @@
 	transition: transform var(--transition-fast), background var(--transition-fast);
 }
 
-.approach-editor__active-toggle .checkbox__control svg {
+.approach-editor__active-toggle .checkbox__control svg,
+.approach-card__active-toggle .checkbox__control svg {
 	display: none;
 }
 
-.approach-editor__active-toggle .checkbox__input:checked + .checkbox__control::after {
+.approach-editor__active-toggle .checkbox__input:checked + .checkbox__control::after,
+.approach-card__active-toggle .checkbox__input:checked + .checkbox__control::after {
 	background: var(--color-on-accent);
 	transform: translateX(16px);
 }

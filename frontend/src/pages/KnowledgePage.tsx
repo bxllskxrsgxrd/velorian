@@ -976,9 +976,6 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 									event.preventDefault();
 									openCardMenu(item.id, event.clientX, event.clientY);
 								}}
-								onClick={(event) => {
-									if (!(event.target as HTMLElement).closest('button, a, input, label')) navigate(`/knowledge/${item.id}`);
-								}}
 							>
 								<div className="knowledge-card__select-column">
 									<Checkbox
