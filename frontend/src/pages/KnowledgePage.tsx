@@ -379,7 +379,6 @@ export function KnowledgeDataEditor({
 					</div>
 				) : (
 					<div className="knowledge-edit-modal__preview" role="tabpanel">
-						<article className="knowledge-edit-modal__preview-card">
 						<h3>{title.trim() || file?.name || 'Без названия'}</h3>
 						<Rating value={rating} readonly ariaLabel="Рейтинг элемента" />
 						<span className="knowledge-edit-modal__preview-source">{sourceLabel}</span>
@@ -411,7 +410,6 @@ export function KnowledgeDataEditor({
 								))}
 							</div>
 						)}
-						</article>
 					</div>
 				)}
 				<div className="knowledge-editor-page__actions">

@@ -951,17 +951,10 @@
 
 	.knowledge-edit-modal__preview {
 		padding: 22px 24px 0;
-	}
-
-	.knowledge-edit-modal__preview-card {
-		padding: 20px;
-		border: 1px solid var(--color-border);
-		border-radius: var(--radius-large);
 		color: var(--color-text-primary);
-		background: var(--color-bg-elevated);
 	}
 
-	.knowledge-edit-modal__preview-card h3 {
+	.knowledge-edit-modal__preview h3 {
 		margin: 0 0 8px;
 		font-size: 18px;
 		overflow-wrap: anywhere;
