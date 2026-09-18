@@ -423,7 +423,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 										onClick={() => openDialog('delete', conversation)}
 									>
 										<TrashIcon />
-										Удалить
+										В корзину
 									</button>
 								</div>
 							)}
@@ -525,9 +525,8 @@ export function ChatSidebar(props: ChatSidebarProps) {
 			)}
 			{dialog?.type === 'delete' && (
 				<ModalDialog
-					title="Удалить чат?"
-					confirmLabel="Удалить"
-					danger
+					title="Переместить чат в корзину?"
+					confirmLabel="Переместить в корзину"
 					onClose={() => setDialog(null)}
 					onConfirm={() => {
 						props.onDelete(dialog.conversation.id);

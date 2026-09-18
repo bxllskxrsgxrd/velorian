@@ -4,6 +4,7 @@ import { listKnowledge } from '../api/chatApi';
 import { CrossIcon, MoreIcon, PlusIcon } from '../components/icons/AppIcons';
 import { Checkbox } from '../components/ui/Checkbox/Checkbox';
 import { CustomSelect } from '../components/ui/CustomSelect/CustomSelect';
+import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
 import { useToast } from '../hooks/useToast';
 import { useApproachesStore } from '../stores/approachesStore';
 import type { ApproachInput, KnowledgeItem } from '../types/chat';
@@ -57,12 +58,6 @@ export function ApproachEditorPage() {
 	const isDirty = baseline !== JSON.stringify(form);
 	const blocker = useBlocker(() => isDirty && !saving && !allowNavigationRef.current);
 	const availableExamples = useMemo(() => knowledgeItems.filter((item) => !form.exampleKnowledgeItemIds.includes(item.id)), [form.exampleKnowledgeItemIds, knowledgeItems]);
-
-	useEffect(() => {
-		if (blocker.state !== 'blocked') return;
-		if (window.confirm('Есть несохранённые изменения. Покинуть страницу?')) blocker.proceed();
-		else blocker.reset();
-	}, [blocker]);
 
 	useEffect(() => {
 		function beforeUnload(event: BeforeUnloadEvent) {
@@ -161,6 +156,22 @@ export function ApproachEditorPage() {
 					<button className="approach-editor__save" type="button" disabled={!form.name.trim() || saving} onClick={() => void save()}>{saving ? 'Сохранение…' : 'Сохранить'}</button>
 				</div>
 			</div>
+			{blocker.state === 'blocked' && (
+				<ModalDialog
+					title="Есть несохранённые изменения"
+					confirmLabel="Выйти"
+					closeLabel="Остаться"
+					danger
+					onClose={() => blocker.reset()}
+					onConfirm={() => {
+						allowNavigationRef.current = true;
+						setBaseline(JSON.stringify(form));
+						blocker.proceed();
+					}}
+				>
+					<p>Несохранённые изменения будут потеряны.</p>
+				</ModalDialog>
+			)}
 		</main>
 	);
 }

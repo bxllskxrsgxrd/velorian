@@ -7,6 +7,7 @@ type ModalDialogProps = {
 	title: string;
 	children: ReactNode;
 	confirmLabel: string;
+	closeLabel?: string;
 	className?: string;
 	subtitle?: string;
 	showCloseButton?: boolean;
@@ -21,6 +22,7 @@ export function ModalDialog({
 	title,
 	children,
 	confirmLabel,
+	closeLabel = 'Отмена',
 	className = '',
 	subtitle,
 	showCloseButton = false,
@@ -62,7 +64,7 @@ export function ModalDialog({
 				<div className="modal-dialog__content">{children}</div>
 				<div className="modal-dialog__actions">
 					<button type="button" disabled={closeDisabled} onClick={onClose}>
-						{confirmDisabled && !closeDisabled ? 'Закрыть' : 'Отмена'}
+						{confirmDisabled && !closeDisabled ? 'Закрыть' : closeLabel}
 					</button>
 					<button
 						disabled={confirmDisabled}

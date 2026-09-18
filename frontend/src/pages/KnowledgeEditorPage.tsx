@@ -7,6 +7,7 @@ import {
 	updateKnowledgeItem,
 	uploadKnowledgeFile,
 } from '../api/chatApi';
+import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
 import { EMPTY_KNOWLEDGE_FILTERS } from '../constants/knowledgeFilters';
 import { useToast } from '../hooks/useToast';
 import { useApproachesStore } from '../stores/approachesStore';
@@ -65,12 +66,6 @@ export function KnowledgeEditorPage() {
 	const currentFingerprint = fingerprint({ title, content, rating, isActive, approachId: selectedApproachId, filters: formFilters, file });
 	const isDirty = Boolean(baseline) && baseline !== currentFingerprint;
 	const blocker = useBlocker(() => isDirty && !saving && !allowNavigationRef.current);
-
-	useEffect(() => {
-		if (blocker.state !== 'blocked') return;
-		if (window.confirm('Есть несохранённые изменения. Покинуть страницу?')) blocker.proceed();
-		else blocker.reset();
-	}, [blocker]);
 
 	useEffect(() => {
 		function handleBeforeUnload(event: BeforeUnloadEvent) {
@@ -166,27 +161,45 @@ export function KnowledgeEditorPage() {
 	if (!isCreate && !item) return <main className="knowledge-editor-page knowledge-page"><p>Загрузка материала…</p></main>;
 
 	return (
-		<KnowledgeDataEditor
-			mode={isCreate ? 'create' : 'edit'}
-			item={item}
-			title={title}
-			setTitle={setTitle}
-			content={content}
-			setContent={setContent}
-			rating={rating}
-			setRating={setRating}
-			isActive={isActive}
-			setIsActive={setIsActive}
-			selectedApproachId={selectedApproachId}
-			setSelectedApproachId={setSelectedApproachId}
-			formFilters={formFilters}
-			setFormFilters={setFormFilters}
-			approaches={approaches}
-			file={file}
-			setFile={setFile}
-			saving={saving}
-			onCancel={() => navigate('/knowledge')}
-			onConfirm={() => void save()}
-		/>
+		<>
+			<KnowledgeDataEditor
+				mode={isCreate ? 'create' : 'edit'}
+				item={item}
+				title={title}
+				setTitle={setTitle}
+				content={content}
+				setContent={setContent}
+				rating={rating}
+				setRating={setRating}
+				isActive={isActive}
+				setIsActive={setIsActive}
+				selectedApproachId={selectedApproachId}
+				setSelectedApproachId={setSelectedApproachId}
+				formFilters={formFilters}
+				setFormFilters={setFormFilters}
+				approaches={approaches}
+				file={file}
+				setFile={setFile}
+				saving={saving}
+				onCancel={() => navigate('/knowledge')}
+				onConfirm={() => void save()}
+			/>
+			{blocker.state === 'blocked' && (
+				<ModalDialog
+					title="Есть несохранённые изменения"
+					confirmLabel="Выйти"
+					closeLabel="Остаться"
+					danger
+					onClose={() => blocker.reset()}
+					onConfirm={() => {
+						allowNavigationRef.current = true;
+						setBaseline(currentFingerprint);
+						blocker.proceed();
+					}}
+				>
+					<p>Несохранённые изменения будут потеряны.</p>
+				</ModalDialog>
+			)}
+		</>
 	);
 }
