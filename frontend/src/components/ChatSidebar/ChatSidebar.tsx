@@ -77,6 +77,15 @@ function trashDateLabel(deletedAt?: string | null) {
 	return `Удалён ${date}, ${time} · осталось ${remainingDays} ${daysLabel(remainingDays)}`;
 }
 
+function prepareTitleMarquee(item: HTMLDivElement) {
+	const title = item.querySelector<HTMLElement>('.chat-sidebar__select > span:last-child');
+	if (!title) return;
+	const overflow = title.scrollWidth - title.clientWidth;
+	item.dataset.titleOverflowing = String(overflow > 0);
+	item.style.setProperty('--chat-title-marquee-distance', `${-overflow}px`);
+	item.style.setProperty('--chat-title-marquee-duration', `${Math.max(3, overflow / 30)}s`);
+}
+
 type ChatSidebarProps = {
 	user: AuthUser;
 	activeConversationId: string | null;
@@ -392,6 +401,8 @@ export function ChatSidebar(props: ChatSidebarProps) {
 									: 'chat-sidebar__item'
 							}
 							key={conversation.id}
+							onMouseEnter={(event) => prepareTitleMarquee(event.currentTarget)}
+							onMouseLeave={(event) => event.currentTarget.removeAttribute('data-title-overflowing')}
 						>
 							<button
 								className="chat-sidebar__select"
