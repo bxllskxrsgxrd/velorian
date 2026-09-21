@@ -1,10 +1,10 @@
-import { useEffect, useId, useRef, useState, type KeyboardEvent } from 'react';
+import { useEffect, useId, useRef, useState, type KeyboardEvent, type ReactNode } from 'react';
 import { ChevronIcon } from '../../icons/AppIcons';
 import './_customSelect.scss';
 
 export type CustomSelectOption = {
 	value: string;
-	label: string;
+	label: ReactNode;
 	disabled?: boolean;
 };
 

@@ -7,11 +7,9 @@ import {
 	restoreConversation,
 	restoreKnowledgeItem,
 } from '../../api/chatApi';
-import { ACCENT_THEMES, ACCENT_THEME_LABELS, type AccentTheme } from '../../theme/accentTheme';
 import type { AuthUser, ConversationSummary } from '../../types/chat';
 import {
 	NewChatIcon,
-	ChevronIcon,
 	EditIcon,
 	KnowledgeIcon,
 	LogoutIcon,
@@ -27,7 +25,6 @@ import {
 import { VelorianIcon } from '../icons/VelorianIcon';
 import { ModalDialog } from '../ui/ModalDialog/ModalDialog';
 import { Checkbox } from '../ui/Checkbox/Checkbox';
-import { CustomSelect } from '../ui/CustomSelect/CustomSelect';
 import './_chatSidebar.scss';
 import { SidebarButton } from '../ui/SidebarButton/SidebarButton';
 import { useSidebarStore } from '../../stores/sidebarStore';
@@ -37,6 +34,7 @@ import { useDebounce } from '../../hooks/useDebounce';
 import { useKnowledgeStore } from '../../stores/knowledgeStore';
 import { reportError } from '../../utils/reportError';
 import { useToast } from '../../hooks/useToast';
+import { SettingsPanel } from './SettingsPanel';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -446,29 +444,14 @@ export function ChatSidebar(props: ChatSidebarProps) {
 							<button
 								className="chat-sidebar__settings-toggle"
 								type="button"
-								aria-expanded={settingsOpen}
-								onClick={() => setSettingsOpen((current) => !current)}
+								onClick={() => {
+									setSettingsOpen(true);
+									setAccountOpen(false);
+								}}
 							>
 								<SettingsIcon />
 								<span>Настройки</span>
-								<ChevronIcon />
 							</button>
-							{settingsOpen && (
-								<div className="chat-sidebar__settings-panel">
-									<div className="chat-sidebar__settings-field">
-										<span>Акцент интерфейса</span>
-										<CustomSelect
-											value={accentTheme}
-											onChange={(value) => setAccent(value as AccentTheme)}
-											ariaLabel="Акцент интерфейса"
-											options={ACCENT_THEMES.map((theme) => ({
-												value: theme,
-												label: ACCENT_THEME_LABELS[theme],
-											}))}
-										/>
-									</div>
-								</div>
-							)}
 							<button type="button" onClick={() => void openTrash()}>
 								<TrashIcon />
 								<span>Корзина</span>
@@ -491,12 +474,19 @@ export function ChatSidebar(props: ChatSidebarProps) {
 						</span>
 						<span className="chat-sidebar__account-copy">
 							<strong>{props.user.email.split('@')[0]}</strong>
-							<small>{props.user.email}</small>
 						</span>
-						<MoreIcon />
 					</button>
 				</div>
 			</aside>
+
+			{settingsOpen && (
+				<SettingsPanel
+					user={props.user}
+					accentTheme={accentTheme}
+					onAccentChange={setAccent}
+					onClose={() => setSettingsOpen(false)}
+				/>
+			)}
 
 			{dialog?.type === 'rename' && (
 				<ModalDialog

@@ -101,7 +101,7 @@ describe('ChatSidebar menus', () => {
 		expect(onRename).toHaveBeenCalledWith(conversation, 'Новое название');
 	});
 
-	it('keeps accent settings inside the account menu', () => {
+	it('opens the settings dialog and switches between its sections', () => {
 		renderSidebar();
 
 		fireEvent.click(
@@ -122,7 +122,13 @@ describe('ChatSidebar menus', () => {
 			}),
 		);
 
-		expect(screen.getByText('Акцент интерфейса')).toBeInTheDocument();
+		expect(screen.getByRole('dialog', { name: 'Общие' })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Язык интерфейса' })).toHaveTextContent('Автоматически определять');
+
+		fireEvent.click(screen.getByRole('button', { name: 'Внешний вид' }));
+
+		expect(screen.getByRole('dialog', { name: 'Внешний вид' })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Акцентный цвет' })).toHaveTextContent('Сосна');
 	});
 
 	it('opens unified trash with chats and knowledge tabs', async () => {
