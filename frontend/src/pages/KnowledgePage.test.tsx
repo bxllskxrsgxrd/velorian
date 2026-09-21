@@ -40,7 +40,7 @@ const api = vi.hoisted(() => ({
 
 vi.mock('../api/chatApi', () => api);
 
-// Нужен только для таба предпросмотра.
+// Нужен только для таба предпросмотра
 vi.mock('../components/MarkdownEditor/MarkdownEditor', () => ({
 	default: ({
 		value,
@@ -63,7 +63,7 @@ vi.mock('../components/MarkdownEditor/MarkdownEditor', () => ({
 function createTextFile(content: string, name: string, type = 'text/plain') {
 	const file = new File([content], name, { type });
 
-	// jsdom/File support differs between environments; keep file.text() deterministic.
+	// jsdom/File support differs between environments; keep file.text() deterministic
 	Object.defineProperty(file, 'text', {
 		configurable: true,
 		value: vi.fn().mockResolvedValue(content),
@@ -119,19 +119,29 @@ function LocationProbe() {
 }
 
 function TestShell() {
-	return <ToastProvider><Outlet /><LocationProbe /></ToastProvider>;
+	return (
+		<ToastProvider>
+			<Outlet />
+			<LocationProbe />
+		</ToastProvider>
+	);
 }
 
 function renderKnowledge(initialEntry = '/knowledge') {
-	const router = createMemoryRouter([{
-		path: '/',
-		element: <TestShell />,
-		children: [
-			{ path: 'knowledge', element: <KnowledgePage user={{ id: 'user', email: 'user@example.com' }} /> },
-			{ path: 'knowledge/new', element: <KnowledgeEditorPage /> },
-			{ path: 'knowledge/:knowledgeId', element: <KnowledgeEditorPage /> },
+	const router = createMemoryRouter(
+		[
+			{
+				path: '/',
+				element: <TestShell />,
+				children: [
+					{ path: 'knowledge', element: <KnowledgePage user={{ id: 'user', email: 'user@example.com' }} /> },
+					{ path: 'knowledge/new', element: <KnowledgeEditorPage /> },
+					{ path: 'knowledge/:knowledgeId', element: <KnowledgeEditorPage /> },
+				],
+			},
 		],
-	}], { initialEntries: [initialEntry] });
+		{ initialEntries: [initialEntry] },
+	);
 	return render(<RouterProvider router={router} />);
 }
 
@@ -580,7 +590,10 @@ describe('KnowledgePage', () => {
 			);
 		});
 
-		expect(within(dialog).getByRole('button', { name: 'Поставить рейтинг 5 из 5' })).toHaveAttribute('aria-pressed', 'true');
+		expect(within(dialog).getByRole('button', { name: 'Поставить рейтинг 5 из 5' })).toHaveAttribute(
+			'aria-pressed',
+			'true',
+		);
 	});
 
 	it('switches to edit preview and shows only filled metadata', async () => {

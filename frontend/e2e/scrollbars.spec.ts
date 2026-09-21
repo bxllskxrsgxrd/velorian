@@ -40,15 +40,15 @@ test('Knowledge and editor keep one vertical scroll container at a small viewpor
 
 	// Knowledge now owns the page-level scroll. Do not require the old custom
 	// scrollbar-width/color contract here; only verify that it is the active
-	// vertical scroll container and that body itself does not become scrollable.
+	// vertical scroll container and that body itself does not become scrollable
 	expect(knowledge.scrollHeight).toBeGreaterThan(knowledge.clientHeight);
 	expect(await page.evaluate(() => document.body.scrollHeight)).toBeLessThanOrEqual(600);
 
-	// Sidebar keeps the shared custom scrollbar styling.
+	// Sidebar keeps the shared custom scrollbar styling
 	expectStyledScrollbar(sidebar);
 	expect(sidebar.scrollHeight).toBeGreaterThan(sidebar.clientHeight);
 
-	// Accent changes must not mutate the shared Sidebar scrollbar style.
+	// Accent changes must not mutate the shared Sidebar scrollbar style
 	const sidebarScrollbarColor = sidebar.scrollbarColor;
 	for (const accent of ['terracotta', 'plum', 'pine']) {
 		await page.evaluate((value) => {
@@ -69,7 +69,7 @@ test('Knowledge and editor keep one vertical scroll container at a small viewpor
 	const editorForm = await scrollbarSnapshot(editor.locator('.knowledge-edit-modal__form'));
 
 	// Editor page is the only vertical scroll container. The inner form must not
-	// create the old second scrollbar.
+	// create the old second scrollbar
 	expect(editorPage.overflowY).toBe('auto');
 	expect(editorPage.scrollHeight).toBeGreaterThan(editorPage.clientHeight);
 	expect(editorForm.overflowY).toBe('visible');

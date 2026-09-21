@@ -37,7 +37,7 @@ export function setAccentTheme(theme: AccentTheme, persist = true) {
 			window.localStorage.setItem(ACCENT_THEME_STORAGE_KEY, theme);
 		} catch (error) {
 			reportError('Не удалось сохранить тему в localStorage', error, { theme });
-			// Тема всё равно применяется к текущей сессии, даже если storage недоступен.
+			// Тема всё равно применяется к текущей сессии, даже если storage недоступен
 		}
 	}
 }

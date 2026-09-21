@@ -12,17 +12,46 @@ type MarkdownEditorProps = {
 };
 
 const SOURCE_LANGUAGES: Record<string, string> = {
-	'.html': 'markup', '.htm': 'markup', '.xml': 'xml', '.vue': 'vue', '.svelte': 'svelte',
-	'.css': 'css', '.scss': 'scss', '.sass': 'sass', '.less': 'less',
-	'.js': 'javascript', '.mjs': 'javascript', '.cjs': 'javascript', '.jsx': 'jsx',
-	'.ts': 'typescript', '.tsx': 'tsx', '.json': 'json', '.yaml': 'yaml', '.yml': 'yaml',
-	'.py': 'python', '.rb': 'ruby', '.php': 'php', '.java': 'java', '.kt': 'kotlin', '.kts': 'kotlin',
-	'.swift': 'swift', '.go': 'go', '.rs': 'rust', '.c': 'c', '.h': 'c', '.cpp': 'cpp', '.hpp': 'cpp',
-	'.cs': 'csharp', '.sql': 'sql', '.sh': 'bash', '.bash': 'bash', '.zsh': 'bash',
+	'.html': 'markup',
+	'.htm': 'markup',
+	'.xml': 'xml',
+	'.vue': 'vue',
+	'.svelte': 'svelte',
+	'.css': 'css',
+	'.scss': 'scss',
+	'.sass': 'sass',
+	'.less': 'less',
+	'.js': 'javascript',
+	'.mjs': 'javascript',
+	'.cjs': 'javascript',
+	'.jsx': 'jsx',
+	'.ts': 'typescript',
+	'.tsx': 'tsx',
+	'.json': 'json',
+	'.yaml': 'yaml',
+	'.yml': 'yaml',
+	'.py': 'python',
+	'.rb': 'ruby',
+	'.php': 'php',
+	'.java': 'java',
+	'.kt': 'kotlin',
+	'.kts': 'kotlin',
+	'.swift': 'swift',
+	'.go': 'go',
+	'.rs': 'rust',
+	'.c': 'c',
+	'.h': 'c',
+	'.cpp': 'cpp',
+	'.hpp': 'cpp',
+	'.cs': 'csharp',
+	'.sql': 'sql',
+	'.sh': 'bash',
+	'.bash': 'bash',
+	'.zsh': 'bash',
 };
 
 function sourceLanguage(fileName: string | undefined, content: string) {
-	const dotIndex = fileName?.lastIndexOf('.') ?? -1;
+	const dotIndex = fileName?.lastIndexOf('') ?? -1;
 	const extension = dotIndex >= 0 ? fileName?.slice(dotIndex).toLowerCase() : undefined;
 	if (extension && SOURCE_LANGUAGES[extension]) return SOURCE_LANGUAGES[extension];
 	return /^(?:\uFEFF?\s*)(?:<!doctype\s+html\b|<html(?:\s|>))/i.test(content) ? 'markup' : undefined;

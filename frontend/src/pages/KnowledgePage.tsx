@@ -1,11 +1,7 @@
 import { lazy, Suspense, useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate, useSearchParams } from 'react-router-dom';
-import {
-	deleteKnowledgeItem,
-	listKnowledge,
-	updateKnowledgeItem,
-} from '../api/chatApi';
+import { deleteKnowledgeItem, listKnowledge, updateKnowledgeItem } from '../api/chatApi';
 import { useDebounce } from '../hooks/useDebounce';
 import { useToast } from '../hooks/useToast';
 import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
@@ -212,7 +208,7 @@ export function KnowledgeDataEditor({
 		setTitle(nextFile.name);
 		setContent('');
 		setFilePreview({ status: 'loading', content: '' });
-		const dotIndex = nextFile.name.lastIndexOf('.');
+		const dotIndex = nextFile.name.lastIndexOf('');
 		const extension = dotIndex >= 0 ? nextFile.name.slice(dotIndex).toLowerCase() : '';
 		if (!nextFile.type.startsWith('text/') && !TEXT_FILE_EXTENSIONS.has(extension)) {
 			setFilePreview({ status: 'error', content: '' });
@@ -262,161 +258,171 @@ export function KnowledgeDataEditor({
 	return (
 		<main className="knowledge-editor-page knowledge-page">
 			<header className="knowledge-editor-page__header">
-				<button className="knowledge-editor-page__back" type="button" onClick={onCancel}>← База знаний</button>
+				<button className="knowledge-editor-page__back" type="button" onClick={onCancel}>
+					← База знаний
+				</button>
 				<h1 id="knowledge-editor-title">{mode === 'create' ? 'Добавить данные' : 'Редактировать данные'}</h1>
-				<p>{mode === 'create' ? 'Заполните материал и его метаданные' : 'Все изменения будут применены после сохранения'}</p>
+				<p>
+					{mode === 'create' ? 'Заполните материал и его метаданные' : 'Все изменения будут применены после сохранения'}
+				</p>
 			</header>
 			<div className="knowledge-editor-page__content" role="region" aria-labelledby="knowledge-editor-title">
-			<div className="knowledge-edit-modal__tabs" role="tablist" aria-label="Режим редактора">
-				<button
-					className={activeTab === 'edit' ? 'active' : ''}
-					type="button"
-					role="tab"
-					aria-selected={activeTab === 'edit'}
-					onClick={() => setActiveTab('edit')}
-				>
-					Редактирование
-				</button>
-				<button
-					className={activeTab === 'preview' ? 'active' : ''}
-					type="button"
-					role="tab"
-					aria-selected={activeTab === 'preview'}
-					onClick={() => setActiveTab('preview')}
-				>
-					Предпросмотр
-				</button>
-			</div>
-			<section className="knowledge-editor-page__card">
-				{activeTab === 'edit' ? (
-					<div className="knowledge-edit-modal__form" role="tabpanel">
-						<section className="knowledge-editor-page__section" aria-labelledby="knowledge-data-main-title">
-							<h2 id="knowledge-data-main-title">Основные данные</h2>
-							<label>
-								Название
-								<input value={title} onChange={(event) => setTitle(event.target.value)} />
-							</label>
-							<label>
-								Содержимое
-								<textarea
-									value={content}
-									onChange={(event) => setContent(event.target.value)}
-									placeholder="Вставьте текст"
-								/>
-							</label>
-							<div className="knowledge-edit-modal__file-field">
-								<span>Файл</span>
-								<input
-									ref={fileInputRef}
-									className="knowledge-edit-modal__file-input"
-									type="file"
-									onChange={(event) => void handleFileChange(event.target.files?.[0] ?? null)}
-								/>
-								<div className="knowledge-edit-modal__file-picker">
-									<DropZone
-										className="knowledge-edit-modal__file-drop-zone"
-										showOverlay={false}
-										onFilesDrop={(files) => void handleFileChange(files[0] ?? null)}
-									>
-										{(isDragging) => (
+				<div className="knowledge-edit-modal__tabs" role="tablist" aria-label="Режим редактора">
+					<button
+						className={activeTab === 'edit' ? 'active' : ''}
+						type="button"
+						role="tab"
+						aria-selected={activeTab === 'edit'}
+						onClick={() => setActiveTab('edit')}
+					>
+						Редактирование
+					</button>
+					<button
+						className={activeTab === 'preview' ? 'active' : ''}
+						type="button"
+						role="tab"
+						aria-selected={activeTab === 'preview'}
+						onClick={() => setActiveTab('preview')}
+					>
+						Предпросмотр
+					</button>
+				</div>
+				<section className="knowledge-editor-page__card">
+					{activeTab === 'edit' ? (
+						<div className="knowledge-edit-modal__form" role="tabpanel">
+							<section className="knowledge-editor-page__section" aria-labelledby="knowledge-data-main-title">
+								<h2 id="knowledge-data-main-title">Основные данные</h2>
+								<label>
+									Название
+									<input value={title} onChange={(event) => setTitle(event.target.value)} />
+								</label>
+								<label>
+									Содержимое
+									<textarea
+										value={content}
+										onChange={(event) => setContent(event.target.value)}
+										placeholder="Вставьте текст"
+									/>
+								</label>
+								<div className="knowledge-edit-modal__file-field">
+									<span>Файл</span>
+									<input
+										ref={fileInputRef}
+										className="knowledge-edit-modal__file-input"
+										type="file"
+										onChange={(event) => void handleFileChange(event.target.files?.[0] ?? null)}
+									/>
+									<div className="knowledge-edit-modal__file-picker">
+										<DropZone
+											className="knowledge-edit-modal__file-drop-zone"
+											showOverlay={false}
+											onFilesDrop={(files) => void handleFileChange(files[0] ?? null)}
+										>
+											{(isDragging) => (
+												<button
+													type="button"
+													className={isDragging ? 'is-dragging' : undefined}
+													aria-label={isDragging ? 'Отпустите файл' : 'Выбрать файл'}
+													onClick={() => fileInputRef.current?.click()}
+												>
+													<DocumentIcon />
+													<span>
+														{isDragging ? 'Отпустите файл' : (file?.name ?? 'Перетащите файл сюда или выберите файл')}
+													</span>
+												</button>
+											)}
+										</DropZone>
+										{file && (
 											<button
+												className="knowledge-edit-modal__file-remove"
 												type="button"
-												className={isDragging ? 'is-dragging' : undefined}
-												aria-label={isDragging ? 'Отпустите файл' : 'Выбрать файл'}
-												onClick={() => fileInputRef.current?.click()}
+												onClick={clearSelectedFile}
+												aria-label={`Убрать файл ${file.name}`}
 											>
-												<DocumentIcon />
-												<span>{isDragging ? 'Отпустите файл' : file?.name ?? 'Перетащите файл сюда или выберите файл'}</span>
+												<CrossIcon />
 											</button>
 										)}
-									</DropZone>
-									{file && (
-										<button
-											className="knowledge-edit-modal__file-remove"
-											type="button"
-											onClick={clearSelectedFile}
-											aria-label={`Убрать файл ${file.name}`}
-										>
-											<CrossIcon />
-										</button>
-									)}
+									</div>
 								</div>
-							</div>
-						</section>
-						<div className="knowledge-edit-modal__divider" />
-						<section className="knowledge-edit-modal__metadata" aria-labelledby="knowledge-data-metadata-title">
-							<h2 id="knowledge-data-metadata-title">Метаданные</h2>
-							<div className="knowledge-edit-modal__metadata-grid">
-								<KnowledgeFilterFields value={formFilters} onChange={setFormFilters} disabled={saving} />
-								<div className="knowledge-edit-modal__approach">
-									<label>
-										Подход
-										<CustomSelect
-											value={selectedApproachId}
-											onChange={setSelectedApproachId}
-											ariaLabel="Подход элемента"
-											options={[
-												{ value: '', label: 'Без подхода' },
-												...approaches
-													.filter((approach) => approach.isActive || approach.id === selectedApproachId)
-													.map((approach) => ({ value: approach.id, label: approach.name })),
-											]}
-										/>
-									</label>
+							</section>
+							<div className="knowledge-edit-modal__divider" />
+							<section className="knowledge-edit-modal__metadata" aria-labelledby="knowledge-data-metadata-title">
+								<h2 id="knowledge-data-metadata-title">Метаданные</h2>
+								<div className="knowledge-edit-modal__metadata-grid">
+									<KnowledgeFilterFields value={formFilters} onChange={setFormFilters} disabled={saving} />
+									<div className="knowledge-edit-modal__approach">
+										<label>
+											Подход
+											<CustomSelect
+												value={selectedApproachId}
+												onChange={setSelectedApproachId}
+												ariaLabel="Подход элемента"
+												options={[
+													{ value: '', label: 'Без подхода' },
+													...approaches
+														.filter((approach) => approach.isActive || approach.id === selectedApproachId)
+														.map((approach) => ({ value: approach.id, label: approach.name })),
+												]}
+											/>
+										</label>
+									</div>
+									<div className="knowledge-edit-modal__rating">
+										<span>Рейтинг</span>
+										<Rating value={rating} onChange={setRating} ariaLabel="Рейтинг элемента" />
+									</div>
 								</div>
-								<div className="knowledge-edit-modal__rating">
-									<span>Рейтинг</span>
-									<Rating value={rating} onChange={setRating} ariaLabel="Рейтинг элемента" />
-								</div>
-							</div>
-							<Checkbox
-								checked={isActive}
-								onChange={setIsActive}
-								label="Использовать в ответах"
-								className="knowledge-edit-modal__switch knowledge-card__active-toggle"
-							/>
-						</section>
-					</div>
-				) : (
-					<div className="knowledge-edit-modal__preview" role="tabpanel">
-						<h3>{title.trim() || file?.name || 'Без названия'}</h3>
-						<Rating value={rating} readonly ariaLabel="Рейтинг элемента" />
-						<span className="knowledge-edit-modal__preview-source">{sourceLabel}</span>
-						<div className="knowledge-edit-modal__preview-markdown">
-							{file ? (
-								filePreview.status === 'loading' ? (
-									<p>Загрузка содержимого файла…</p>
-								) : filePreview.status === 'ready' ? (
-									<Suspense fallback={<p>Загрузка содержимого файла…</p>}>
+								<Checkbox
+									checked={isActive}
+									onChange={setIsActive}
+									label="Использовать в ответах"
+									className="knowledge-edit-modal__switch knowledge-card__active-toggle"
+								/>
+							</section>
+						</div>
+					) : (
+						<div className="knowledge-edit-modal__preview" role="tabpanel">
+							<h3>{title.trim() || file?.name || 'Без названия'}</h3>
+							<Rating value={rating} readonly ariaLabel="Рейтинг элемента" />
+							<span className="knowledge-edit-modal__preview-source">{sourceLabel}</span>
+							<div className="knowledge-edit-modal__preview-markdown">
+								{file ? (
+									filePreview.status === 'loading' ? (
+										<p>Загрузка содержимого файла…</p>
+									) : filePreview.status === 'ready' ? (
+										<Suspense fallback={<p>Загрузка содержимого файла…</p>}>
+											<MarkdownEditor value={content} onChange={() => undefined} readonly fileName={previewFileName} />
+										</Suspense>
+									) : (
+										<p>Не удалось отобразить содержимое файла в предпросмотре</p>
+									)
+								) : content.trim() ? (
+									<Suspense fallback={<p>Загрузка предпросмотра…</p>}>
 										<MarkdownEditor value={content} onChange={() => undefined} readonly fileName={previewFileName} />
 									</Suspense>
 								) : (
-									<p>Не удалось отобразить содержимое файла в предпросмотре</p>
-								)
-							) : content.trim() ? (
-								<Suspense fallback={<p>Загрузка предпросмотра…</p>}>
-									<MarkdownEditor value={content} onChange={() => undefined} readonly fileName={previewFileName} />
-								</Suspense>
-							) : (
-								<p>Текстовое содержимое не заполнено</p>
+									<p>Текстовое содержимое не заполнено</p>
+								)}
+							</div>
+							{previewMetadata.length > 0 && (
+								<div className="knowledge-edit-modal__chips">
+									{previewMetadata.map(({ label, value }) => (
+										<span key={label}>
+											{label} · {value?.trim()}
+										</span>
+									))}
+								</div>
 							)}
 						</div>
-						{previewMetadata.length > 0 && (
-							<div className="knowledge-edit-modal__chips">
-								{previewMetadata.map(({ label, value }) => (
-									<span key={label}>
-										{label} · {value?.trim()}
-									</span>
-								))}
-							</div>
-						)}
+					)}
+					<div className="knowledge-editor-page__actions">
+						<button type="button" disabled={saving} onClick={onCancel}>
+							Отмена
+						</button>
+						<button className="knowledge-editor-page__confirm" type="button" disabled={saving} onClick={onConfirm}>
+							{confirmLabel}
+						</button>
 					</div>
-				)}
-				<div className="knowledge-editor-page__actions">
-					<button type="button" disabled={saving} onClick={onCancel}>Отмена</button>
-					<button className="knowledge-editor-page__confirm" type="button" disabled={saving} onClick={onConfirm}>{confirmLabel}</button>
-				</div>
-			</section>
+				</section>
 			</div>
 		</main>
 	);
@@ -511,16 +517,15 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 
 	useEffect(() => {
 		setSearch(params.get('q') ?? '');
-		// URL is the source of truth only when the page is entered.
+		// URL is the source of truth only when the page is entered
 		// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, []);
 
 	useEffect(() => {
-		loadApproaches()
-			.catch((error: unknown) => {
-				reportError('KNOWLEDGE_APPROACHES_FAILED', error);
-				showToast(error instanceof Error ? error.message : 'Не удалось загрузить подходы', 'error');
-			});
+		loadApproaches().catch((error: unknown) => {
+			reportError('KNOWLEDGE_APPROACHES_FAILED', error);
+			showToast(error instanceof Error ? error.message : 'Не удалось загрузить подходы', 'error');
+		});
 	}, [loadApproaches, showToast]);
 
 	useEffect(() => {
@@ -777,7 +782,9 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 						</p>
 					</div>
 					<div className="knowledge-page__header-actions">
-						<button type="button" onClick={() => navigate('/knowledge/approaches')}>Подходы</button>
+						<button type="button" onClick={() => navigate('/knowledge/approaches')}>
+							Подходы
+						</button>
 						<button className="knowledge-page__add" type="button" onClick={() => navigate('/knowledge/new')}>
 							Добавить данные
 						</button>
@@ -953,8 +960,7 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 								Снять выбор
 							</button>
 							<button className="knowledge-page__bulk-delete" type="button" onClick={() => setBulkDeleteOpen(true)}>
-								<TrashIcon />
-								В корзину {selectedItems.length}
+								<TrashIcon />В корзину {selectedItems.length}
 							</button>
 						</div>
 					)}
@@ -1056,7 +1062,11 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 						aria-label={`Действия с записью «${cardMenuItem.title}»`}
 						style={{ top: cardMenu.top, left: cardMenu.left }}
 					>
-						<button type="button" role="menuitem" onClick={() => runCardMenuAction(() => navigate(`/knowledge/${cardMenuItem.id}`))}>
+						<button
+							type="button"
+							role="menuitem"
+							onClick={() => runCardMenuAction(() => navigate(`/knowledge/${cardMenuItem.id}`))}
+						>
 							Редактировать
 						</button>
 						{cardMenuItem.downloadUrl && (

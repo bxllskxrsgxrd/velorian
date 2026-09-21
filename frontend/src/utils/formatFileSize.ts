@@ -14,7 +14,7 @@ export function formatFileSize(bytes: number): string {
 	// Вычисляем итоговое число
 	const size = bytes / Math.pow(k, safeIndex);
 
-	// Если это байты, выводим целое число.
+	// Если это байты, выводим целое число
 	// Если КБ/МБ — округляем до 1 знака после запятой (например: 14.6 МБ)
 	return `${safeIndex === 0 ? size : size.toFixed(1)} ${sizes[safeIndex]}`;
 }

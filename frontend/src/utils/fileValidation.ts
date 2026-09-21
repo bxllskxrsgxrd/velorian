@@ -3,18 +3,63 @@ import { getUserFacingError } from '../errors/userErrorMessages';
 import type { ChatMessageError } from '../types/chat';
 
 export { MAX_ATTACHMENTS };
-export const ACCEPTED_FILE_TYPES = 'image/png,image/jpeg,image/webp,image/bmp,image/tiff,.pdf,.docx,.txt,.md,.json,.csv,.log,.html,.css,.scss,.sass,.less,.js,.jsx,.ts,.tsx,.xml,.yaml,.yml,.toml,.ini,.env,.py,.rb,.php,.java,.kt,.kts,.swift,.go,.rs,.c,.h,.cpp,.hpp,.cs,.sql,.sh,.bash,.zsh,.vue,.svelte';
+export const ACCEPTED_FILE_TYPES =
+	'image/png,image/jpeg,image/webp,image/bmp,image/tiff,.pdf,.docx,.txt,.md,.json,.csv,.log,.html,.css,.scss,.sass,.less,.js,.jsx,.ts,.tsx,.xml,.yaml,.yml,.toml,.ini,.env,.py,.rb,.php,.java,.kt,.kts,.swift,.go,.rs,.c,.h,.cpp,.hpp,.cs,.sql,.sh,.bash,.zsh,.vue,.svelte';
 
 const SUPPORTED_EXTENSIONS = new Set([
-	'.png', '.jpg', '.jpeg', '.webp', '.bmp', '.tiff', '.tif',
-	'.pdf', '.docx', '.txt', '.md', '.json', '.csv', '.log', '.html', '.css', '.scss', '.sass', '.less',
-	'.js', '.jsx', '.ts', '.tsx', '.xml', '.yaml', '.yml', '.toml', '.ini', '.env', '.py', '.rb', '.php',
-	'.java', '.kt', '.kts', '.swift', '.go', '.rs', '.c', '.h', '.cpp', '.hpp', '.cs', '.sql', '.sh', '.bash',
-	'.zsh', '.vue', '.svelte',
+	'.png',
+	'.jpg',
+	'.jpeg',
+	'.webp',
+	'.bmp',
+	'.tiff',
+	'.tif',
+	'.pdf',
+	'.docx',
+	'.txt',
+	'.md',
+	'.json',
+	'.csv',
+	'.log',
+	'.html',
+	'.css',
+	'.scss',
+	'.sass',
+	'.less',
+	'.js',
+	'.jsx',
+	'.ts',
+	'.tsx',
+	'.xml',
+	'.yaml',
+	'.yml',
+	'.toml',
+	'.ini',
+	'.env',
+	'.py',
+	'.rb',
+	'.php',
+	'.java',
+	'.kt',
+	'.kts',
+	'.swift',
+	'.go',
+	'.rs',
+	'.c',
+	'.h',
+	'.cpp',
+	'.hpp',
+	'.cs',
+	'.sql',
+	'.sh',
+	'.bash',
+	'.zsh',
+	'.vue',
+	'.svelte',
 ]);
 
 function extensionOf(name: string) {
-	const dotIndex = name.lastIndexOf('.');
+	const dotIndex = name.lastIndexOf('');
 	return dotIndex >= 0 ? name.slice(dotIndex).toLowerCase() : '';
 }
 

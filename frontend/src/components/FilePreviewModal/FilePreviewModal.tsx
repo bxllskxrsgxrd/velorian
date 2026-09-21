@@ -53,7 +53,7 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 				if (error instanceof DOMException && error.name === 'AbortError') return;
 
 				reportError('Не удалось загрузить превью файла', error, { fileName: file.name });
-				setTextPreview({ url: file.url, content: 'Не удалось прочитать файл.' });
+				setTextPreview({ url: file.url, content: 'Не удалось прочитать файл' });
 			});
 
 		return () => controller.abort();

@@ -11,12 +11,45 @@ import './_messageContent.scss';
 type AssistantMessageContentProps = { content: string; isStreaming: boolean; sourceLanguage?: string };
 
 const LANGUAGE_LABELS: Record<string, string> = {
-	markup: 'HTML', html: 'HTML', css: 'CSS', scss: 'SCSS', sass: 'Sass',
-	typescript: 'TypeScript', ts: 'TypeScript', tsx: 'TSX', javascript: 'JavaScript', js: 'JavaScript', jsx: 'JSX',
-	json: 'JSON', markdown: 'Markdown', md: 'Markdown', python: 'Python', py: 'Python', sql: 'SQL',
-	bash: 'Bash', shell: 'Shell', sh: 'Shell', xml: 'XML', yaml: 'YAML', yml: 'YAML',
-	java: 'Java', kotlin: 'Kotlin', swift: 'Swift', go: 'Go', rust: 'Rust', ruby: 'Ruby', php: 'PHP',
-	c: 'C', cpp: 'C++', csharp: 'C#', cs: 'C#', vue: 'Vue', svelte: 'Svelte', text: 'TXT', txt: 'TXT', plaintext: 'TXT',
+	markup: 'HTML',
+	html: 'HTML',
+	css: 'CSS',
+	scss: 'SCSS',
+	sass: 'Sass',
+	typescript: 'TypeScript',
+	ts: 'TypeScript',
+	tsx: 'TSX',
+	javascript: 'JavaScript',
+	js: 'JavaScript',
+	jsx: 'JSX',
+	json: 'JSON',
+	markdown: 'Markdown',
+	md: 'Markdown',
+	python: 'Python',
+	py: 'Python',
+	sql: 'SQL',
+	bash: 'Bash',
+	shell: 'Shell',
+	sh: 'Shell',
+	xml: 'XML',
+	yaml: 'YAML',
+	yml: 'YAML',
+	java: 'Java',
+	kotlin: 'Kotlin',
+	swift: 'Swift',
+	go: 'Go',
+	rust: 'Rust',
+	ruby: 'Ruby',
+	php: 'PHP',
+	c: 'C',
+	cpp: 'C++',
+	csharp: 'C#',
+	cs: 'C#',
+	vue: 'Vue',
+	svelte: 'Svelte',
+	text: 'TXT',
+	txt: 'TXT',
+	plaintext: 'TXT',
 };
 
 const forestNightTheme: PrismTheme = {
@@ -36,36 +69,50 @@ const forestNightTheme: PrismTheme = {
 };
 
 function registerLanguageGrammars() {
-	if (!Prism.languages.java) Prism.languages.java = Prism.languages.extend('clike', {
-		keyword: /\b(?:abstract|assert|boolean|break|byte|case|catch|char|class|const|continue|default|do|double|else|enum|extends|final|finally|float|for|if|implements|import|instanceof|int|interface|long|module|native|new|package|private|protected|public|record|return|sealed|short|static|strictfp|super|switch|synchronized|this|throw|throws|transient|try|var|void|volatile|while|yield)\b/,
-		annotation: { pattern: /(^|[^.])@[\w.]+/, lookbehind: true, alias: 'punctuation' },
-	});
-	if (!Prism.languages.csharp) Prism.languages.csharp = Prism.languages.extend('clike', {
-		keyword: /\b(?:abstract|add|alias|as|async|await|base|bool|break|byte|case|catch|char|checked|class|const|continue|decimal|default|delegate|do|double|dynamic|else|enum|event|explicit|extern|false|finally|fixed|float|for|foreach|from|get|global|goto|if|implicit|in|init|int|interface|internal|into|is|join|let|lock|long|namespace|new|null|object|operator|out|override|params|partial|private|protected|public|readonly|record|ref|remove|required|return|sbyte|sealed|select|set|short|sizeof|stackalloc|static|string|struct|switch|this|throw|true|try|typeof|uint|ulong|unchecked|unsafe|ushort|using|value|var|virtual|void|volatile|when|where|while|with|yield)\b/,
-	});
-	if (!Prism.languages.ruby) Prism.languages.ruby = Prism.languages.extend('python', {
-		keyword: /\b(?:BEGIN|END|alias|and|begin|break|case|class|def|defined\?|do|else|elsif|end|ensure|false|for|if|in|module|next|nil|not|or|redo|rescue|retry|return|self|super|then|true|undef|unless|until|when|while|yield)\b/,
-		symbol: /:[a-zA-Z_]\w*[!?=]?/,
-	});
-	if (!Prism.languages.php) Prism.languages.php = Prism.languages.extend('clike', {
-		keyword: /\b(?:abstract|and|array|as|break|callable|case|catch|class|clone|const|continue|declare|default|do|echo|else|elseif|empty|enddeclare|endfor|endforeach|endif|endswitch|endwhile|enum|eval|exit|extends|final|finally|fn|for|foreach|function|global|goto|if|implements|include|include_once|instanceof|insteadof|interface|isset|list|match|namespace|new|or|print|private|protected|public|readonly|require|require_once|return|static|switch|throw|trait|try|unset|use|var|while|xor|yield)\b/i,
-		variable: /\$+(?:\w+|\{[^}]+\})/,
-	});
-	if (!Prism.languages.scss) Prism.languages.scss = Prism.languages.extend('css', {
-		comment: /\/\*[\s\S]*?\*\/|\/\/.*$/m,
-		atrule: /@[\w-]+(?:[^;{]|\{(?:[^{}]|\{[^{}]*\})*\})*(?:;|(?=\s*\{))/,
-		variable: /\$[-\w]+|--[-\w]+/,
-	});
-	if (!Prism.languages.bash) Prism.languages.bash = {
-		comment: { pattern: /(^|[^"'\\])#.*/, lookbehind: true },
-		string: [{ pattern: /"(?:\\[\s\S]|[^"\\])*"/, greedy: true }, { pattern: /'(?:[^']*)'/, greedy: true }],
-		variable: /\$(?:[a-zA-Z_]\w*|\{[^}]+\}|[?#*@!$0-9_-])+/,
-		keyword: /\b(?:case|coproc|do|done|elif|else|esac|fi|for|function|if|in|select|then|time|until|while)\b/,
-		builtin: /\b(?:alias|bg|bind|break|builtin|cd|command|declare|echo|enable|eval|exec|exit|export|fc|fg|getopts|hash|help|history|jobs|kill|let|local|logout|mapfile|printf|pwd|read|readonly|return|set|shift|shopt|source|test|times|trap|type|typeset|ulimit|umask|unalias|unset|wait)\b/,
-		function: /\b[a-zA-Z_]\w*(?=\s*\(\s*\))/,
-		operator: /&&?|\|\|?|;;|[<>]=?|[=!]=?/,
-		punctuation: /[{}[\]();]/,
-	};
+	if (!Prism.languages.java)
+		Prism.languages.java = Prism.languages.extend('clike', {
+			keyword:
+				/\b(?:abstract|assert|boolean|break|byte|case|catch|char|class|const|continue|default|do|double|else|enum|extends|final|finally|float|for|if|implements|import|instanceof|int|interface|long|module|native|new|package|private|protected|public|record|return|sealed|short|static|strictfp|super|switch|synchronized|this|throw|throws|transient|try|var|void|volatile|while|yield)\b/,
+			annotation: { pattern: /(^|[^.])@[\w.]+/, lookbehind: true, alias: 'punctuation' },
+		});
+	if (!Prism.languages.csharp)
+		Prism.languages.csharp = Prism.languages.extend('clike', {
+			keyword:
+				/\b(?:abstract|add|alias|as|async|await|base|bool|break|byte|case|catch|char|checked|class|const|continue|decimal|default|delegate|do|double|dynamic|else|enum|event|explicit|extern|false|finally|fixed|float|for|foreach|from|get|global|goto|if|implicit|in|init|int|interface|internal|into|is|join|let|lock|long|namespace|new|null|object|operator|out|override|params|partial|private|protected|public|readonly|record|ref|remove|required|return|sbyte|sealed|select|set|short|sizeof|stackalloc|static|string|struct|switch|this|throw|true|try|typeof|uint|ulong|unchecked|unsafe|ushort|using|value|var|virtual|void|volatile|when|where|while|with|yield)\b/,
+		});
+	if (!Prism.languages.ruby)
+		Prism.languages.ruby = Prism.languages.extend('python', {
+			keyword:
+				/\b(?:BEGIN|END|alias|and|begin|break|case|class|def|defined\?|do|else|elsif|end|ensure|false|for|if|in|module|next|nil|not|or|redo|rescue|retry|return|self|super|then|true|undef|unless|until|when|while|yield)\b/,
+			symbol: /:[a-zA-Z_]\w*[!?=]?/,
+		});
+	if (!Prism.languages.php)
+		Prism.languages.php = Prism.languages.extend('clike', {
+			keyword:
+				/\b(?:abstract|and|array|as|break|callable|case|catch|class|clone|const|continue|declare|default|do|echo|else|elseif|empty|enddeclare|endfor|endforeach|endif|endswitch|endwhile|enum|eval|exit|extends|final|finally|fn|for|foreach|function|global|goto|if|implements|include|include_once|instanceof|insteadof|interface|isset|list|match|namespace|new|or|print|private|protected|public|readonly|require|require_once|return|static|switch|throw|trait|try|unset|use|var|while|xor|yield)\b/i,
+			variable: /\$+(?:\w+|\{[^}]+\})/,
+		});
+	if (!Prism.languages.scss)
+		Prism.languages.scss = Prism.languages.extend('css', {
+			comment: /\/\*[\s\S]*?\*\/|\/\/.*$/m,
+			atrule: /@[\w-]+(?:[^;{]|\{(?:[^{}]|\{[^{}]*\})*\})*(?:;|(?=\s*\{))/,
+			variable: /\$[-\w]+|--[-\w]+/,
+		});
+	if (!Prism.languages.bash)
+		Prism.languages.bash = {
+			comment: { pattern: /(^|[^"'\\])#.*/, lookbehind: true },
+			string: [
+				{ pattern: /"(?:\\[\s\S]|[^"\\])*"/, greedy: true },
+				{ pattern: /'(?:[^']*)'/, greedy: true },
+			],
+			variable: /\$(?:[a-zA-Z_]\w*|\{[^}]+\}|[?#*@!$0-9_-])+/,
+			keyword: /\b(?:case|coproc|do|done|elif|else|esac|fi|for|function|if|in|select|then|time|until|while)\b/,
+			builtin:
+				/\b(?:alias|bg|bind|break|builtin|cd|command|declare|echo|enable|eval|exec|exit|export|fc|fg|getopts|hash|help|history|jobs|kill|let|local|logout|mapfile|printf|pwd|read|readonly|return|set|shift|shopt|source|test|times|trap|type|typeset|ulimit|umask|unalias|unset|wait)\b/,
+			function: /\b[a-zA-Z_]\w*(?=\s*\(\s*\))/,
+			operator: /&&?|\|\|?|;;|[<>]=?|[=!]=?/,
+			punctuation: /[{}[\]();]/,
+		};
 	Prism.languages.cs = Prism.languages.csharp;
 	Prism.languages.sh = Prism.languages.bash;
 	Prism.languages.shell = Prism.languages.bash;
@@ -86,10 +133,16 @@ function detectLanguage(code: string) {
 	const trimmed = code.trim();
 	if (/^<[!?/]?[a-z][\s\S]*>/i.test(trimmed)) return 'markup';
 	if ((trimmed.startsWith('{') && trimmed.endsWith('}')) || (trimmed.startsWith('[') && trimmed.endsWith(']'))) {
-		try { JSON.parse(trimmed); return 'json'; } catch { /* Continue with syntax heuristics. */ }
+		try {
+			JSON.parse(trimmed);
+			return 'json';
+		} catch {
+			/* Continue with syntax heuristics. */
+		}
 	}
 	if (/\$[\w-]+\s*:|&(?:[:.#]|\[)|@mixin|@include/.test(trimmed)) return 'scss';
-	if (/\b(interface|namespace|enum|implements|type)\b|:\s*(string|number|boolean|unknown|never)\b/.test(trimmed)) return 'typescript';
+	if (/\b(interface|namespace|enum|implements|type)\b|:\s*(string|number|boolean|unknown|never)\b/.test(trimmed))
+		return 'typescript';
 	if (/[.#]?[\w-]+(?:\s+[.#]?[\w-]+)*\s*\{[\s\S]*[\w-]+\s*:/.test(trimmed)) return 'css';
 	if (/\b(SELECT|INSERT|UPDATE|DELETE|CREATE TABLE|ALTER TABLE)\b/i.test(trimmed)) return 'sql';
 	if (/^(#!.*(?:sh|bash)|\s*(?:npm|pnpm|yarn|git|cd|mkdir)\s)/.test(trimmed)) return 'bash';
@@ -111,12 +164,16 @@ export function HighlightedCode({ code, language, className, ariaLabel }: Highli
 		<Highlight theme={forestNightTheme} code={code} language={Prism.languages[prismLanguage] ? prismLanguage : 'text'}>
 			{({ className: prismClassName, style, tokens, getLineProps, getTokenProps }) => (
 				<pre className={[prismClassName, className].filter(Boolean).join(' ')} style={style} aria-label={ariaLabel}>
-					<code>{tokens.map((line, lineIndex) => (
-						<span {...getLineProps({ line })} key={lineIndex}>
-							{line.map((token, tokenIndex) => <span {...getTokenProps({ token })} key={tokenIndex} />)}
-							{lineIndex < tokens.length - 1 ? '\n' : null}
-						</span>
-					))}</code>
+					<code>
+						{tokens.map((line, lineIndex) => (
+							<span {...getLineProps({ line })} key={lineIndex}>
+								{line.map((token, tokenIndex) => (
+									<span {...getTokenProps({ token })} key={tokenIndex} />
+								))}
+								{lineIndex < tokens.length - 1 ? '\n' : null}
+							</span>
+						))}
+					</code>
 				</pre>
 			)}
 		</Highlight>
@@ -124,7 +181,9 @@ export function HighlightedCode({ code, language, className, ariaLabel }: Highli
 }
 
 function getCodeBlockData(children: ReactNode) {
-	const codeElement = Children.toArray(children).find((child) => isValidElement<{ className?: string; children?: ReactNode }>(child));
+	const codeElement = Children.toArray(children).find((child) =>
+		isValidElement<{ className?: string; children?: ReactNode }>(child),
+	);
 	const code = nodeText(children).replace(/\n$/, '');
 	const declared = isValidElement<{ className?: string }>(codeElement)
 		? codeElement.props.className?.match(/(?:^|\s)language-([^\s]+)/)?.[1]?.toLowerCase()
@@ -144,7 +203,7 @@ function normalizeMarkdown(content: string) {
 
 function sanitizeHeading(value: string) {
 	return value
-		.replace(/([0-9])\uFE0F?\u20E3/g, '$1.')
+		.replace(/([0-9])\uFE0F?\u20E3/g, '$1')
 		.replace(/\p{Extended_Pictographic}/gu, '')
 		.replace(/[\u2600-\u27BF]/g, '')
 		.replace(/\uFE0F|\u20E3/g, '')
@@ -177,7 +236,12 @@ function MarkdownCopyButton({ label, getValue }: { label: string; getValue: () =
 	const copied = useStore(store, (state) => state.copied);
 	const setCopied = useStore(store, (state) => state.setCopied);
 	const timerRef = useRef<number | null>(null);
-	useEffect(() => () => { if (timerRef.current !== null) window.clearTimeout(timerRef.current); }, []);
+	useEffect(
+		() => () => {
+			if (timerRef.current !== null) window.clearTimeout(timerRef.current);
+		},
+		[],
+	);
 
 	async function handleCopy() {
 		try {
@@ -185,12 +249,19 @@ function MarkdownCopyButton({ label, getValue }: { label: string; getValue: () =
 			setCopied(true);
 			if (timerRef.current !== null) window.clearTimeout(timerRef.current);
 			timerRef.current = window.setTimeout(() => setCopied(false), 1800);
-		} catch { setCopied(false); }
+		} catch {
+			setCopied(false);
+		}
 	}
 
 	const accessibleLabel = copied ? 'Скопировано' : `Копировать ${label}`;
 	return (
-		<IconButton className="message__markdown-copy" onClick={() => void handleCopy()} aria-label={accessibleLabel} title={accessibleLabel}>
+		<IconButton
+			className="message__markdown-copy"
+			onClick={() => void handleCopy()}
+			aria-label={accessibleLabel}
+			title={accessibleLabel}
+		>
 			{copied ? <CheckIcon /> : <CopyIcon />}
 		</IconButton>
 	);
@@ -201,10 +272,21 @@ function MarkdownPre({ children }: { children?: ReactNode }) {
 	return <SourceCodeBlock code={code} language={language} label={label} />;
 }
 
-function SourceCodeBlock({ code, language, label = LANGUAGE_LABELS[language] || language.toUpperCase() }: { code: string; language: string; label?: string }) {
+function SourceCodeBlock({
+	code,
+	language,
+	label = LANGUAGE_LABELS[language] || language.toUpperCase(),
+}: {
+	code: string;
+	language: string;
+	label?: string;
+}) {
 	return (
 		<div className="message__markdown-block message__markdown-code-block">
-			<div className="message__markdown-toolbar"><span>{label}</span><MarkdownCopyButton label={label} getValue={() => code} /></div>
+			<div className="message__markdown-toolbar">
+				<span>{label}</span>
+				<MarkdownCopyButton label={label} getValue={() => code} />
+			</div>
 			<HighlightedCode code={code} language={language} ariaLabel={`Код ${label}`} />
 		</div>
 	);
@@ -215,13 +297,22 @@ function MarkdownTable({ children }: { children?: ReactNode }) {
 	function tableText() {
 		if (!tableRef.current) return '';
 		return Array.from(tableRef.current.rows)
-			.map((row) => Array.from(row.cells).map((cell) => (cell.innerText || cell.textContent || '').trim()).join('\t'))
+			.map((row) =>
+				Array.from(row.cells)
+					.map((cell) => (cell.innerText || cell.textContent || '').trim())
+					.join('\t'),
+			)
 			.join('\n');
 	}
 	return (
 		<div className="message__markdown-block message__markdown-table-block">
-			<div className="message__markdown-toolbar"><span>Таблица</span><MarkdownCopyButton label="таблицу" getValue={tableText} /></div>
-			<div className="message__markdown-table-scroll"><table ref={tableRef}>{children}</table></div>
+			<div className="message__markdown-toolbar">
+				<span>Таблица</span>
+				<MarkdownCopyButton label="таблицу" getValue={tableText} />
+			</div>
+			<div className="message__markdown-table-scroll">
+				<table ref={tableRef}>{children}</table>
+			</div>
 		</div>
 	);
 }
@@ -243,9 +334,19 @@ export function AssistantMessageContent({ content, isStreaming, sourceLanguage }
 					remarkPlugins={[remarkGfm]}
 					skipHtml
 					components={{
-						a: ({ children, ...props }) => <a {...props} target="_blank" rel="noreferrer">{children}</a>,
-						pre: MarkdownPre, table: MarkdownTable,
-						h1: heading(1), h2: heading(2), h3: heading(3), h4: heading(4), h5: heading(5), h6: heading(6),
+						a: ({ children, ...props }) => (
+							<a {...props} target="_blank" rel="noreferrer">
+								{children}
+							</a>
+						),
+						pre: MarkdownPre,
+						table: MarkdownTable,
+						h1: heading(1),
+						h2: heading(2),
+						h3: heading(3),
+						h4: heading(4),
+						h5: heading(5),
+						h6: heading(6),
 					}}
 				>
 					{normalizeMarkdown(content)}

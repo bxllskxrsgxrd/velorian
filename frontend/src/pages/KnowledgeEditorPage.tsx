@@ -63,7 +63,15 @@ export function KnowledgeEditorPage() {
 	const { showToast } = useToast();
 	const [baseline, setBaseline] = useState('');
 	const allowNavigationRef = useRef(false);
-	const currentFingerprint = fingerprint({ title, content, rating, isActive, approachId: selectedApproachId, filters: formFilters, file });
+	const currentFingerprint = fingerprint({
+		title,
+		content,
+		rating,
+		isActive,
+		approachId: selectedApproachId,
+		filters: formFilters,
+		file,
+	});
 	const isDirty = Boolean(baseline) && baseline !== currentFingerprint;
 	const blocker = useBlocker(() => isDirty && !saving && !allowNavigationRef.current);
 
@@ -88,8 +96,16 @@ export function KnowledgeEditorPage() {
 		let cancelled = false;
 		allowNavigationRef.current = false;
 		if (isCreate) {
-			const initial = { title: '', content: '', rating: null, isActive: true, approachId: '', filters: { ...EMPTY_KNOWLEDGE_FILTERS }, file: null };
-			// Route changes can reuse this component instance, so reset the comparison snapshot too.
+			const initial = {
+				title: '',
+				content: '',
+				rating: null,
+				isActive: true,
+				approachId: '',
+				filters: { ...EMPTY_KNOWLEDGE_FILTERS },
+				file: null,
+			};
+			// Route changes can reuse this component instance, so reset the comparison snapshot too
 			// eslint-disable-next-line react-hooks/set-state-in-effect
 			setBaseline(fingerprint(initial));
 			setTitle(initial.title);
@@ -128,8 +144,22 @@ export function KnowledgeEditorPage() {
 				reportError('KNOWLEDGE_LOAD_FAILED', error, { knowledgeId });
 				showToast(error instanceof Error ? error.message : 'Материал не найден', 'error');
 			});
-		return () => { cancelled = true; };
-	}, [isCreate, knowledgeId, setContent, setFile, setFormFilters, setIsActive, setRating, setSelectedApproachId, setTitle, showToast, upsertItem]);
+		return () => {
+			cancelled = true;
+		};
+	}, [
+		isCreate,
+		knowledgeId,
+		setContent,
+		setFile,
+		setFormFilters,
+		setIsActive,
+		setRating,
+		setSelectedApproachId,
+		setTitle,
+		showToast,
+		upsertItem,
+	]);
 
 	async function save() {
 		if (saving || !title.trim()) return;
@@ -137,14 +167,48 @@ export function KnowledgeEditorPage() {
 		try {
 			const saved = isCreate
 				? file
-					? await uploadKnowledgeFile(file, title.trim(), content, rating, isActive, selectedApproachId || null, formFilters)
+					? await uploadKnowledgeFile(
+							file,
+							title.trim(),
+							content,
+							rating,
+							isActive,
+							selectedApproachId || null,
+							formFilters,
+						)
 					: await createKnowledgeItem(title.trim(), content, rating, isActive, selectedApproachId || null, formFilters)
 				: file
-					? await updateKnowledgeFile(knowledgeId!, file, title.trim(), content, rating, isActive, selectedApproachId || null, formFilters)
-					: await updateKnowledgeItem(knowledgeId!, { title: title.trim(), content, rating, isActive, approachId: selectedApproachId || null, filters: formFilters });
+					? await updateKnowledgeFile(
+							knowledgeId!,
+							file,
+							title.trim(),
+							content,
+							rating,
+							isActive,
+							selectedApproachId || null,
+							formFilters,
+						)
+					: await updateKnowledgeItem(knowledgeId!, {
+							title: title.trim(),
+							content,
+							rating,
+							isActive,
+							approachId: selectedApproachId || null,
+							filters: formFilters,
+						});
 			upsertItem(saved);
 			setFile(null);
-			setBaseline(fingerprint({ title: saved.title, content: saved.content, rating: saved.rating, isActive: saved.isActive, approachId: saved.approach?.id ?? '', filters: itemFilters(saved), file: null }));
+			setBaseline(
+				fingerprint({
+					title: saved.title,
+					content: saved.content,
+					rating: saved.rating,
+					isActive: saved.isActive,
+					approachId: saved.approach?.id ?? '',
+					filters: itemFilters(saved),
+					file: null,
+				}),
+			);
 			showToast(isCreate ? 'Данные добавлены в базу знаний' : 'Изменения сохранены', 'success');
 			if (isCreate) {
 				allowNavigationRef.current = true;
@@ -158,7 +222,12 @@ export function KnowledgeEditorPage() {
 		}
 	}
 
-	if (!isCreate && !item) return <main className="knowledge-editor-page knowledge-page"><p>Загрузка материала…</p></main>;
+	if (!isCreate && !item)
+		return (
+			<main className="knowledge-editor-page knowledge-page">
+				<p>Загрузка материала…</p>
+			</main>
+		);
 
 	return (
 		<>
@@ -197,7 +266,7 @@ export function KnowledgeEditorPage() {
 						blocker.proceed();
 					}}
 				>
-					<p>Несохранённые изменения будут потеряны.</p>
+					<p>Несохранённые изменения будут потеряны</p>
 				</ModalDialog>
 			)}
 		</>

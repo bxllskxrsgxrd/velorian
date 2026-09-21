@@ -39,7 +39,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	await expect(page).toHaveURL(/\/knowledge\/new$/);
 	const editor = page.getByRole('region', { name: 'Добавить данные' });
 
-	// Страница добавления открывается на вкладке редактирования.
+	// Страница добавления открывается на вкладке редактирования
 	const editTab = editor.getByRole('tab', {
 		name: 'Редактирование',
 	});
@@ -51,28 +51,28 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	await expect(editTab).toHaveAttribute('aria-selected', 'true');
 	await expect(previewTab).toHaveAttribute('aria-selected', 'false');
 
-	// Рейтинг содержит пять интерактивных звёзд.
+	// Рейтинг содержит пять интерактивных звёзд
 	const ratingButtons = editor.locator('.rating__star');
 
 	await expect(ratingButtons).toHaveCount(5);
 
-	// Hover подсвечивает нужное количество звёзд.
+	// Hover подсвечивает нужное количество звёзд
 	await editor.getByRole('button', { name: 'Поставить рейтинг 3 из 5' }).hover();
 
 	await expect(editor.locator('.rating__star--active')).toHaveCount(3);
 	await expect(editor.locator('.rating__star--inactive')).toHaveCount(2);
 
-	// Заполняем основные данные.
+	// Заполняем основные данные
 	await editor.getByLabel('Название').fill('Проверенный оффер');
 
 	await editor.getByLabel('Содержимое').fill('Текст для внутренней базы знаний');
 
-	// Knowledge-форма только выбирает существующий глобальный подход.
+	// Knowledge-форма только выбирает существующий глобальный подход
 	const createApproachSelect = editor.getByLabel('Подход элемента');
 	await selectCustomOption(page, createApproachSelect, 'Интервью');
 	await expect(createApproachSelect).toContainText('Интервью');
 
-	// Выбираем рейтинг.
+	// Выбираем рейтинг
 	const ratingThree = editor.getByRole('button', {
 		name: 'Поставить рейтинг 3 из 5',
 	});
@@ -83,7 +83,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(editor.locator('.rating__star--active')).toHaveCount(3);
 
-	// Проверяем preview до сохранения.
+	// Проверяем preview до сохранения
 	await previewTab.click();
 
 	await expect(previewTab).toHaveAttribute('aria-selected', 'true');
@@ -101,13 +101,13 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(createPreview.getByText(/Добавлено вручную ·/)).toBeVisible();
 
-	// Незаполненные метаданные не появляются.
+	// Незаполненные метаданные не появляются
 	await expect(createPreview.getByText(/ГЕО ·/)).toHaveCount(0);
 	await expect(createPreview.getByText(/Селеба ·/)).toHaveCount(0);
 	await expect(createPreview.getByText(/Оффер ·/)).toHaveCount(0);
 	await expect(createPreview.getByText(/Новостник ·/)).toHaveCount(0);
 
-	// Возвращаемся и сохраняем.
+	// Возвращаемся и сохраняем
 	await editTab.click();
 
 	await expect(editTab).toHaveAttribute('aria-selected', 'true');
@@ -131,7 +131,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 		}),
 	).toBeVisible();
 
-	// Числовой рейтинг больше не выводится.
+	// Числовой рейтинг больше не выводится
 	await expect(
 		page.getByText('3/5', {
 			exact: true,
@@ -146,7 +146,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 		}),
 	).toBeChecked();
 
-	// Bulk selection.
+	// Bulk selection
 	const selectCheckbox = page.getByRole('checkbox', {
 		name: 'Выбрать Проверенный оффер',
 	});
@@ -184,7 +184,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	await expect(selectCheckbox).not.toBeChecked();
 	await expect(bulkBar).not.toBeVisible();
 
-	// Данные сохраняются после reload.
+	// Данные сохраняются после reload
 	await page.reload();
 
 	await expect(
@@ -195,7 +195,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(page.getByText('3/5', { exact: true })).toHaveCount(0);
 
-	// Редактирование через контекстное меню карточки.
+	// Редактирование через контекстное меню карточки
 	const knowledgeCard = page.locator('article.knowledge-card').filter({
 		hasText: 'Проверенный оффер',
 	});
@@ -250,7 +250,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(editPage.locator('.rating__star--active')).toHaveCount(5);
 
-	// Preview редактирования.
+	// Preview редактирования
 	await editPreviewTab.click();
 
 	await expect(editPreviewTab).toHaveAttribute('aria-selected', 'true');
@@ -291,7 +291,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(page.getByText('5/5', { exact: true })).toHaveCount(0);
 
-	// Рейтинг переживает reload.
+	// Рейтинг переживает reload
 	await page.reload();
 
 	await expect(
@@ -300,7 +300,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 		}),
 	).toBeVisible();
 
-	// Отключаем использование записи агентом.
+	// Отключаем использование записи агентом
 	await page
 		.locator('label.checkbox')
 		.filter({
@@ -326,7 +326,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 		name: 'Управление базой знаний',
 	});
 
-	// Фильтры.
+	// Фильтры
 	await controls
 		.getByRole('button', {
 			name: /^Фильтры/,
@@ -379,7 +379,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 			active: 'inactive',
 		});
 
-	// Сортировка.
+	// Сортировка
 	await controls
 		.getByRole('button', {
 			name: 'Сортировка',
@@ -397,7 +397,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(sortDropdown).not.toBeVisible();
 
-	// Поиск.
+	// Поиск
 	await page.getByLabel('Поиск по базе знаний').fill('оффер');
 
 	await expect
@@ -414,7 +414,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 			sort: 'rating_desc',
 		});
 
-	// Сбрасываем только фильтры.
+	// Сбрасываем только фильтры
 	await controls
 		.getByRole('button', {
 			name: /^Фильтры/,
@@ -508,7 +508,7 @@ test('agent can browse and search the current user knowledge through chat', asyn
 
 	await editor.getByLabel('Название').fill('Facebook Hooks');
 
-	await editor.getByLabel('Содержимое').fill('Для health-офферов используем curiosity angle.');
+	await editor.getByLabel('Содержимое').fill('Для health-офферов используем curiosity angle');
 
 	await editor.getByRole('button', { name: 'Добавить данные' }).click();
 	await expect(page).toHaveURL(/\/knowledge\/k1$/);

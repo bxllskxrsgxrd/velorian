@@ -215,40 +215,88 @@ export function SettingsPanel({ user, accentTheme, onAccentChange }: SettingsPan
 							<div className="chat-sidebar__settings-sections">
 								<section className="chat-sidebar__settings-group">
 									<h3>Язык и регион</h3>
-									<SettingRow title="Язык интерфейса" description="Выберите язык, на котором будет работать приложение.">
-										<CustomSelect value={language} options={LANGUAGE_OPTIONS} onChange={setLanguage} ariaLabel="Язык интерфейса" />
+									<SettingRow title="Язык интерфейса" description="Выберите язык, на котором будет работать приложение">
+										<CustomSelect
+											value={language}
+											options={LANGUAGE_OPTIONS}
+											onChange={setLanguage}
+											ariaLabel="Язык интерфейса"
+										/>
 									</SettingRow>
-									<SettingRow title="Формат даты" description="Используется для отображения дат в чатах, истории и файлах.">
-										<CustomSelect value={dateFormat} options={DATE_OPTIONS} onChange={setDateFormat} ariaLabel="Формат даты" />
+									<SettingRow
+										title="Формат даты"
+										description="Используется для отображения дат в чатах, истории и файлах"
+									>
+										<CustomSelect
+											value={dateFormat}
+											options={DATE_OPTIONS}
+											onChange={setDateFormat}
+											ariaLabel="Формат даты"
+										/>
 									</SettingRow>
-									<SettingRow title="Часовой пояс" description="Используется для корректного отображения времени в чате и уведомлениях.">
-										<CustomSelect value={timezone} options={TIMEZONE_OPTIONS} onChange={setTimezone} ariaLabel="Часовой пояс" />
+									<SettingRow
+										title="Часовой пояс"
+										description="Используется для корректного отображения времени в чате и уведомлениях"
+									>
+										<CustomSelect
+											value={timezone}
+											options={TIMEZONE_OPTIONS}
+											onChange={setTimezone}
+											ariaLabel="Часовой пояс"
+										/>
 									</SettingRow>
 								</section>
 
 								<section className="chat-sidebar__settings-group">
 									<h3>Поведение приложения</h3>
-									<SettingRow title="Открывать новый чат при запуске" description="Автоматически создавать новый чат при открытии Velorian.">
+									<SettingRow
+										title="Открывать новый чат при запуске"
+										description="Автоматически создавать новый чат при открытии Velorian"
+									>
 										<Toggle checked={openNewChat} onChange={setOpenNewChat} label="Открывать новый чат при запуске" />
 									</SettingRow>
-									<SettingRow title="Отправка сообщения по Enter" description="Отправлять сообщение в чате при нажатии клавиши Enter (вместо переноса строки).">
+									<SettingRow
+										title="Отправка сообщения по Enter"
+										description="Отправлять сообщение в чате при нажатии клавиши Enter (вместо переноса строки)"
+									>
 										<Toggle checked={sendOnEnter} onChange={setSendOnEnter} label="Отправка сообщения по Enter" />
 									</SettingRow>
-									<SettingRow title="Показывать подсказки интерфейса" description="Отображать полезные подсказки и советы при использовании приложения.">
+									<SettingRow
+										title="Показывать подсказки интерфейса"
+										description="Отображать полезные подсказки и советы при использовании приложения"
+									>
 										<Toggle checked={showHints} onChange={setShowHints} label="Показывать подсказки интерфейса" />
 									</SettingRow>
 								</section>
 
 								<section className="chat-sidebar__settings-group">
 									<h3>Данные и хранилище</h3>
-									<SettingRow title="Локальное хранилище" description="Управление данными, которые сохраняются на этом устройстве.">
-										<button className="chat-sidebar__settings-button" type="button" disabled>Управление</button>
+									<SettingRow
+										title="Локальное хранилище"
+										description="Управление данными, которые сохраняются на этом устройстве"
+									>
+										<button className="chat-sidebar__settings-button" type="button" disabled>
+											Управление
+										</button>
 									</SettingRow>
-									<SettingRow title="Экспорт данных" description="Скачать историю чатов, настройки и другие данные.">
-										<button className="chat-sidebar__settings-button" type="button" disabled><DownloadIcon aria-hidden="true" />Экспортировать</button>
+									<SettingRow title="Экспорт данных" description="Скачать историю чатов, настройки и другие данные">
+										<button className="chat-sidebar__settings-button" type="button" disabled>
+											<DownloadIcon aria-hidden="true" />
+											Экспортировать
+										</button>
 									</SettingRow>
-									<SettingRow title="Очистить локальные данные" description="Удалить все сохранённые на этом устройстве данные (кроме учетной записи).">
-										<button className="chat-sidebar__settings-button chat-sidebar__settings-button--danger" type="button" disabled><TrashIcon aria-hidden="true" />Очистить</button>
+									<SettingRow
+										title="Очистить локальные данные"
+										description="Удалить все сохранённые на этом устройстве данные (кроме учетной записи)"
+									>
+										<button
+											className="chat-sidebar__settings-button chat-sidebar__settings-button--danger"
+											type="button"
+											disabled
+										>
+											<TrashIcon aria-hidden="true" />
+											Очистить
+										</button>
 									</SettingRow>
 								</section>
 							</div>
@@ -256,19 +304,38 @@ export function SettingsPanel({ user, accentTheme, onAccentChange }: SettingsPan
 
 						{section === 'appearance' && (
 							<div className="chat-sidebar__settings-appearance">
-								<SettingRow title="Тема" description="Выберите режим отображения интерфейса.">
+								<SettingRow title="Тема" description="Выберите режим отображения интерфейса">
 									<CustomSelect value={theme} options={THEME_OPTIONS} onChange={setTheme} ariaLabel="Тема" />
 								</SettingRow>
-								<SettingRow title="Акцентный цвет" description="Цвет активных элементов интерфейса, кнопок и переключателей.">
-									<CustomSelect value={accentTheme} options={ACCENT_OPTIONS} onChange={(value) => onAccentChange(value as AccentTheme)} ariaLabel="Акцентный цвет" />
+								<SettingRow
+									title="Акцентный цвет"
+									description="Цвет активных элементов интерфейса, кнопок и переключателей"
+								>
+									<CustomSelect
+										value={accentTheme}
+										options={ACCENT_OPTIONS}
+										onChange={(value) => onAccentChange(value as AccentTheme)}
+										ariaLabel="Акцентный цвет"
+									/>
 								</SettingRow>
-								<SettingRow title="Контраст" description="Настройка контрастности элементов интерфейса.">
-									<CustomSelect value={contrast} options={CONTRAST_OPTIONS} onChange={setContrast} ariaLabel="Контраст" />
+								<SettingRow title="Контраст" description="Настройка контрастности элементов интерфейса">
+									<CustomSelect
+										value={contrast}
+										options={CONTRAST_OPTIONS}
+										onChange={setContrast}
+										ariaLabel="Контраст"
+									/>
 								</SettingRow>
-								<SettingRow title="Компактный режим интерфейса" description="Уменьшает вертикальные отступы и делает интерфейс более плотным.">
+								<SettingRow
+									title="Компактный режим интерфейса"
+									description="Уменьшает вертикальные отступы и делает интерфейс более плотным"
+								>
 									<Toggle checked={compactMode} onChange={setCompactMode} label="Компактный режим интерфейса" />
 								</SettingRow>
-								<SettingRow title="Анимации интерфейса" description="Показывать плавные переходы и анимации в интерфейсе.">
+								<SettingRow
+									title="Анимации интерфейса"
+									description="Показывать плавные переходы и анимации в интерфейсе"
+								>
 									<Toggle checked={animations} onChange={setAnimations} label="Анимации интерфейса" />
 								</SettingRow>
 							</div>
@@ -281,46 +348,93 @@ export function SettingsPanel({ user, accentTheme, onAccentChange }: SettingsPan
 									<div className="chat-sidebar__settings-photo">
 										<div className="chat-sidebar__settings-photo-avatar">
 											<UserIcon aria-hidden="true" />
-											<button type="button" disabled aria-label="Изменить фото профиля"><CameraIcon aria-hidden="true" /></button>
+											<button type="button" disabled aria-label="Изменить фото профиля">
+												<CameraIcon aria-hidden="true" />
+											</button>
 										</div>
 										<div>
 											<strong>Фото профиля</strong>
-											<p>JPG, PNG или WEBP. Максимальный размер 5 МБ.</p>
+											<p>JPG, PNG или WEBP. Максимальный размер 5 МБ</p>
 											<div className="chat-sidebar__settings-photo-actions">
-												<button className="chat-sidebar__settings-button" type="button" disabled><DownloadIcon aria-hidden="true" />Загрузить фото</button>
-												<button className="chat-sidebar__settings-button chat-sidebar__settings-button--danger" type="button" disabled><TrashIcon aria-hidden="true" />Удалить</button>
+												<button className="chat-sidebar__settings-button" type="button" disabled>
+													<DownloadIcon aria-hidden="true" />
+													Загрузить фото
+												</button>
+												<button
+													className="chat-sidebar__settings-button chat-sidebar__settings-button--danger"
+													type="button"
+													disabled
+												>
+													<TrashIcon aria-hidden="true" />
+													Удалить
+												</button>
 											</div>
 										</div>
 									</div>
 
 									<label className="chat-sidebar__settings-input-row">
 										<span>Логин</span>
-										<div><input value={login} onChange={(event) => setLogin(event.target.value)} autoComplete="username" /><small>Используется для отображения в интерфейсе.</small></div>
+										<div>
+											<input value={login} onChange={(event) => setLogin(event.target.value)} autoComplete="username" />
+											<small>Используется для отображения в интерфейсе</small>
+										</div>
 									</label>
 									<label className="chat-sidebar__settings-input-row">
 										<span>Email (основной)</span>
-										<div><span className="chat-sidebar__settings-locked-input"><input value={user.email} disabled /><LockIcon aria-hidden="true" /></span><small>Этот email используется для входа в аккаунт и не может быть изменён.</small></div>
+										<div>
+											<span className="chat-sidebar__settings-locked-input">
+												<input value={user.email} disabled />
+												<LockIcon aria-hidden="true" />
+											</span>
+											<small>Этот email используется для входа в аккаунт и не может быть изменён</small>
+										</div>
 									</label>
 									<label className="chat-sidebar__settings-input-row">
 										<span>Резервная почта</span>
-										<div><input type="email" value={backupEmail} placeholder="example@mail.com" onChange={(event) => setBackupEmail(event.target.value)} autoComplete="email" /><small>Используется для восстановления доступа к аккаунту.</small></div>
+										<div>
+											<input
+												type="email"
+												value={backupEmail}
+												placeholder="example@mail.com"
+												onChange={(event) => setBackupEmail(event.target.value)}
+												autoComplete="email"
+											/>
+											<small>Используется для восстановления доступа к аккаунту</small>
+										</div>
 									</label>
 									<div className="chat-sidebar__settings-save">
-										<button className="chat-sidebar__settings-button chat-sidebar__settings-button--primary" type="button" disabled>Сохранить изменения</button>
+										<button
+											className="chat-sidebar__settings-button chat-sidebar__settings-button--primary"
+											type="button"
+											disabled
+										>
+											Сохранить изменения
+										</button>
 									</div>
 								</section>
 
 								<section className="chat-sidebar__settings-group chat-sidebar__settings-security">
 									<h3>Безопасность</h3>
-									<p className="chat-sidebar__settings-group-description">Управляйте паролем и активными сеансами.</p>
+									<p className="chat-sidebar__settings-group-description">Управляйте паролем и активными сеансами</p>
 									<SettingRow title="Пароль" description="Последнее изменение: данные недоступны">
-										<button className="chat-sidebar__settings-button" type="button" disabled>Изменить</button>
+										<button className="chat-sidebar__settings-button" type="button" disabled>
+											Изменить
+										</button>
 									</SettingRow>
 									<SettingRow title="Активные сеансы" description="Количество устройств недоступно">
-										<button className="chat-sidebar__settings-button" type="button" disabled>Управление</button>
+										<button className="chat-sidebar__settings-button" type="button" disabled>
+											Управление
+										</button>
 									</SettingRow>
-									<button className="chat-sidebar__settings-button chat-sidebar__settings-button--danger chat-sidebar__settings-logout-all" type="button" disabled><LogoutIcon aria-hidden="true" />Выйти на всех устройствах</button>
-									<p className="chat-sidebar__settings-session-note">Текущий сеанс останется активным.</p>
+									<button
+										className="chat-sidebar__settings-button chat-sidebar__settings-button--danger chat-sidebar__settings-logout-all"
+										type="button"
+										disabled
+									>
+										<LogoutIcon aria-hidden="true" />
+										Выйти на всех устройствах
+									</button>
+									<p className="chat-sidebar__settings-session-note">Текущий сеанс останется активным</p>
 								</section>
 							</div>
 						)}
@@ -336,7 +450,7 @@ export function SettingsPanel({ user, accentTheme, onAccentChange }: SettingsPan
 					onClose={() => blocker.reset()}
 					onConfirm={() => blocker.proceed()}
 				>
-					<p>Несохранённые изменения будут потеряны.</p>
+					<p>Несохранённые изменения будут потеряны</p>
 				</ModalDialog>
 			)}
 		</>

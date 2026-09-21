@@ -73,8 +73,7 @@ export function ApproachesPage() {
 
 	function updateCardCursorIndicator(target: EventTarget | null, clientX: number, clientY: number) {
 		const indicator = cardCursorIndicatorRef.current;
-		const interactiveTarget =
-			target instanceof Element && target.closest('button, a, input, label');
+		const interactiveTarget = target instanceof Element && target.closest('button, a, input, label');
 		hideCardCursorIndicator();
 		if (!indicator || interactiveTarget || !window.matchMedia('(hover: hover) and (pointer: fine)').matches) return;
 
@@ -85,8 +84,14 @@ export function ApproachesPage() {
 			if (!position || !cardCursorIndicatorRef.current) return;
 			const indicatorSize = 16;
 			const viewportInset = 6;
-			const x = Math.max(viewportInset, Math.min(position.clientX + 10, window.innerWidth - indicatorSize - viewportInset));
-			const y = Math.max(viewportInset, Math.min(position.clientY + 10, window.innerHeight - indicatorSize - viewportInset));
+			const x = Math.max(
+				viewportInset,
+				Math.min(position.clientX + 10, window.innerWidth - indicatorSize - viewportInset),
+			);
+			const y = Math.max(
+				viewportInset,
+				Math.min(position.clientY + 10, window.innerHeight - indicatorSize - viewportInset),
+			);
 			cardCursorIndicatorRef.current.style.transform = `translate3d(${x}px, ${y}px, 0)`;
 		}, 400);
 	}
@@ -128,12 +133,18 @@ export function ApproachesPage() {
 		<main className="approaches-page knowledge-page">
 			<header>
 				<div>
-					<button className="knowledge-page__mobile-menu" type="button" onClick={() => setSidebarOpen(true)}>☰</button>
-					<button className="approaches-page__back" type="button" onClick={() => navigate('/knowledge')}>← База знаний</button>
+					<button className="knowledge-page__mobile-menu" type="button" onClick={() => setSidebarOpen(true)}>
+						☰
+					</button>
+					<button className="approaches-page__back" type="button" onClick={() => navigate('/knowledge')}>
+						← База знаний
+					</button>
 					<h1>Подходы</h1>
 					<p>Глобальные профили, которыми руководствуется агент</p>
 				</div>
-				<button className="knowledge-page__add" type="button" onClick={() => navigate('/knowledge/approaches/new')}>Создать подход</button>
+				<button className="knowledge-page__add" type="button" onClick={() => navigate('/knowledge/approaches/new')}>
+					Создать подход
+				</button>
 			</header>
 			<section className="approaches-page__list">
 				{loading && <p>Загрузка…</p>}
@@ -181,7 +192,11 @@ export function ApproachesPage() {
 					aria-label={`Действия с подходом «${cardMenuItem.name}»`}
 					style={{ top: cardMenu.top, left: cardMenu.left }}
 				>
-					<button type="button" role="menuitem" onClick={() => runCardMenuAction(() => navigate(`/knowledge/approaches/${cardMenuItem.id}`))}>
+					<button
+						type="button"
+						role="menuitem"
+						onClick={() => runCardMenuAction(() => navigate(`/knowledge/approaches/${cardMenuItem.id}`))}
+					>
 						Редактировать
 					</button>
 					<div className="knowledge-card__menu-separator" role="separator" />
@@ -203,7 +218,7 @@ export function ApproachesPage() {
 					onClose={() => setDeleteItemId(null)}
 					onConfirm={() => void deleteApproach()}
 				>
-					<p>Если подход используется, он будет деактивирован и связи материалов сохранятся.</p>
+					<p>Если подход используется, он будет деактивирован и связи материалов сохранятся</p>
 				</ModalDialog>
 			)}
 		</main>
