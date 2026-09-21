@@ -1,9 +1,10 @@
 import { useEffect, useState, type ReactNode } from 'react';
+import { useBlocker, useLocation, useNavigate } from 'react-router-dom';
 import { ACCENT_THEMES, ACCENT_THEME_LABELS, type AccentTheme } from '../../theme/accentTheme';
 import type { AuthUser } from '../../types/chat';
 import {
 	CameraIcon,
-	CrossIcon,
+	ChevronIcon,
 	DownloadIcon,
 	LockIcon,
 	LogoutIcon,
@@ -13,6 +14,8 @@ import {
 	UserIcon,
 } from '../icons/AppIcons';
 import { CustomSelect, type CustomSelectOption } from '../ui/CustomSelect/CustomSelect';
+import { ModalDialog } from '../ui/ModalDialog/ModalDialog';
+import './_chatSidebar.scss';
 
 type SettingsSection = 'general' | 'appearance' | 'account';
 
@@ -20,7 +23,6 @@ type SettingsPanelProps = {
 	user: AuthUser;
 	accentTheme: AccentTheme;
 	onAccentChange: (accent: AccentTheme) => void;
-	onClose: () => void;
 };
 
 type SettingRowProps = {
@@ -111,7 +113,9 @@ function SettingRow({ title, description, children }: SettingRowProps) {
 	);
 }
 
-export function SettingsPanel({ user, accentTheme, onAccentChange, onClose }: SettingsPanelProps) {
+export function SettingsPanel({ user, accentTheme, onAccentChange }: SettingsPanelProps) {
+	const navigate = useNavigate();
+	const location = useLocation();
 	const [section, setSection] = useState<SettingsSection>('general');
 	const [language, setLanguage] = useState('auto');
 	const [dateFormat, setDateFormat] = useState('dmy');
@@ -126,25 +130,46 @@ export function SettingsPanel({ user, accentTheme, onAccentChange, onClose }: Se
 	const [login, setLogin] = useState(user.email.split('@')[0]);
 	const [backupEmail, setBackupEmail] = useState('');
 	const copy = SECTION_COPY[section];
+	const returnPath = typeof location.state?.from === 'string' ? location.state.from : null;
+	const isDirty =
+		language !== 'auto' ||
+		dateFormat !== 'dmy' ||
+		timezone !== 'auto' ||
+		!openNewChat ||
+		!sendOnEnter ||
+		showHints ||
+		theme !== 'system' ||
+		contrast !== 'system' ||
+		compactMode ||
+		!animations ||
+		login !== user.email.split('@')[0] ||
+		backupEmail !== '';
+	const blocker = useBlocker(() => isDirty);
 
 	useEffect(() => {
-		function handleEscape(event: KeyboardEvent) {
-			if (event.key === 'Escape') onClose();
+		function handleBeforeUnload(event: BeforeUnloadEvent) {
+			if (!isDirty) return;
+			event.preventDefault();
+			event.returnValue = '';
 		}
 
-		document.addEventListener('keydown', handleEscape);
-		return () => document.removeEventListener('keydown', handleEscape);
-	}, [onClose]);
+		window.addEventListener('beforeunload', handleBeforeUnload);
+		return () => window.removeEventListener('beforeunload', handleBeforeUnload);
+	}, [isDirty]);
+
+	function handleBack() {
+		if (returnPath) navigate(returnPath, { replace: true });
+		else navigate('/chat/new', { replace: true });
+	}
 
 	return (
-		<div className="chat-sidebar__settings-overlay" role="presentation">
-			<div
-				className="chat-sidebar__settings-panel"
-				role="dialog"
-				aria-modal="true"
-				aria-labelledby="chat-sidebar-settings-title"
-			>
+		<>
+			<main className="chat-sidebar__settings-panel" aria-labelledby="chat-sidebar-settings-title">
 				<aside className="chat-sidebar__settings-sidebar">
+					<button className="chat-sidebar__settings-back" type="button" onClick={handleBack}>
+						<ChevronIcon aria-hidden="true" />
+						<span>Вернуться в приложение</span>
+					</button>
 					<h2>Настройки</h2>
 					<nav aria-label="Разделы настроек">
 						<button
@@ -183,15 +208,6 @@ export function SettingsPanel({ user, accentTheme, onAccentChange, onClose }: Se
 							<h2 id="chat-sidebar-settings-title">{copy.title}</h2>
 							<p>{copy.description}</p>
 						</div>
-						<button
-							className="chat-sidebar__settings-close"
-							type="button"
-							autoFocus
-							aria-label="Закрыть настройки"
-							onClick={onClose}
-						>
-							<CrossIcon aria-hidden="true" />
-						</button>
 					</header>
 
 					<div className="chat-sidebar__settings-content">
@@ -310,7 +326,19 @@ export function SettingsPanel({ user, accentTheme, onAccentChange, onClose }: Se
 						)}
 					</div>
 				</section>
-			</div>
-		</div>
+			</main>
+			{blocker.state === 'blocked' && (
+				<ModalDialog
+					title="Есть несохранённые изменения"
+					confirmLabel="Выйти"
+					closeLabel="Остаться"
+					danger
+					onClose={() => blocker.reset()}
+					onConfirm={() => blocker.proceed()}
+				>
+					<p>Несохранённые изменения будут потеряны.</p>
+				</ModalDialog>
+			)}
+		</>
 	);
 }

@@ -31,6 +31,7 @@ const conversation = {
 function renderSidebar(isCollapsed = false) {
 	const onRename = vi.fn();
 	const onDelete = vi.fn();
+	const onOpenSettings = vi.fn();
 
 	if (useUiStore.getState().isSidebarCollapsed !== isCollapsed) {
 		useUiStore.getState().toggleSidebarCollapsed();
@@ -46,10 +47,11 @@ function renderSidebar(isCollapsed = false) {
 			onRename={onRename}
 			onLogout={vi.fn()}
 			onOpenKnowledge={vi.fn()}
+			onOpenSettings={onOpenSettings}
 		/>,
 	);
 
-	return { onRename, onDelete };
+	return { onRename, onDelete, onOpenSettings };
 }
 
 describe('ChatSidebar menus', () => {
@@ -67,7 +69,6 @@ describe('ChatSidebar menus', () => {
 
 		useSidebarStore.getState().setConversationMenuId(null);
 		useSidebarStore.getState().setAccountOpen(false);
-		useSidebarStore.getState().setSettingsOpen(false);
 		useSidebarStore.getState().setDialog(null);
 	});
 
@@ -101,12 +102,12 @@ describe('ChatSidebar menus', () => {
 		expect(onRename).toHaveBeenCalledWith(conversation, 'Новое название');
 	});
 
-	it('opens the settings dialog and switches between its sections', () => {
-		renderSidebar();
+	it('opens the settings route from the account menu', () => {
+		const { onOpenSettings } = renderSidebar();
 
 		fireEvent.click(
 			screen.getByRole('button', {
-				name: /user@example\.com/i,
+				name: 'user',
 			}),
 		);
 
@@ -122,13 +123,8 @@ describe('ChatSidebar menus', () => {
 			}),
 		);
 
-		expect(screen.getByRole('dialog', { name: 'Общие' })).toBeInTheDocument();
-		expect(screen.getByRole('button', { name: 'Язык интерфейса' })).toHaveTextContent('Автоматически определять');
-
-		fireEvent.click(screen.getByRole('button', { name: 'Внешний вид' }));
-
-		expect(screen.getByRole('dialog', { name: 'Внешний вид' })).toBeInTheDocument();
-		expect(screen.getByRole('button', { name: 'Акцентный цвет' })).toHaveTextContent('Сосна');
+		expect(onOpenSettings).toHaveBeenCalledOnce();
+		expect(screen.queryByRole('dialog', { name: 'Общие' })).not.toBeInTheDocument();
 	});
 
 	it('opens unified trash with chats and knowledge tabs', async () => {
@@ -173,7 +169,7 @@ describe('ChatSidebar menus', () => {
 
 		fireEvent.click(
 			screen.getByRole('button', {
-				name: /user@example\.com/i,
+				name: 'user',
 			}),
 		);
 

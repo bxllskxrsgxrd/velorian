@@ -7,6 +7,7 @@ import { AppLayout } from './components/AppLayout/AppLayout';
 import { reportError } from './utils/reportError';
 import { configureAttachmentLimits } from './constants/attachmentLimits';
 import { useAuthStore } from './stores/authStore';
+import { SettingsPage } from './pages/SettingsPage';
 
 const KnowledgePage = lazy(() => import('./pages/KnowledgePage'));
 const KnowledgeEditorPage = lazy(() => import('./pages/KnowledgeEditorPage').then((module) => ({ default: module.KnowledgeEditorPage })));
@@ -58,6 +59,7 @@ function App() {
 			<Route path="/knowledge/approaches/:approachId" element={<ApproachEditorPage />} />
 			<Route path="/knowledge/:knowledgeId" element={<KnowledgeEditorPage />} />
 		</Route>
+		<Route path="/settings" element={<SettingsPage user={user} />} />
 		<Route path="*" element={<Navigate to="/chat/new" replace />} />
 	</Routes></Suspense>;
 }

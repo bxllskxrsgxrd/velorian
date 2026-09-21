@@ -109,6 +109,9 @@ export function AppLayout({ user, onLogout }: { user: AuthUser; onLogout: () => 
 				})}
 				onLogout={() => void onLogout()}
 				onOpenKnowledge={() => { navigate('/knowledge'); setSidebarOpen(false); }}
+				onOpenSettings={() => navigate('/settings', {
+					state: { from: `${location.pathname}${location.search}${location.hash}` },
+				})}
 			/>
 			<Outlet context={{ onExport: handleExport }} />
 			{sidebarOpen && (

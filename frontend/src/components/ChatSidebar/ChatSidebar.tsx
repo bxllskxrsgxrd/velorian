@@ -34,7 +34,6 @@ import { useDebounce } from '../../hooks/useDebounce';
 import { useKnowledgeStore } from '../../stores/knowledgeStore';
 import { reportError } from '../../utils/reportError';
 import { useToast } from '../../hooks/useToast';
-import { SettingsPanel } from './SettingsPanel';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -93,6 +92,7 @@ type ChatSidebarProps = {
 	onRename: (conversation: ConversationSummary, title: string) => void;
 	onLogout: () => void;
 	onOpenKnowledge: () => void;
+	onOpenSettings: () => void;
 	activeSection?: 'chat' | 'knowledge';
 };
 
@@ -109,8 +109,6 @@ export function ChatSidebar(props: ChatSidebarProps) {
 	const removeDeletedKnowledgeItem = useKnowledgeStore((state) => state.removeDeletedItem);
 	const search = useConversationsStore((state) => state.search);
 	const setSearch = useConversationsStore((state) => state.setSearch);
-	const accentTheme = useUiStore((state) => state.accent);
-	const setAccent = useUiStore((state) => state.setAccent);
 	const isOpen = useUiStore((state) => state.isSidebarOpen);
 	const setSidebarOpen = useUiStore((state) => state.setSidebarOpen);
 	const isCollapsed = useUiStore((state) => state.isSidebarCollapsed);
@@ -119,8 +117,6 @@ export function ChatSidebar(props: ChatSidebarProps) {
 	const setConversationMenuId = useSidebarStore((state) => state.setConversationMenuId);
 	const accountOpen = useSidebarStore((state) => state.isAccountOpen);
 	const setAccountOpen = useSidebarStore((state) => state.setAccountOpen);
-	const settingsOpen = useSidebarStore((state) => state.isSettingsOpen);
-	const setSettingsOpen = useSidebarStore((state) => state.setSettingsOpen);
 	const dialog = useSidebarStore((state) => state.dialog);
 	const setDialog = useSidebarStore((state) => state.setDialog);
 	const draftTitle = useSidebarStore((state) => state.draftTitle);
@@ -189,7 +185,6 @@ export function ChatSidebar(props: ChatSidebarProps) {
 
 	async function openTrash() {
 		setAccountOpen(false);
-		setSettingsOpen(false);
 		setTrashOpen(true);
 		setTrashLoading(true);
 		setTrashError(null);
@@ -445,8 +440,8 @@ export function ChatSidebar(props: ChatSidebarProps) {
 								className="chat-sidebar__settings-toggle"
 								type="button"
 								onClick={() => {
-									setSettingsOpen(true);
 									setAccountOpen(false);
+									props.onOpenSettings();
 								}}
 							>
 								<SettingsIcon />
@@ -478,15 +473,6 @@ export function ChatSidebar(props: ChatSidebarProps) {
 					</button>
 				</div>
 			</aside>
-
-			{settingsOpen && (
-				<SettingsPanel
-					user={props.user}
-					accentTheme={accentTheme}
-					onAccentChange={setAccent}
-					onClose={() => setSettingsOpen(false)}
-				/>
-			)}
 
 			{dialog?.type === 'rename' && (
 				<ModalDialog
