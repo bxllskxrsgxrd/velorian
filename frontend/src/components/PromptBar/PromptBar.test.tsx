@@ -13,6 +13,7 @@ function renderPromptBar(onSendMessage = vi.fn().mockResolvedValue(undefined)) {
 	render(
 		<PromptBar
 			onSendMessage={onSendMessage}
+			onExport={vi.fn()}
 			onStop={vi.fn()}
 			onOpenFile={vi.fn()}
 		/>,

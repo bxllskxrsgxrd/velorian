@@ -33,6 +33,7 @@ type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
 type PromptBarProps = {
 	onSendMessage: (prompt: string, files: File[], searchMode: SearchMode) => Promise<void>;
+	onExport: (format: 'markdown' | 'json') => void;
 	onStop: () => void;
 	onOpenFile: (file: File) => void;
 	isGenerating?: boolean;
@@ -41,6 +42,7 @@ type PromptBarProps = {
 
 export function PromptBar({
 	onSendMessage,
+	onExport,
 	onStop,
 	onOpenFile,
 	isGenerating = false,
@@ -193,6 +195,7 @@ export function PromptBar({
 				<div className="prompt-bar__actions">
 					<PromptActionsMenu
 						onFilesSelect={onFilesSelect}
+						onExport={onExport}
 						searchMode={searchMode}
 						onSearchModeChange={handleSearchModeChange}
 					/>

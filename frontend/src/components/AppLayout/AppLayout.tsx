@@ -107,11 +107,10 @@ export function AppLayout({ user, onLogout }: { user: AuthUser; onLogout: () => 
 					reportError('Не удалось переименовать диалог', error, { conversationId: conversation.id });
 					showToast(error instanceof Error ? error.message : 'Не удалось переименовать диалог', 'error');
 				})}
-				onExport={handleExport}
 				onLogout={() => void onLogout()}
 				onOpenKnowledge={() => { navigate('/knowledge'); setSidebarOpen(false); }}
 			/>
-			<Outlet />
+			<Outlet context={{ onExport: handleExport }} />
 			{sidebarOpen && (
 				<button className="chat-shell__backdrop" type="button" onClick={() => setSidebarOpen(false)} aria-label="Закрыть меню" />
 			)}

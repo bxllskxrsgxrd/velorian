@@ -44,7 +44,6 @@ function renderSidebar(isCollapsed = false) {
 			onNew={vi.fn()}
 			onDelete={onDelete}
 			onRename={onRename}
-			onExport={vi.fn()}
 			onLogout={vi.fn()}
 			onOpenKnowledge={vi.fn()}
 		/>,

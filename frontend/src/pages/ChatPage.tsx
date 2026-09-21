@@ -1,5 +1,5 @@
 import { useEffect, useRef } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
+import { useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import {
 	activateMessageBranch,
 	createMessageMarkdownFile,
@@ -45,6 +45,7 @@ const EMPTY_MESSAGES: ChatMessage[] = [];
 export function ChatPage() {
 	const { showToast } = useToast();
 	const navigate = useNavigate();
+	const { onExport } = useOutletContext<{ onExport: (format: 'markdown' | 'json') => void }>();
 	const { chatId: routeConversationId } = useParams<{ chatId: string }>();
 	const isNewConversationRoute = routeConversationId === 'new';
 	const conversations = useConversationsStore((state) => state.conversations);
@@ -644,6 +645,7 @@ export function ChatPage() {
 						)}
 						<PromptBar
 							onSendMessage={handleSendMessage}
+							onExport={onExport}
 							onStop={() => {
 								if (activeConversationId) requestControllersRef.current.get(activeConversationId)?.abort();
 							}}

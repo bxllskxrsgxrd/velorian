@@ -11,6 +11,7 @@ import type { SearchMode } from '../../types/chat';
 
 type PromptActionsMenuProps = {
 	onFilesSelect: (files: File[]) => void;
+	onExport: (format: 'markdown' | 'json') => void;
 	searchMode: SearchMode;
 	onSearchModeChange: (mode: SearchMode) => void;
 };
@@ -22,7 +23,7 @@ function createPromptActionsUiStore() {
 	}));
 }
 
-export function PromptActionsMenu({ onFilesSelect, searchMode, onSearchModeChange }: PromptActionsMenuProps) {
+export function PromptActionsMenu({ onFilesSelect, onExport, searchMode, onSearchModeChange }: PromptActionsMenuProps) {
 	const store = useMemo(() => createPromptActionsUiStore(), []);
 	const open = useStore(store, (state) => state.open);
 	const setOpen = useStore(store, (state) => state.setOpen);
@@ -41,6 +42,11 @@ export function PromptActionsMenu({ onFilesSelect, searchMode, onSearchModeChang
 
 	function handleSearchModeClick(mode: Exclude<SearchMode, 'none'>) {
 		onSearchModeChange(searchMode === mode ? 'none' : mode);
+		closeMenu();
+	}
+
+	function handleExport(format: 'markdown' | 'json') {
+		onExport(format);
 		closeMenu();
 	}
 
@@ -86,6 +92,8 @@ export function PromptActionsMenu({ onFilesSelect, searchMode, onSearchModeChang
 						const active = searchMode === mode;
 						return <PromptActionButton key={mode} role="menuitemradio" aria-checked={active} className={active ? 'prompt-action-btn--active' : ''} onClick={() => handleSearchModeClick(mode)}>{active ? tool.activeLabel : tool.label}</PromptActionButton>;
 					})}
+					<PromptActionButton role="menuitem" onClick={() => handleExport('markdown')}>Экспорт .md</PromptActionButton>
+					<PromptActionButton role="menuitem" onClick={() => handleExport('json')}>Экспорт .json</PromptActionButton>
 				</div>
 			)}
 		</div>

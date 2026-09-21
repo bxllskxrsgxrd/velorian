@@ -93,7 +93,6 @@ type ChatSidebarProps = {
 	onNew: () => void;
 	onDelete: (id: string) => void;
 	onRename: (conversation: ConversationSummary, title: string) => void;
-	onExport: (format: 'markdown' | 'json') => void;
 	onLogout: () => void;
 	onOpenKnowledge: () => void;
 	activeSection?: 'chat' | 'knowledge';
@@ -456,7 +455,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 							</button>
 							{settingsOpen && (
 								<div className="chat-sidebar__settings-panel">
-									<label>
+									<div className="chat-sidebar__settings-field">
 										<span>Акцент интерфейса</span>
 										<CustomSelect
 											value={accentTheme}
@@ -467,14 +466,6 @@ export function ChatSidebar(props: ChatSidebarProps) {
 												label: ACCENT_THEME_LABELS[theme],
 											}))}
 										/>
-									</label>
-									<div>
-										<button type="button" onClick={() => props.onExport('markdown')}>
-											Экспорт .md
-										</button>
-										<button type="button" onClick={() => props.onExport('json')}>
-											Экспорт .json
-										</button>
 									</div>
 								</div>
 							)}

@@ -487,7 +487,7 @@
 		background: var(--color-bg-surface);
 	}
 
-	&__settings-panel label {
+	&__settings-field {
 		display: flex;
 		flex-direction: column;
 		gap: 6px;
@@ -515,14 +515,6 @@
 	&__settings-panel .custom-select__trigger:focus-visible {
 		border-color: var(--color-accent);
 		box-shadow: var(--focus-ring);
-	}
-
-	&__settings-panel > div {
-		display: grid;
-		grid-template-columns: 1fr 1fr;
-		gap: 6px;
-
-		margin-top: 9px;
 	}
 
 	&__settings-panel button {
