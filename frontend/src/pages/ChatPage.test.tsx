@@ -15,13 +15,24 @@ import { AppLayout } from '../components/AppLayout/AppLayout';
 const api = vi.hoisted(() => ({
 	createConversation: vi.fn(),
 	deleteConversation: vi.fn(),
-	emptyConversationTrash: vi.fn(), emptyKnowledgeTrash: vi.fn(), listDeletedConversations: vi.fn(), listDeletedKnowledgeItems: vi.fn(),
-	permanentlyDeleteConversation: vi.fn(), permanentlyDeleteKnowledgeItem: vi.fn(), restoreConversation: vi.fn(), restoreKnowledgeItem: vi.fn(),
+	emptyConversationTrash: vi.fn(),
+	emptyKnowledgeTrash: vi.fn(),
+	listDeletedConversations: vi.fn(),
+	listDeletedKnowledgeItems: vi.fn(),
+	permanentlyDeleteConversation: vi.fn(),
+	permanentlyDeleteKnowledgeItem: vi.fn(),
+	restoreConversation: vi.fn(),
+	restoreKnowledgeItem: vi.fn(),
 	getConversation: vi.fn(),
 	listConversations: vi.fn(),
 	renameConversation: vi.fn(),
 	streamChat: vi.fn(),
-	activateMessageBranch: vi.fn(), createMessageMarkdownFile: vi.fn(), removeMessageRating: vi.fn(), saveAttachmentToKnowledge: vi.fn(), saveMessageToKnowledge: vi.fn(), setMessageRating: vi.fn(),
+	activateMessageBranch: vi.fn(),
+	createMessageMarkdownFile: vi.fn(),
+	removeMessageRating: vi.fn(),
+	saveAttachmentToKnowledge: vi.fn(),
+	saveMessageToKnowledge: vi.fn(),
+	setMessageRating: vi.fn(),
 }));
 
 vi.mock('../api/chatApi', () => api);
@@ -36,7 +47,13 @@ const conversation = {
 function renderChatPage(initialEntry = `/chat/${conversation.id}`) {
 	return render(
 		<MemoryRouter initialEntries={[initialEntry]}>
-			<ToastProvider><Routes><Route element={<AppLayout user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn()} />}><Route path="/chat/:chatId" element={<ChatPage />} /></Route></Routes></ToastProvider>
+			<ToastProvider>
+				<Routes>
+					<Route element={<AppLayout user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn()} />}>
+						<Route path="/chat/:chatId" element={<ChatPage />} />
+					</Route>
+				</Routes>
+			</ToastProvider>
 		</MemoryRouter>,
 	);
 }
@@ -95,13 +112,22 @@ describe('ChatPage retry', () => {
 	it('maps an error event after stream metadata from streaming to the dedicated error UI', async () => {
 		api.getConversation.mockResolvedValueOnce({ ...conversation, messages: [] });
 		api.streamChat.mockImplementationOnce(async ({ onEvent }: { onEvent: (event: StreamEvent) => void }) => {
-			onEvent({ type: 'meta', conversationId: conversation.id, conversationTitle: conversation.title, userMessage: { id: 'user-stream', role: 'user', content: 'Потоковая ошибка', status: 'done', attachments: [] }, assistantMessageId: 'assistant-stream', requestId: 'stream-request' });
+			onEvent({
+				type: 'meta',
+				conversationId: conversation.id,
+				conversationTitle: conversation.title,
+				userMessage: { id: 'user-stream', role: 'user', content: 'Потоковая ошибка', status: 'done', attachments: [] },
+				assistantMessageId: 'assistant-stream',
+				requestId: 'stream-request',
+			});
 			onEvent({ type: 'delta', content: 'Начало ответа' });
 			onEvent({ type: 'error', code: 'AI_TIMEOUT', message: 'internal', requestId: 'timeout-request' });
 			throw new ApiError('AI_TIMEOUT', 200, 'timeout-request');
 		});
 		const { container } = renderChatPage();
-		fireEvent.change(await screen.findByRole('textbox', { name: /введите запрос/i }), { target: { value: 'Потоковая ошибка' } });
+		fireEvent.change(await screen.findByRole('textbox', { name: /введите запрос/i }), {
+			target: { value: 'Потоковая ошибка' },
+		});
 		fireEvent.click(screen.getByRole('button', { name: 'Отправить сообщение' }));
 		const errorText = await screen.findByText(/Сервер не успел завершить запрос/i);
 		const alert = errorText.closest('[role="alert"]');
@@ -131,7 +157,9 @@ describe('ChatPage lazy conversation creation', () => {
 		fireEvent.submit(form);
 		await waitFor(() => expect(api.streamChat).toHaveBeenCalledTimes(1));
 		expect(api.createConversation).toHaveBeenCalledTimes(1);
-		expect(api.streamChat).toHaveBeenCalledWith(expect.objectContaining({ conversationId: 'created-on-send', prompt: 'Первый запрос' }));
+		expect(api.streamChat).toHaveBeenCalledWith(
+			expect.objectContaining({ conversationId: 'created-on-send', prompt: 'Первый запрос' }),
+		);
 	});
 
 	it('restores the prompt when creating the first conversation fails', async () => {
@@ -175,7 +203,7 @@ describe('ChatPage conversation deletion', () => {
 		await waitFor(() => expect(signals.has(secondConversation.id)).toBe(true));
 
 		fireEvent.click(screen.getByRole('button', { name: `Действия с чатом «${conversation.title}»` }));
-		fireEvent.click(screen.getByRole('button', { name: 'Удалить' }));
+		fireEvent.click(screen.getByRole('button', { name: 'В корзину' }));
 		fireEvent.click(screen.getByRole('button', { name: 'Удалить' }));
 
 		await waitFor(() => expect(api.deleteConversation).toHaveBeenCalledWith(conversation.id));
