@@ -204,7 +204,11 @@ describe('ChatPage conversation deletion', () => {
 
 		fireEvent.click(screen.getByRole('button', { name: `Действия с чатом «${conversation.title}»` }));
 		fireEvent.click(screen.getByRole('button', { name: 'В корзину' }));
-		fireEvent.click(screen.getByRole('button', { name: 'Удалить' }));
+		fireEvent.click(
+			screen.getByRole('button', {
+				name: 'Переместить в корзину',
+			}),
+		);
 
 		await waitFor(() => expect(api.deleteConversation).toHaveBeenCalledWith(conversation.id));
 		expect(signals.get(conversation.id)?.aborted).toBe(true);
