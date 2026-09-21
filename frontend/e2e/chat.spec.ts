@@ -86,7 +86,8 @@ test('drag-and-drop and automatic large paste use the same cumulative attachment
 	await page.goto('/');
 	await page.locator('.drop-zone').evaluate((element) => {
 		const transfer = new DataTransfer();
-		for (let index = 0; index < 9; index += 1) transfer.items.add(new File([`drop-${index}`], `drop-${index}.txt`, { type: 'text/plain' }));
+		for (let index = 0; index < 9; index += 1)
+			transfer.items.add(new File([`drop-${index}`], `drop-${index}.txt`, { type: 'text/plain' }));
 		element.dispatchEvent(new DragEvent('drop', { bubbles: true, cancelable: true, dataTransfer: transfer }));
 	});
 	await expect(page.locator('.prompt-bar__attachments-item')).toHaveCount(9);
@@ -113,7 +114,9 @@ test('knowledge search is active and sent as search_mode', async ({ page }) => {
 	await page.goto('/');
 	await page.getByLabel('Открыть меню действий').click();
 	await page.getByRole('menuitemradio', { name: 'Поиск по базе знаний' }).click();
-	const requestPromise = page.waitForRequest((request) => request.url().includes('/stream') && (request.postData() ?? '').includes('knowledge'));
+	const requestPromise = page.waitForRequest(
+		(request) => request.url().includes('/stream') && (request.postData() ?? '').includes('knowledge'),
+	);
 	await page.getByRole('textbox', { name: 'Введите запрос' }).fill('◈ Поиск по базе знаний оффер');
 	await page.getByRole('button', { name: 'Отправить сообщение' }).click();
 	const request = await requestPromise;
@@ -164,10 +167,26 @@ test('an unknown chat URL shows not found without opening the newest chat', asyn
 test('deleting the active chat applies the fallback only after deletion', async ({ page }) => {
 	await installMockApi(page, { multipleChats: true });
 	await page.goto('/chat/chat-a');
+
 	await expect(page.getByText('Сообщения из Chat A')).toBeVisible();
+
 	await page.getByRole('button', { name: 'Действия с чатом «Chat A»' }).click();
-	await page.getByRole('button', { name: 'Удалить', exact: true }).click();
-	await page.getByRole('dialog').getByRole('button', { name: 'Удалить', exact: true }).click();
+
+	await page.getByRole('button', { name: 'В корзину', exact: true }).click();
+
+	const dialog = page.getByRole('dialog', {
+		name: 'Переместить чат в корзину?',
+	});
+
+	await expect(dialog).toBeVisible();
+
+	await dialog
+		.getByRole('button', {
+			name: 'Переместить в корзину',
+			exact: true,
+		})
+		.click();
+
 	await expect(page).toHaveURL(/\/chat\/chat-b$/);
 	await expect(page.getByText('Сообщения из Chat B')).toBeVisible();
 });
