@@ -37,7 +37,34 @@ const FILE_LANGUAGE_BY_EXTENSION: Record<string, string> = {
 	svelte: 'svelte',
 };
 
-export function getFileCodeLanguage(fileName: string) {
-	const extension = fileName.split('').pop()?.toLowerCase() ?? '';
-	return FILE_LANGUAGE_BY_EXTENSION[extension] || 'text';
+const FILE_LANGUAGE_BY_MIME_TYPE: Record<string, string> = {
+	'application/javascript': 'javascript',
+	'application/json': 'json',
+	'application/ld+json': 'json',
+	'application/sql': 'sql',
+	'application/typescript': 'typescript',
+	'application/xml': 'xml',
+	'application/x-httpd-php': 'php',
+	'application/x-sh': 'bash',
+	'text/css': 'css',
+	'text/html': 'markup',
+	'text/javascript': 'javascript',
+	'text/jsx': 'jsx',
+	'text/typescript': 'typescript',
+	'text/tsx': 'tsx',
+	'text/x-c': 'c',
+	'text/x-c++': 'cpp',
+	'text/x-csharp': 'csharp',
+	'text/x-java-source': 'java',
+	'text/x-python': 'python',
+	'text/x-ruby': 'ruby',
+	'text/x-shellscript': 'bash',
+	'text/xml': 'xml',
+	'text/yaml': 'yaml',
+};
+
+export function getFileCodeLanguage(fileName: string, mimeType = '') {
+	const extension = fileName.split('.').pop()?.toLowerCase() ?? '';
+	const normalizedMimeType = mimeType.split(';', 1)[0]?.trim().toLowerCase() ?? '';
+	return FILE_LANGUAGE_BY_EXTENSION[extension] ?? FILE_LANGUAGE_BY_MIME_TYPE[normalizedMimeType] ?? null;
 }

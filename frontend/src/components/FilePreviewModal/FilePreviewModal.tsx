@@ -26,6 +26,7 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 	const isPdf = file.type === 'application/pdf';
 	const isText = isTextPreview(file);
 	const isMarkdown = file.type === 'text/markdown' || file.name.toLowerCase().endsWith('.md');
+	const codeLanguage = getFileCodeLanguage(file.name, file.type);
 
 	useEffect(() => {
 		const handleKeyDown = (e: KeyboardEvent) => {
@@ -76,13 +77,16 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 				);
 			}
 
+			if (!codeLanguage) return <pre className="file-preview__text">{textContent}</pre>;
+
 			return (
 				<Suspense fallback={<pre className="file-preview__text">{textContent}</pre>}>
 					<HighlightedCode
 						code={textContent}
-						language={getFileCodeLanguage(file.name)}
+						language={codeLanguage}
 						className="file-preview__text"
 						ariaLabel={`Содержимое файла ${file.name}`}
+						detectFallback={false}
 					/>
 				</Suspense>
 			);
@@ -92,7 +96,7 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 	};
 
 	return (
-		<div className="file-preview" onClick={onClose}>
+		<div className="file-preview">
 			{isImage ? (
 				<>
 					<div className="file-preview__image-header">
@@ -100,10 +104,7 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 
 						<IconButton
 							className="file-preview__close"
-							onClick={(event) => {
-								event.stopPropagation();
-								onClose();
-							}}
+							onClick={onClose}
 							aria-label="Закрыть превью"
 						>
 							<CrossIcon />
@@ -114,7 +115,6 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 						role="dialog"
 						aria-modal="true"
 						aria-label={`Предпросмотр файла ${file.name}`}
-						onClick={(event) => event.stopPropagation()}
 					>
 						<img className="file-preview__image" src={file.url} alt={file.name} />
 					</div>
@@ -126,10 +126,7 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 
 						<IconButton
 							className="file-preview__close"
-							onClick={(event) => {
-								event.stopPropagation();
-								onClose();
-							}}
+							onClick={onClose}
 							aria-label="Закрыть превью"
 						>
 							<CrossIcon />
@@ -140,7 +137,6 @@ export function FilePreviewModal({ file, onClose }: FilePreviewModalProps) {
 						role="dialog"
 						aria-modal="true"
 						aria-label={`Предпросмотр файла ${file.name}`}
-						onClick={(event) => event.stopPropagation()}
 					>
 						<div className="file-preview__body">{renderFilePreview()}</div>
 					</div>

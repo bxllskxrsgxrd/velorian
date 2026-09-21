@@ -83,7 +83,7 @@
 		border: 0;
 		background: transparent;
 
-		color: var(--color-text-secondary);
+		color: var(--color-text-light);
 		font-size: 28px;
 		line-height: 1;
 
@@ -119,13 +119,16 @@
 
 	&__text {
 		width: 100%;
+		max-width: 100%;
 		min-height: 100%;
 
 		margin: 0;
 		padding: 16px;
 
 		white-space: pre;
-		overflow: visible;
+		overflow-x: auto;
+		overflow-y: hidden;
+		tab-size: 4;
 
 		font-size: 14px;
 		line-height: 20px;

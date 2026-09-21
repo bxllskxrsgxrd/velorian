@@ -156,10 +156,11 @@ type HighlightedCodeProps = {
 	language: string;
 	className?: string;
 	ariaLabel?: string;
+	detectFallback?: boolean;
 };
 
-export function HighlightedCode({ code, language, className, ariaLabel }: HighlightedCodeProps) {
-	const prismLanguage = Prism.languages[language] ? language : detectLanguage(code);
+export function HighlightedCode({ code, language, className, ariaLabel, detectFallback = true }: HighlightedCodeProps) {
+	const prismLanguage = Prism.languages[language] ? language : detectFallback ? detectLanguage(code) : 'text';
 	return (
 		<Highlight theme={forestNightTheme} code={code} language={Prism.languages[prismLanguage] ? prismLanguage : 'text'}>
 			{({ className: prismClassName, style, tokens, getLineProps, getTokenProps }) => (
