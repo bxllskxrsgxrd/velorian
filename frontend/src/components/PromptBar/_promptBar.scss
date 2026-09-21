@@ -167,21 +167,12 @@
 		width: 100%;
 
 		display: grid;
-		grid-template-columns: auto minmax(0, 1fr) auto auto;
-		grid-template-areas: 'actions textarea voice send';
+		grid-template-columns: auto minmax(0, 1fr) auto;
+		grid-template-areas: 'actions textarea send';
 		align-items: center;
 
 		column-gap: 0;
 		row-gap: 0;
-	}
-
-	&__voice {
-		color: var(--color-text-secondary);
-		grid-area: voice;
-	}
-
-	&__voice--active {
-		color: var(--color-error);
 	}
 
 	&__error {
@@ -237,8 +228,8 @@
 	&--multiline {
 		.prompt-bar__input-container {
 			grid-template-areas:
-				'textarea textarea textarea textarea'
-				'actions . voice send';
+				'textarea textarea textarea'
+				'actions . send';
 			row-gap: 8px;
 			align-items: center;
 		}
@@ -246,12 +237,6 @@
 		.resizeTextarea {
 			padding-left: var(--textarea-leading-inset);
 			padding-right: var(--textarea-trailing-inset);
-		}
-	}
-
-	&--with-voice {
-		.prompt-bar__input-container {
-			--textarea-trailing-inset: 72px;
 		}
 	}
 

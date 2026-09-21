@@ -1,10 +1,9 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useRef } from 'react';
 import { USER_MESSAGE_INLINE_CHAR_LIMIT } from '../../constants/limits';
 import { PROMPT_TOOLS, promptMarker, stripPromptMarker } from '../../constants/promptTools';
 import type { SearchMode } from '../../types/chat';
 import { reportError } from '../../utils/reportError';
 import { createPastedTextFile } from '../../utils/pastedTextFile';
-import { MicrophoneIcon } from '../icons/AppIcons';
 import { SendIcon } from '../icons/AppIcons';
 import { PromptActionsMenu } from '../PromptActionsMenu/PromptActionsMenu';
 import { AutoResizeTextarea } from '../ui/AutoResizeTextarea/AutoResizeTextarea';
@@ -13,23 +12,6 @@ import './_promptBar.scss';
 import { AttachmentPreview } from './AttachmentPreview';
 import { usePromptStore } from '../../stores/promptStore';
 import { useFilesStore } from '../../stores/filesStore';
-
-type SpeechRecognitionEventLike = Event & {
-	results: ArrayLike<{ 0: { transcript: string } }>;
-};
-
-type SpeechRecognitionLike = {
-	lang: string;
-	interimResults: boolean;
-	continuous: boolean;
-	start: () => void;
-	stop: () => void;
-	onresult: ((event: SpeechRecognitionEventLike) => void) | null;
-	onend: (() => void) | null;
-	onerror: (() => void) | null;
-};
-
-type SpeechRecognitionConstructor = new () => SpeechRecognitionLike;
 
 type PromptBarProps = {
 	onSendMessage: (prompt: string, files: File[], searchMode: SearchMode) => Promise<void>;
@@ -56,42 +38,20 @@ export function PromptBar({
 	const isMultiline = usePromptStore((state) => state.isMultiline);
 	const value = usePromptStore((state) => state.value);
 	const searchMode = usePromptStore((state) => state.searchMode);
-	const isListening = usePromptStore((state) => state.isListening);
 	const setIsMultiline = usePromptStore((state) => state.setMultiline);
 	const setValue = usePromptStore((state) => state.setValue);
 	const setSearchMode = usePromptStore((state) => state.setSearchMode);
-	const setIsListening = usePromptStore((state) => state.setListening);
 	const resetPrompt = usePromptStore((state) => state.reset);
 	const restorePrompt = usePromptStore((state) => state.restore);
-	const recognitionRef = useRef<SpeechRecognitionLike | null>(null);
 	const submissionsRef = useRef(new Set<string>());
-	const speechWindow = window as typeof window & {
-		SpeechRecognition?: SpeechRecognitionConstructor;
-		webkitSpeechRecognition?: SpeechRecognitionConstructor;
-	};
-	const voiceInputAvailable = Boolean(speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition);
 	const promptValue = stripPromptMarker(value, searchMode);
 	const isSendDisabled = isGenerating || (!promptValue.trim() && files.length === 0);
 	const promptBarClassName = [
 		'prompt-bar',
 		isMultiline && 'prompt-bar--multiline',
-		voiceInputAvailable && 'prompt-bar--with-voice',
 	]
 		.filter(Boolean)
 		.join(' ');
-
-	useEffect(
-		() => () => {
-			const recognition = recognitionRef.current;
-			if (!recognition) return;
-			recognition.onresult = null;
-			recognition.onend = null;
-			recognition.onerror = null;
-			recognition.stop();
-			recognitionRef.current = null;
-		},
-		[],
-	);
 
 	function handleChange(event: React.ChangeEvent<HTMLTextAreaElement>) {
 		const nextValue = event.currentTarget.value;
@@ -145,31 +105,6 @@ export function PromptBar({
 		}
 	}
 
-	function toggleVoiceInput() {
-		if (recognitionRef.current) {
-			recognitionRef.current.stop();
-			return;
-		}
-		const Recognition = speechWindow.SpeechRecognition ?? speechWindow.webkitSpeechRecognition;
-		if (!Recognition) return;
-		const recognition = new Recognition();
-		recognition.lang = 'ru-RU';
-		recognition.interimResults = false;
-		recognition.continuous = false;
-		recognition.onresult = (event) => {
-			const transcript = event.results[0]?.[0]?.transcript ?? '';
-			setValue((current) => `${current}${current && transcript && !current.endsWith(' ') ? ' ' : ''}${transcript}`);
-		};
-		recognition.onend = () => {
-			recognitionRef.current = null;
-			setIsListening(false);
-		};
-		recognition.onerror = recognition.onend;
-		recognitionRef.current = recognition;
-		setIsListening(true);
-		recognition.start();
-	}
-
 	return (
 		<form className={promptBarClassName} onSubmit={handleSubmit}>
 			{files.length > 0 && (
@@ -207,16 +142,6 @@ export function PromptBar({
 					onKeyDown={handleEnterDown}
 					onPaste={handlePaste}
 				/>
-				{voiceInputAvailable && (
-					<IconButton
-						className={isListening ? 'prompt-bar__voice prompt-bar__voice--active' : 'prompt-bar__voice'}
-						onClick={toggleVoiceInput}
-						aria-label={isListening ? 'Остановить запись' : 'Голосовой ввод'}
-					>
-						<MicrophoneIcon />
-					</IconButton>
-				)}
-
 				<div className="prompt-bar__send">
 					{isGenerating ? (
 						<IconButton onClick={onStop} aria-label="Остановить генерацию">
