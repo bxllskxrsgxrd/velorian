@@ -204,7 +204,7 @@ function normalizeMarkdown(content: string) {
 
 function sanitizeHeading(value: string) {
 	return value
-		.replace(/([0-9])\uFE0F?\u20E3/g, '$1')
+		.replace(/([0-9])\uFE0F?\u20E3/g, '$1.')
 		.replace(/\p{Extended_Pictographic}/gu, '')
 		.replace(/[\u2600-\u27BF]/g, '')
 		.replace(/\uFE0F|\u20E3/g, '')
