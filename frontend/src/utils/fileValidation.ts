@@ -59,7 +59,7 @@ const SUPPORTED_EXTENSIONS = new Set([
 ]);
 
 function extensionOf(name: string) {
-	const dotIndex = name.lastIndexOf('');
+	const dotIndex = name.lastIndexOf('.');
 	return dotIndex >= 0 ? name.slice(dotIndex).toLowerCase() : '';
 }
 
