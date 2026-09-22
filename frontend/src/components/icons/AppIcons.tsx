@@ -111,7 +111,17 @@ export function UserIcon({ size = 16, ...props }: IconProps) {
 
 export function PaletteIcon({ size = 16, ...props }: IconProps) {
 	return (
-		<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...props}>
+		<svg
+			width={size}
+			height={size}
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="1.8"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			{...props}
+		>
 			<circle cx="13.5" cy="6.5" r=".5" fill="currentColor" />
 			<circle cx="17.5" cy="10.5" r=".5" fill="currentColor" />
 			<circle cx="8.5" cy="7.5" r=".5" fill="currentColor" />
@@ -123,7 +133,17 @@ export function PaletteIcon({ size = 16, ...props }: IconProps) {
 
 export function CameraIcon({ size = 16, ...props }: IconProps) {
 	return (
-		<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...props}>
+		<svg
+			width={size}
+			height={size}
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="1.8"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			{...props}
+		>
 			<path d="M14.5 4h-5L7.7 6H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V8a2 2 0 0 0-2-2h-3.7l-1.8-2Z" />
 			<circle cx="12" cy="12.5" r="3.5" />
 		</svg>
@@ -132,7 +152,17 @@ export function CameraIcon({ size = 16, ...props }: IconProps) {
 
 export function LockIcon({ size = 16, ...props }: IconProps) {
 	return (
-		<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8" strokeLinecap="round" strokeLinejoin="round" {...props}>
+		<svg
+			width={size}
+			height={size}
+			viewBox="0 0 24 24"
+			fill="none"
+			stroke="currentColor"
+			strokeWidth="1.8"
+			strokeLinecap="round"
+			strokeLinejoin="round"
+			{...props}
+		>
 			<rect width="16" height="12" x="4" y="10" rx="2" />
 			<path d="M8 10V7a4 4 0 0 1 8 0v3" />
 		</svg>
@@ -283,6 +313,15 @@ export function UndoIcon({ size = 16, ...props }: IconProps) {
 	return (
 		<svg width={size} height="10" viewBox="0 0 16 10" fill="currentColor" {...props}>
 			<path d="M0.421053 0C0.653594 0 0.842105 0.188512 0.842105 0.421053V4.52714L2.6653 2.88734L2.66612 2.88651C4.13167 1.57208 6.03054 0.844207 7.99918 0.842105C10.1209 0.842105 12.1568 1.68474 13.6571 3.18503C15.1574 4.68532 16 6.72037 16 8.84211C16 9.07465 15.8115 9.26316 15.5789 9.26316C15.3464 9.26316 15.1579 9.07465 15.1579 8.84211C15.1579 6.94371 14.404 5.12279 13.0617 3.78043C11.7193 2.43806 9.89839 1.68421 8 1.68421C6.23889 1.68611 4.5398 2.33663 3.22862 3.51234L1.51809 5.05263H5.47368C5.70623 5.05263 5.89474 5.24114 5.89474 5.47368C5.89474 5.70623 5.70623 5.89474 5.47368 5.89474H0.421053C0.193293 5.89474 0 5.70389 0 5.47368V0.421053C0 0.188512 0.188512 0 0.421053 0Z" />
+		</svg>
+	);
+}
+
+export function RefreshIcon({ size = 16, ...props }: IconProps) {
+	return (
+		<svg width={size} height={size} viewBox="0 0 16 16" fill="currentColor" {...props}>
+			<path d="M15.5789 7.57895C15.8115 7.57895 16 7.76746 16 8C16 10.1217 15.1574 12.1568 13.6571 13.6571C12.1568 15.1574 10.1217 16 8 16H7.99836C5.77094 15.9916 3.6327 15.1222 2.03125 13.574L0.842105 12.3849V15.5789C0.842105 15.8115 0.653594 16 0.421053 16C0.188512 16 0 15.8115 0 15.5789V11.3684C0 11.2581 0.0450894 11.149 0.123355 11.0707C0.203586 10.9905 0.310017 10.9474 0.421053 10.9474H4.63158C4.86412 10.9474 5.05263 11.1359 5.05263 11.3684C5.05263 11.601 4.86412 11.7895 4.63158 11.7895H1.4375L2.61678 12.9688C4.06182 14.3657 5.99098 15.1493 8.00082 15.1571C9.89892 15.1569 11.7195 14.4038 13.0617 13.0617C14.404 11.7193 15.1579 9.89839 15.1579 8C15.1579 7.76746 15.3464 7.57895 15.5789 7.57895Z" />
+			<path d="M13.662 2.14309L13.9688 2.42599L15.1579 3.61513V0.421053C15.1579 0.188512 15.3464 0 15.5789 0C15.8115 0 16 0.188512 16 0.421053V4.63158C16 4.74011 15.9536 4.85236 15.8766 4.92928C15.7997 5.00619 15.6875 5.05263 15.5789 5.05263H11.3684C11.1359 5.05263 10.9474 4.86412 10.9474 4.63158C10.9474 4.39904 11.1359 4.21053 11.3684 4.21053H14.5625L13.3832 3.03125L13.1069 2.77632C11.6967 1.53884 9.88291 0.849195 7.99836 0.842105C6.10056 0.842541 4.2803 1.59634 2.93832 2.93832C1.59596 4.28069 0.842105 6.10161 0.842105 8C0.842105 8.23254 0.653594 8.42105 0.421053 8.42105C0.188512 8.42105 0 8.23254 0 8C0 5.87827 0.842637 3.84322 2.34293 2.34293C3.84322 0.842637 5.87827 0 8 0H8.00164C10.0875 0.057711 12.0803 0.755248 13.662 2.14309Z" />
 		</svg>
 	);
 }

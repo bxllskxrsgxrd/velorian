@@ -99,6 +99,12 @@
 		justify-content: center;
 	}
 
+	&__markdown {
+		.message__text {
+			padding: 16px;
+		}
+	}
+
 	&__image {
 		display: block;
 

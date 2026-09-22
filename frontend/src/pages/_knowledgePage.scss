@@ -38,46 +38,6 @@
 	}
 }
 
-@mixin knowledge-outline-button {
-	display: inline-flex;
-	align-items: center;
-	justify-content: center;
-	gap: 7px;
-
-	border: 1px solid var(--color-border);
-	border-radius: var(--radius-medium);
-	outline: none;
-
-	color: var(--color-text-secondary);
-	background: transparent;
-
-	font: inherit;
-	text-decoration: none;
-	white-space: nowrap;
-	cursor: pointer;
-	transition:
-		border-color 0.15s ease,
-		color 0.15s ease,
-		background-color 0.15s ease,
-		box-shadow 0.15s ease;
-
-	&:hover:not(:disabled) {
-		border-color: var(--color-text-secondary);
-		color: var(--color-text-primary);
-		background: var(--color-bg-elevated);
-	}
-
-	&:focus-visible {
-		border-color: var(--color-accent);
-		box-shadow: var(--focus-ring);
-	}
-
-	&:disabled {
-		cursor: not-allowed;
-		opacity: 0.5;
-	}
-}
-
 .knowledge-shell {
 	min-height: 100dvh;
 	display: flex;
@@ -120,13 +80,6 @@
 	background: transparent;
 	cursor: pointer;
 }
-.knowledge-page .knowledge-page__add {
-	padding: 10px 14px;
-	border-radius: 10px;
-	color: var(--color-on-accent);
-	background: var(--color-accent);
-}
-
 .knowledge-page__controls {
 	position: relative;
 	max-width: 1100px;
@@ -144,7 +97,7 @@
 	gap: 9px;
 
 	min-width: 0;
-	min-height: 42px;
+	min-height: 40px;
 
 	padding: 0 12px;
 
@@ -185,42 +138,12 @@
 	background: transparent;
 
 	font: inherit;
+	font-size: 14px;
 
 	&::placeholder {
 		color: var(--color-text-secondary);
 	}
 }
-.knowledge-page__control-btn {
-	@include knowledge-outline-button;
-
-	min-height: 42px;
-	padding: 0 14px;
-	font-size: 14px;
-}
-.knowledge-page__control-btn.active {
-	border-color: var(--color-accent);
-	color: var(--color-accent);
-	background: var(--color-accent-soft);
-}
-.knowledge-page__control-btn span {
-	display: inline-grid;
-	place-items: center;
-
-	min-width: 18px;
-	height: 18px;
-
-	padding: 0 4px;
-
-	border-radius: 9px;
-
-	font-size: 11px;
-	font-weight: 600;
-	line-height: 1;
-
-	color: var(--color-on-accent);
-	background: var(--color-accent);
-}
-
 .knowledge-page__bulk-slot {
 	box-sizing: border-box;
 	width: 100%;
@@ -250,26 +173,6 @@
 	margin-right: auto;
 	font-size: 13px;
 	white-space: nowrap;
-}
-
-// .knowledge-page button {
-// 	@include knowledge-outline-button;
-
-// 	flex: 0 0 auto;
-// 	height: 32px;
-// 	padding: 0 10px;
-// 	font-size: 13px;
-// }
-
-.knowledge-page__bulk-bar .knowledge-page__bulk-delete {
-	border-color: var(--color-error);
-	color: var(--color-error);
-}
-
-.knowledge-page__bulk-bar .knowledge-page__bulk-delete:hover {
-	border-color: var(--color-error);
-	color: var(--color-error);
-	background: color-mix(in srgb, var(--color-error) 12%, transparent);
 }
 
 .knowledge-page__dropdown {
@@ -1018,17 +921,6 @@
 		border-top: 1px solid var(--color-border);
 	}
 
-	.knowledge-editor-page__actions .knowledge-editor-page__confirm {
-		padding-inline: 22px;
-		border-color: transparent;
-		color: var(--color-on-accent);
-		background: var(--color-accent);
-	}
-
-	.knowledge-editor-page__actions .knowledge-editor-page__confirm:hover:not(:disabled) {
-		border-color: transparent;
-		background: var(--color-accent-hover);
-	}
 }
 .knowledge-page__more {
 	justify-self: center;

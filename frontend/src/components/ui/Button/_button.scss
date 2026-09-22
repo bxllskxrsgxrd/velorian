@@ -82,7 +82,6 @@
 		background: var(--color-bg-elevated);
 
 		&:hover:not(:disabled) {
-			border-color: var(--color-text-secondary);
 			background: color-mix(in srgb, var(--color-bg-elevated) 90%, var(--color-text-primary));
 		}
 
