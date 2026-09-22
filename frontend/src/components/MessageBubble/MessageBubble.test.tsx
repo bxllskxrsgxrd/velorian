@@ -134,6 +134,7 @@ describe('MessageBubble actions', () => {
 		);
 		fireEvent.click(screen.getByRole('button', { name: 'Создать файл' }));
 		expect(onCreateFile).toHaveBeenCalledOnce();
-		expect(await screen.findByRole('button', { name: 'Файл создан' })).toBeDisabled();
+		expect(await screen.findByRole('status')).toHaveTextContent('Файл создан');
+		expect(screen.queryByRole('button', { name: 'Файл создан' })).not.toBeInTheDocument();
 	});
 });

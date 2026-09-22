@@ -5,12 +5,13 @@ import { useMessageUiStore } from '../../stores/messageUiStore';
 type MessageRatingProps = {
 	messageId: string;
 	rating?: MessageRatingData | null;
+	compact?: boolean;
 	onRate: (score: number, comment?: string) => void;
 	onRemove: () => void;
 	onSaveToKnowledge?: () => void;
 };
 
-export function MessageRating({ messageId, rating, onRate, onRemove, onSaveToKnowledge }: MessageRatingProps) {
+export function MessageRating({ messageId, rating, compact = false, onRate, onRemove, onSaveToKnowledge }: MessageRatingProps) {
 	const commentOpen = useMessageUiStore((state) => state.byMessageId[messageId]?.isCommentOpen ?? false);
 	const comment = useMessageUiStore((state) => state.byMessageId[messageId]?.comment ?? rating?.comment ?? '');
 	const toggleComment = useMessageUiStore((state) => state.toggleComment);
@@ -22,12 +23,14 @@ export function MessageRating({ messageId, rating, onRate, onRemove, onSaveToKno
 				<span>Оценить:</span>
 				<Rating
 					value={rating?.score}
+					size="small"
 					onChange={(score) => {
 						if (score) onRate(score, rating?.comment ?? undefined);
+						else onRemove();
 					}}
 					label="Оценка ответа"
 				/>
-				{rating && (
+				{!compact && rating && (
 					<button
 						className="message__rating-link"
 						type="button"
@@ -36,18 +39,18 @@ export function MessageRating({ messageId, rating, onRate, onRemove, onSaveToKno
 						Комментарий
 					</button>
 				)}
-				{rating && (
+				{!compact && rating && (
 					<button className="message__rating-link" type="button" onClick={onRemove}>
 						Убрать
 					</button>
 				)}
-				{onSaveToKnowledge && (
+				{!compact && onSaveToKnowledge && (
 					<button className="message__rating-save" type="button" onClick={onSaveToKnowledge}>
 						В базу знаний
 					</button>
 				)}
 			</div>
-			{commentOpen && (
+			{!compact && commentOpen && (
 				<div className="message__rating-comment">
 					<textarea
 						value={comment}

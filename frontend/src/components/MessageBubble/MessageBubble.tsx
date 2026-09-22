@@ -3,7 +3,7 @@ import { CHAT_MESSAGE_STATUSES } from '../../constants/chatMessageStatuses';
 import { CHAT_ROLES } from '../../constants/chatRoles';
 import type { ChatAttachment, ChatMessage } from '../../types/chat';
 import { SubmitLoadingIcon } from '../icons/SubmitLoadingIcon/SubmitLoadingIcon';
-import { EditIcon } from '../icons/AppIcons';
+import { CheckIcon, DocumentIcon, EditIcon } from '../icons/AppIcons';
 import './_messageBubble.scss';
 import { MessageAttachment } from './MessageAttachment';
 import { MessageError } from './MessageError';
@@ -57,11 +57,16 @@ function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, br
 	const imageAttachments = attachments.filter((attachment) => attachment.type.startsWith('image/'));
 
 	const fileAttachments = attachments.filter((attachment) => !attachment.type.startsWith('image/'));
+	const generatedFileAttachments = isUser ? [] : fileAttachments.filter((attachment) => attachment.generated);
+	const leadingFileAttachments = isUser
+		? fileAttachments
+		: fileAttachments.filter((attachment) => !attachment.generated);
 
 	const hasAttachments = attachments.length > 0;
 	const hasImages = imageAttachments.length > 0;
-	const hasFiles = fileAttachments.length > 0;
 	const hasText = Boolean(message.content);
+	const isFileCreated = fileState === 'success' || generatedFileAttachments.length > 0;
+	const showCompletedAssistantActions = !isUser && !isPending && !isStreaming && !isCancelled;
 
 	const contentClassName = ['message__content', hasAttachments && 'message__content--with-attachments']
 		.filter(Boolean)
@@ -99,9 +104,9 @@ function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, br
 				</div>
 			)}
 
-			{hasFiles && (
+			{leadingFileAttachments.length > 0 && (
 				<div className="message__files">
-					{fileAttachments?.map((attachment) => (
+					{leadingFileAttachments.map((attachment) => (
 						<MessageAttachment key={attachment.id} attachment={attachment} onOpen={() => onOpenAttachment(attachment)} onAddToKnowledge={attachment.generated && onAddAttachmentToKnowledge ? () => onAddAttachmentToKnowledge(attachment) : undefined} />
 					))}
 				</div>
@@ -127,16 +132,49 @@ function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, br
 					)}
 				</div>
 			)}
-			{!isUser && !isPending && !isStreaming && !isCancelled && onRate && onRemoveRating && (
-				<MessageRating messageId={message.id} rating={message.rating} onRate={onRate} onRemove={onRemoveRating} onSaveToKnowledge={onSaveToKnowledge} />
+			{showCompletedAssistantActions && ((onRate && onRemoveRating) || (onCreateFile && hasText)) && (
+				<div className="message__assistant-actions">
+					{onRate && onRemoveRating && (
+						<MessageRating compact messageId={message.id} rating={message.rating} onRate={onRate} onRemove={onRemoveRating} onSaveToKnowledge={onSaveToKnowledge} />
+					)}
+					{onRate && onRemoveRating && onCreateFile && hasText && (
+						<span className="message__assistant-actions-divider" aria-hidden="true" />
+					)}
+					{onCreateFile && hasText && (isFileCreated ? (
+						<span className="message__file-created" role="status">
+							<span className="message__file-created-icon" aria-hidden="true"><CheckIcon size={10} /></span>
+							Файл создан
+						</span>
+					) : (
+						<button
+							className="message__create-file"
+							type="button"
+							disabled={fileState === 'loading'}
+							onClick={() => {
+								setFileState(message.id, 'loading');
+								void onCreateFile()
+									.then(() => setFileState(message.id, 'success'))
+									.catch(() => setFileState(message.id, 'error'));
+							}}
+						>
+							<DocumentIcon size={16} />
+							{fileState === 'loading' ? 'Создание…' : 'Создать файл'}
+						</button>
+					))}
+					{fileState === 'error' && <span className="message__create-file-error" role="status">Не удалось создать файл</span>}
+				</div>
 			)}
-			{!isUser && !isPending && !isStreaming && !isCancelled && onCreateFile && hasText && (
-				<div className="message__actions message__actions--file">
-					<button type="button" disabled={fileState === 'loading' || fileState === 'success'} onClick={() => {
-						setFileState(message.id, 'loading');
-						void onCreateFile().then(() => setFileState(message.id, 'success')).catch(() => setFileState(message.id, 'error'));
-					}}>{fileState === 'loading' ? 'Создание…' : fileState === 'success' ? 'Файл создан' : 'Создать файл'}</button>
-					{fileState === 'error' && <span role="status">Не удалось создать файл</span>}
+			{generatedFileAttachments.length > 0 && (
+				<div className="message__files message__files--generated">
+					{generatedFileAttachments.map((attachment) => (
+						<MessageAttachment
+							key={attachment.id}
+							attachment={attachment}
+							onOpen={() => onOpenAttachment(attachment)}
+							onAddToKnowledge={onAddAttachmentToKnowledge ? () => onAddAttachmentToKnowledge(attachment) : undefined}
+							showKnowledgeAction={false}
+						/>
+					))}
 				</div>
 			)}
 			{isUser && !isEditing && (onEdit || (branch && branch.total > 1)) && (

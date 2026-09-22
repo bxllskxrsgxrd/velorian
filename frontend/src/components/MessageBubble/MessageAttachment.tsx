@@ -7,23 +7,32 @@ type MessageAttachmentProps = {
 	attachment: ChatAttachment;
 	onOpen?: () => void;
 	onAddToKnowledge?: () => void;
+	showKnowledgeAction?: boolean;
 };
 
-export function MessageAttachment({ attachment, onOpen, onAddToKnowledge }: MessageAttachmentProps) {
+function attachmentFormat(attachment: ChatAttachment) {
+	if (attachment.type === 'text/markdown' || attachment.name.toLowerCase().endsWith('.md')) return 'Markdown';
+	const extension = attachment.name.split('.').pop();
+	return extension && extension !== attachment.name ? extension.toUpperCase() : 'Файл';
+}
+
+export function MessageAttachment({ attachment, onOpen, onAddToKnowledge, showKnowledgeAction = true }: MessageAttachmentProps) {
 	if (attachment.isImage && attachment.url) {
 		return <img className="message__attachment-image" src={attachment.url} alt={attachment.name} />;
 	}
 
 	return (
-		<div className="message__attachment-file">
+		<div className={`message__attachment-file${attachment.generated ? ' message__attachment-file--generated' : ''}`}>
 			<button className="message__attachment-main" type="button" onClick={onOpen}>
-				<DocumentIcon />
+				<DocumentIcon size={attachment.generated ? 24 : 16} />
 				<span className="message__attachment-info">
 					<span className="message__attachment-name">{attachment.name}</span>
-					<span className="message__attachment-size">{attachment.generated ? 'Документ' : formatFileSize(attachment.size)}</span>
+					<span className="message__attachment-size">
+						{attachment.generated ? `${attachmentFormat(attachment)} · ${formatFileSize(attachment.size)}` : formatFileSize(attachment.size)}
+					</span>
 				</span>
 			</button>
-			{attachment.generated && (attachment.knowledgeSaved
+			{showKnowledgeAction && attachment.generated && (attachment.knowledgeSaved
 				? <span className="message__attachment-saved">Добавлено</span>
 				: onAddToKnowledge && <button className="message__attachment-knowledge" type="button" onClick={onAddToKnowledge}>Добавить в БД</button>)}
 			<a className="message__download" href={attachment.downloadUrl ?? attachment.url} download={attachment.name} aria-label={`Скачать ${attachment.name}`} title="Скачать"><DownloadIcon /></a>
