@@ -774,9 +774,9 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 			<main className="knowledge-page">
 				<header>
 					<div>
-						{/* <button className="knowledge-page__mobile-menu" type="button" onClick={() => setSidebarOpen(true)}>
+						<button className="knowledge-page__mobile-menu" type="button" onClick={() => setSidebarOpen(true)}>
 							☰
-						</button> */}
+						</button>
 						<h1>База знаний</h1>
 						<p>
 							{user.email} · на странице активно {counts.active} из {counts.total}
