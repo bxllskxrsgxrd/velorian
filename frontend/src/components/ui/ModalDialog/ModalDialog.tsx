@@ -2,6 +2,7 @@ import type { ReactNode } from 'react';
 import './_modalDialog.scss';
 import { IconButton } from '../IconButton/IconButton';
 import { CrossIcon } from '../../icons/AppIcons';
+import { Button } from '../Button/Button';
 
 type ModalDialogProps = {
 	title: string;
@@ -63,17 +64,27 @@ export function ModalDialog({
 				)}
 				<div className="modal-dialog__content">{children}</div>
 				<div className="modal-dialog__actions">
-					<button type="button" disabled={closeDisabled} onClick={onClose}>
-						{confirmDisabled && !closeDisabled ? 'Закрыть' : closeLabel}
-					</button>
-					<button
-						disabled={confirmDisabled}
-						className={danger ? 'modal-dialog__confirm modal-dialog__confirm--danger' : 'modal-dialog__confirm'}
+					<Button
 						type="button"
+						variant="outline"
+						tone="neutral"
+						size="medium"
+						disabled={closeDisabled}
+						onClick={onClose}
+					>
+						{confirmDisabled && !closeDisabled ? 'Закрыть' : closeLabel}
+					</Button>
+
+					<Button
+						type="button"
+						variant="filled"
+						tone={danger ? 'danger' : 'accent'}
+						size="medium"
+						disabled={confirmDisabled}
 						onClick={onConfirm}
 					>
 						{confirmLabel}
-					</button>
+					</Button>
 				</div>
 			</div>
 		</div>

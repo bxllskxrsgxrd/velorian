@@ -48,25 +48,4 @@
 		gap: 8px;
 		margin-top: 20px;
 	}
-	button {
-		padding: 9px 14px;
-		border: 1px solid var(--color-border);
-		border-radius: 10px;
-		color: var(--color-text-primary);
-		background: var(--color-bg-elevated);
-		cursor: pointer;
-	}
-	button:disabled {
-		opacity: 0.55;
-		cursor: default;
-	}
-	&__confirm {
-		color: var(--color-on-accent) !important;
-		border-color: transparent !important;
-		background: var(--color-accent) !important;
-	}
-	&__confirm--danger {
-		color: #fff !important;
-		background: var(--color-error) !important;
-	}
 }

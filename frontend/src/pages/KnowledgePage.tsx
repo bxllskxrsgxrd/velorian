@@ -18,6 +18,7 @@ import { useUiStore } from '../stores/uiStore';
 import { useApproachesStore } from '../stores/approachesStore';
 import './_knowledgePage.scss';
 import { CrossIcon, DocumentIcon, ListIcon, SearchIcon, TrashIcon } from '../components/icons/AppIcons';
+import { Button } from '../components/ui/Button/Button';
 
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor/MarkdownEditor'));
 
@@ -253,7 +254,7 @@ export function KnowledgeDataEditor({
 			: 'Сохранение…'
 		: mode === 'create'
 			? 'Добавить данные'
-			: 'Сохранить изменения';
+			: 'Сохранить';
 
 	return (
 		<main className="knowledge-editor-page knowledge-page">
@@ -415,12 +416,12 @@ export function KnowledgeDataEditor({
 						</div>
 					)}
 					<div className="knowledge-editor-page__actions">
-						<button type="button" disabled={saving} onClick={onCancel}>
+						<Button variant="outline" tone="neutral" size="medium" disabled={saving} onClick={onCancel}>
 							Отмена
-						</button>
-						<button className="knowledge-editor-page__confirm" type="button" disabled={saving} onClick={onConfirm}>
+						</Button>
+						<Button variant="filled" tone="accent" size="medium" disabled={saving} onClick={onConfirm}>
 							{confirmLabel}
-						</button>
+						</Button>
 					</div>
 				</section>
 			</div>
@@ -773,21 +774,22 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 			<main className="knowledge-page">
 				<header>
 					<div>
-						<button className="knowledge-page__mobile-menu" type="button" onClick={() => setSidebarOpen(true)}>
+						{/* <button className="knowledge-page__mobile-menu" type="button" onClick={() => setSidebarOpen(true)}>
 							☰
-						</button>
+						</button> */}
 						<h1>База знаний</h1>
 						<p>
 							{user.email} · на странице активно {counts.active} из {counts.total}
 						</p>
 					</div>
 					<div className="knowledge-page__header-actions">
-						<button type="button" onClick={() => navigate('/knowledge/approaches')}>
+						<Button variant="outline" tone="neutral" size="medium" onClick={() => navigate('/knowledge/approaches')}>
 							Подходы
-						</button>
-						<button className="knowledge-page__add" type="button" onClick={() => navigate('/knowledge/new')}>
+						</Button>
+
+						<Button variant="filled" tone="accent" size="medium" onClick={() => navigate('/knowledge/new')}>
 							Добавить данные
-						</button>
+						</Button>
 					</div>
 				</header>
 				<section className="knowledge-page__controls" aria-label="Управление базой знаний" ref={dropdownRef}>
@@ -804,23 +806,26 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 							/>
 						</div>
 
-						<button
-							className={`knowledge-page__control-btn ${activeDropdown === 'filters' ? 'active' : ''}`}
-							type="button"
+						<Button
+							variant="outline"
+							tone="neutral"
+							size="medium"
 							aria-expanded={activeDropdown === 'filters'}
 							onClick={() => setActiveDropdown(activeDropdown === 'filters' ? null : 'filters')}
 						>
-							Фильтры {activeFiltersCount > 0 && <span>{activeFiltersCount}</span>}
-						</button>
+							Фильтры
+							{activeFiltersCount > 0 && <span className="button__count">{activeFiltersCount}</span>}
+						</Button>
 
-						<button
-							className={`knowledge-page__control-btn ${activeDropdown === 'sort' ? 'active' : ''}`}
-							type="button"
+						<Button
+							variant="outline"
+							tone="neutral"
+							size="medium"
 							aria-expanded={activeDropdown === 'sort'}
 							onClick={() => setActiveDropdown(activeDropdown === 'sort' ? null : 'sort')}
 						>
 							Сортировка
-						</button>
+						</Button>
 					</div>
 
 					{activeDropdown === 'filters' && (
@@ -949,19 +954,29 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 					{selectedItems.length > 0 && (
 						<div className="knowledge-page__bulk-bar" role="region" aria-label="Действия с выбранными элементами">
 							<strong>Выбрано: {selectedItems.length}</strong>
-							<button
-								type="button"
+							<Button
+								variant="outline"
+								tone="neutral"
+								size="small"
 								disabled={selectedItems.length === items.length}
 								onClick={() => setSelectedItemIds(new Set(items.map((item) => item.id)))}
 							>
 								Выбрать все {items.length}
-							</button>
-							<button type="button" onClick={() => setSelectedItemIds(new Set())}>
+							</Button>
+
+							<Button variant="outline" tone="neutral" size="small" onClick={() => setSelectedItemIds(new Set())}>
 								Снять выбор
-							</button>
-							<button className="knowledge-page__bulk-delete" type="button" onClick={() => setBulkDeleteOpen(true)}>
-								<TrashIcon />В корзину {selectedItems.length}
-							</button>
+							</Button>
+
+							<Button
+								variant="outline"
+								tone="danger"
+								size="small"
+								icon={<TrashIcon />}
+								onClick={() => setBulkDeleteOpen(true)}
+							>
+								В корзину {selectedItems.length}
+							</Button>
 						</div>
 					)}
 				</div>

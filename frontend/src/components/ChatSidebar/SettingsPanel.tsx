@@ -408,7 +408,7 @@ export function SettingsPanel({ user, accentTheme, onAccentChange }: SettingsPan
 											type="button"
 											disabled
 										>
-											Сохранить изменения
+											Сохранить
 										</button>
 									</div>
 								</section>

@@ -13,12 +13,12 @@ export type ButtonVisualProps = {
 	tone?: ButtonTone;
 	size?: ButtonSize;
 	fullWidth?: boolean;
+	icon?: ReactNode;
+	iconPosition?: ButtonIconPosition;
+	isLoading?: boolean;
 };
 
 export type ButtonProps = Omit<ButtonHTMLAttributes<HTMLButtonElement>, 'children'> &
 	ButtonVisualProps & {
 		children: ReactNode;
-		icon?: ReactNode;
-		iconPosition?: ButtonIconPosition;
-		isLoading?: boolean;
 	};

@@ -116,7 +116,6 @@
 	color: var(--color-text-secondary);
 }
 .knowledge-page header button {
-	border: 0;
 	color: var(--color-text-secondary);
 	background: transparent;
 	cursor: pointer;
@@ -147,7 +146,7 @@
 	min-width: 0;
 	min-height: 42px;
 
-	padding: 0 11px;
+	padding: 0 12px;
 
 	border: 1px solid var(--color-border);
 	border-radius: var(--radius-medium);
@@ -253,14 +252,14 @@
 	white-space: nowrap;
 }
 
-.knowledge-page__bulk-bar button {
-	@include knowledge-outline-button;
+// .knowledge-page button {
+// 	@include knowledge-outline-button;
 
-	flex: 0 0 auto;
-	height: 32px;
-	padding: 0 10px;
-	font-size: 13px;
-}
+// 	flex: 0 0 auto;
+// 	height: 32px;
+// 	padding: 0 10px;
+// 	font-size: 13px;
+// }
 
 .knowledge-page__bulk-bar .knowledge-page__bulk-delete {
 	border-color: var(--color-error);
@@ -1017,33 +1016,6 @@
 		margin-top: 24px;
 		padding: 18px 24px 24px;
 		border-top: 1px solid var(--color-border);
-	}
-
-	.knowledge-editor-page__actions button {
-		min-height: 40px;
-		padding: 9px 18px;
-		border: 1px solid var(--color-border);
-		border-radius: 10px;
-		color: var(--color-text-primary);
-		background: var(--color-bg-elevated);
-		font: inherit;
-		cursor: pointer;
-		transition: border-color var(--transition-fast), background var(--transition-fast), opacity var(--transition-fast), box-shadow var(--transition-fast);
-	}
-
-	.knowledge-editor-page__actions button:hover:not(:disabled) {
-		border-color: var(--color-text-secondary);
-	}
-
-	.knowledge-editor-page__actions button:focus-visible {
-		outline: 1px solid var(--color-accent-focus);
-		outline-offset: 2px;
-		box-shadow: var(--focus-ring);
-	}
-
-	.knowledge-editor-page__actions button:disabled {
-		cursor: not-allowed;
-		opacity: 0.55;
 	}
 
 	.knowledge-editor-page__actions .knowledge-editor-page__confirm {

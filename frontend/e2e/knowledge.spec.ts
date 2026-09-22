@@ -276,7 +276,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await editPage
 		.getByRole('button', {
-			name: 'Сохранить изменения',
+			name: 'Сохранить',
 		})
 		.click();
 	await expect(page.getByRole('status').filter({ hasText: 'Изменения сохранены' })).toBeVisible();

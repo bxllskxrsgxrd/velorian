@@ -10,6 +10,7 @@ import { useUiStore } from '../stores/uiStore';
 import { reportError } from '../utils/reportError';
 import './_knowledgePage.scss';
 import './_approaches.scss';
+import { Button } from '../components/ui/Button/Button';
 
 type ApproachCardMenuState = { itemId: string; top: number; left: number };
 
@@ -142,9 +143,9 @@ export function ApproachesPage() {
 					<h1>Подходы</h1>
 					<p>Глобальные профили, которыми руководствуется агент</p>
 				</div>
-				<button className="knowledge-page__add" type="button" onClick={() => navigate('/knowledge/approaches/new')}>
+				<Button variant="filled" tone="accent" size="medium" onClick={() => navigate('/knowledge/approaches/new')}>
 					Создать подход
-				</button>
+				</Button>
 			</header>
 			<section className="approaches-page__list">
 				{loading && <p>Загрузка…</p>}

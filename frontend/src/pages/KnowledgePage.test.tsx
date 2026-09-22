@@ -345,7 +345,7 @@ describe('KnowledgePage', () => {
 		await waitFor(() => {
 			expect(within(dialog).getByRole('textbox', { name: 'Содержимое' })).toHaveValue('Новая файловая версия');
 		});
-		fireEvent.click(within(dialog).getByRole('button', { name: 'Сохранить изменения' }));
+		fireEvent.click(within(dialog).getByRole('button', { name: 'Сохранить' }));
 
 		await waitFor(() => {
 			expect(api.updateKnowledgeFile).toHaveBeenCalledWith(
@@ -576,7 +576,7 @@ describe('KnowledgePage', () => {
 
 		fireEvent.click(
 			within(dialog).getByRole('button', {
-				name: 'Сохранить изменения',
+				name: 'Сохранить',
 			}),
 		);
 

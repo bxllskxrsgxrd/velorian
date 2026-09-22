@@ -11,6 +11,7 @@ import type { ApproachInput, KnowledgeItem } from '../types/chat';
 import { reportError } from '../utils/reportError';
 import './_knowledgePage.scss';
 import './_approaches.scss';
+import { Button } from '../components/ui/Button/Button';
 
 const EMPTY_APPROACH: ApproachInput = {
 	name: '',
@@ -258,17 +259,24 @@ export function ApproachEditorPage() {
 					/>
 				</div>
 				<div className="approach-editor__actions">
-					<button type="button" disabled={saving} onClick={() => navigate('/knowledge/approaches')}>
+					<Button
+						variant="outline"
+						tone="neutral"
+						size="medium"
+						disabled={saving}
+						onClick={() => navigate('/knowledge/approaches')}
+					>
 						Отмена
-					</button>
-					<button
-						className="approach-editor__save"
-						type="button"
+					</Button>
+					<Button
+						variant="filled"
+						tone="accent"
+						size="medium"
 						disabled={!form.name.trim() || saving}
 						onClick={() => void save()}
 					>
 						{saving ? 'Сохранение…' : 'Сохранить'}
-					</button>
+					</Button>
 				</div>
 			</div>
 			{blocker.state === 'blocked' && (
