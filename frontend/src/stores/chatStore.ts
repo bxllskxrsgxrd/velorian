@@ -1,6 +1,6 @@
 import { create } from 'zustand';
 import { EMPTY_KNOWLEDGE_FILTERS } from '../constants/knowledgeFilters';
-import type { ChatAttachment, ChatMessage, KnowledgeFilters } from '../types/chat';
+import type { ChatAttachment, ChatMessage, KnowledgeFilters, KnowledgeItem } from '../types/chat';
 import { resolveStateValue, type StateValue } from './storeTypes';
 
 export type KnowledgeSaveState = 'idle' | 'loading' | 'success' | 'error';
@@ -9,6 +9,22 @@ export type ChatGenerationState = {
 	status: 'streaming';
 	assistantMessageId: string;
 };
+
+type KnowledgeLinkUpdate = Pick<KnowledgeItem, 'id' | 'deletedAt'> &
+	Partial<Pick<KnowledgeItem, 'rating' | 'updatedAt'>>;
+
+function ratingFromKnowledge(message: ChatMessage, item: KnowledgeLinkUpdate): ChatMessage['rating'] {
+	if (!Object.prototype.hasOwnProperty.call(item, 'rating')) return message.rating;
+	if (item.rating == null) return null;
+	const timestamp = item.updatedAt ?? new Date().toISOString();
+	return {
+		id: message.rating?.id ?? `knowledge-${item.id}`,
+		score: item.rating,
+		comment: message.rating?.comment ?? null,
+		createdAt: message.rating?.createdAt ?? timestamp,
+		updatedAt: timestamp,
+	};
+}
 
 type ChatStore = {
 	messagesByConversation: Record<string, ChatMessage[]>;
@@ -34,7 +50,7 @@ type ChatStore = {
 	closeKnowledgeAttachment: () => void;
 	setKnowledgeFilters: (filters: KnowledgeFilters) => void;
 	setKnowledgeSaveState: (value: KnowledgeSaveState) => void;
-	syncKnowledgeLink: (sourceMessageId: string, item: NonNullable<ChatMessage['knowledgeItem']>) => void;
+	syncKnowledgeLink: (sourceMessageId: string, item: KnowledgeLinkUpdate) => void;
 	removeKnowledgeLink: (itemId: string) => void;
 	resetConversation: () => void;
 };
@@ -52,7 +68,25 @@ export const useChatStore = create<ChatStore>((set) => ({
 	knowledgeSaveState: 'idle',
 	setConversationMessages: (conversationId, value) =>
 		set((state) => {
-			const messages = resolveStateValue(value, state.messagesByConversation[conversationId] ?? []);
+			const current = state.messagesByConversation[conversationId] ?? [];
+			let messages = resolveStateValue(value, current);
+			if (typeof value !== 'function') {
+				const savedLinks = new Map(
+					current
+						.filter((message) => message.knowledgeItem && Object.prototype.hasOwnProperty.call(message.knowledgeItem, 'rating'))
+						.map((message) => [message.knowledgeItem!.id, message.knowledgeItem!]),
+				);
+				messages = messages.map((message) => {
+					const savedLink = message.knowledgeItem ? savedLinks.get(message.knowledgeItem.id) : undefined;
+					if (!savedLink) return message;
+					const knowledgeItem = {
+						...message.knowledgeItem,
+						rating: savedLink.rating,
+						updatedAt: savedLink.updatedAt,
+					};
+					return { ...message, knowledgeItem, rating: ratingFromKnowledge(message, knowledgeItem) };
+				});
+			}
 			return { messagesByConversation: { ...state.messagesByConversation, [conversationId]: messages } };
 		}),
 	setMessages: (value) => set((state) => ({ messages: resolveStateValue(value, state.messages) })),
@@ -88,14 +122,19 @@ export const useChatStore = create<ChatStore>((set) => ({
 	setKnowledgeFilters: (knowledgeFilters) => set({ knowledgeFilters }),
 	setKnowledgeSaveState: (knowledgeSaveState) => set({ knowledgeSaveState }),
 	syncKnowledgeLink: (sourceMessageId, item) =>
-		set((state) => ({
-			messagesByConversation: Object.fromEntries(
-				Object.entries(state.messagesByConversation).map(([conversationId, messages]) => [
-					conversationId,
-					messages.map((message) => message.id === sourceMessageId ? { ...message, knowledgeItem: item } : message),
-				]),
-			),
-		})),
+		set((state) => {
+			return {
+				messagesByConversation: Object.fromEntries(
+					Object.entries(state.messagesByConversation).map(([conversationId, messages]) => [
+						conversationId,
+						messages.map((message) => {
+							if (message.id !== sourceMessageId && message.knowledgeItem?.id !== item.id) return message;
+							return { ...message, knowledgeItem: item, rating: ratingFromKnowledge(message, item) };
+						}),
+					]),
+				),
+			};
+		}),
 	removeKnowledgeLink: (itemId) =>
 		set((state) => ({
 			messagesByConversation: Object.fromEntries(

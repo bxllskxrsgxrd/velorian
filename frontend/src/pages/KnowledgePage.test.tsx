@@ -3,6 +3,7 @@ import { createMemoryRouter, Outlet, RouterProvider, useLocation } from 'react-r
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 
 import { ToastProvider } from '../components/Toast/ToastProvider';
+import { useChatStore } from '../stores/chatStore';
 import { useConversationsStore } from '../stores/conversationsStore';
 import { useKnowledgeStore } from '../stores/knowledgeStore';
 import { useApproachesStore } from '../stores/approachesStore';
@@ -174,6 +175,7 @@ async function openEditFromCard(title: string) {
 describe('KnowledgePage', () => {
 	beforeEach(() => {
 		useKnowledgeStore.getState().reset();
+		useChatStore.getState().resetConversation();
 		useApproachesStore.getState().reset();
 		useConversationsStore.getState().reset();
 
@@ -679,6 +681,93 @@ describe('KnowledgePage', () => {
 			'aria-pressed',
 			'true',
 		);
+	});
+
+	it('syncs a successfully saved knowledge rating to the linked chat message', async () => {
+		const stored = {
+			...item,
+			sourceType: 'assistant_message' as const,
+			sourceMessageId: 'assistant-linked',
+			rating: 4,
+		};
+		api.getKnowledgeItem.mockResolvedValue(stored);
+		api.updateKnowledgeItem.mockResolvedValue({ ...stored, rating: 5 });
+		useChatStore.getState().setConversationMessages('conversation-1', [
+			{
+				id: 'assistant-linked',
+				role: 'assistant',
+				content: 'Ответ',
+				status: 'done',
+				knowledgeItem: { id: stored.id, deletedAt: null },
+				rating: {
+					id: 'rating-1',
+					score: 4,
+					comment: null,
+					createdAt: '2026-08-25T00:00:00Z',
+					updatedAt: '2026-08-25T00:00:00Z',
+				},
+			},
+		]);
+
+		renderKnowledge('/knowledge/knowledge-1');
+		fireEvent.click(await screen.findByRole('button', { name: 'Поставить рейтинг 5 из 5' }));
+		fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+		await waitFor(() => {
+			expect(useChatStore.getState().messagesByConversation['conversation-1'][0].rating?.score).toBe(5);
+		});
+
+		useChatStore.getState().setConversationMessages('conversation-1', [
+			{
+				id: 'assistant-linked',
+				role: 'assistant',
+				content: 'Ответ',
+				status: 'done',
+				knowledgeItem: { id: stored.id, deletedAt: null },
+				rating: {
+					id: 'rating-1',
+					score: 4,
+					comment: null,
+					createdAt: '2026-08-25T00:00:00Z',
+					updatedAt: '2026-08-25T00:00:00Z',
+				},
+			},
+		]);
+		expect(useChatStore.getState().messagesByConversation['conversation-1'][0].rating?.score).toBe(5);
+	});
+
+	it('keeps the linked chat rating when knowledge saving fails', async () => {
+		const stored = {
+			...item,
+			sourceType: 'assistant_message' as const,
+			sourceMessageId: 'assistant-linked',
+			rating: 4,
+		};
+		api.getKnowledgeItem.mockResolvedValue(stored);
+		api.updateKnowledgeItem.mockRejectedValueOnce(new Error('Ошибка сохранения'));
+		useChatStore.getState().setConversationMessages('conversation-1', [
+			{
+				id: 'assistant-linked',
+				role: 'assistant',
+				content: 'Ответ',
+				status: 'done',
+				knowledgeItem: { id: stored.id, deletedAt: null },
+				rating: {
+					id: 'rating-1',
+					score: 4,
+					comment: null,
+					createdAt: '2026-08-25T00:00:00Z',
+					updatedAt: '2026-08-25T00:00:00Z',
+				},
+			},
+		]);
+
+		renderKnowledge('/knowledge/knowledge-1');
+		fireEvent.click(await screen.findByRole('button', { name: 'Поставить рейтинг 5 из 5' }));
+		fireEvent.click(screen.getByRole('button', { name: 'Сохранить' }));
+
+		await waitFor(() => expect(api.updateKnowledgeItem).toHaveBeenCalled());
+		expect(useChatStore.getState().messagesByConversation['conversation-1'][0].rating?.score).toBe(4);
 	});
 
 	it('switches to edit preview and shows only filled metadata', async () => {

@@ -11,6 +11,7 @@ import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
 import { EMPTY_KNOWLEDGE_FILTERS } from '../constants/knowledgeFilters';
 import { useToast } from '../hooks/useToast';
 import { useApproachesStore } from '../stores/approachesStore';
+import { useChatStore } from '../stores/chatStore';
 import { useKnowledgeStore } from '../stores/knowledgeStore';
 import type { KnowledgeCreateSource, KnowledgeItem } from '../types/chat';
 import { reportError } from '../utils/reportError';
@@ -62,6 +63,7 @@ export function KnowledgeEditorPage() {
 	const setSaving = useKnowledgeStore((state) => state.setSaving);
 	const approaches = useApproachesStore((state) => state.items);
 	const loadApproaches = useApproachesStore((state) => state.load);
+	const syncKnowledgeLink = useChatStore((state) => state.syncKnowledgeLink);
 	const { showToast } = useToast();
 	const [baseline, setBaseline] = useState('');
 	const allowNavigationRef = useRef(false);
@@ -205,6 +207,14 @@ export function KnowledgeEditorPage() {
 							filters: formFilters,
 						});
 			upsertItem(saved);
+			if (saved.sourceMessageId) {
+				syncKnowledgeLink(saved.sourceMessageId, {
+					id: saved.id,
+					deletedAt: saved.deletedAt,
+					rating: saved.rating,
+					updatedAt: saved.updatedAt,
+				});
+			}
 			setFile(null);
 			setBaseline(
 				fingerprint({

@@ -88,7 +88,8 @@ export type ChatMessage = {
 	requestId?: string;
 	searchMode?: SearchMode;
 	knowledgeSources?: KnowledgeSource[];
-	knowledgeItem?: Pick<KnowledgeItem, 'id' | 'deletedAt'> | null;
+	knowledgeItem?: Pick<KnowledgeItem, 'id' | 'deletedAt'> &
+		Partial<Pick<KnowledgeItem, 'rating' | 'updatedAt'>> | null;
 };
 
 export type PreviewFile = {
