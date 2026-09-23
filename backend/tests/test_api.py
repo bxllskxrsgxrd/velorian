@@ -519,7 +519,7 @@ def test_knowledge_manual_file_rated_message_and_ownership(client, monkeypatch):
 	monkeypatch.setattr(main_module, "client", FakeGroq())
 	first = client.post("/api/auth/register", json={"email": "knowledge-owner@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": first.json()["csrfToken"]})
-	manual = client.post("/api/knowledge", json={"title": "Оффер", "content": "Проверенный текст"})
+	manual = client.post("/api/knowledge", json={"title": "Тестовый материал", "content": "Проверенный текст"})
 	assert manual.status_code == 200
 	manual_id = manual.json()["item"]["id"]
 	file_item = client.post("/api/knowledge/files", data={"title": "Файл"}, files={"file": ("notes.txt", "данные файла".encode(), "text/plain")})
@@ -538,7 +538,7 @@ def test_knowledge_manual_file_rated_message_and_ownership(client, monkeypatch):
 	assert saved.status_code == 200
 	assert saved.json()["items"][0]["sourceType"] == "rated_content"
 
-	updated = client.patch(f"/api/knowledge/{manual_id}", json={"title": "Новый оффер", "content": "Новый текст", "is_active": False})
+	updated = client.patch(f"/api/knowledge/{manual_id}", json={"title": "Новый материал", "content": "Новый текст", "is_active": False})
 	assert updated.json()["item"]["isActive"] is False
 	assert len(client.get("/api/knowledge?search=Новый").json()["items"]) == 1
 
@@ -1106,7 +1106,7 @@ def test_assistant_response_markdown_file_is_exact_idempotent_and_downloadable(a
 def test_generated_markdown_file_to_knowledge_filters_and_retrieval(authenticated_client, monkeypatch):
 	import app.main as main_module
 
-	markdown = "## Pixum AI\n\nТекст рекламного материала с **Markdown**."
+	markdown = "## Материал 1\n\nНейтральный тестовый текст с **Markdown**."
 	completions = RecordingCompletions()
 	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(markdown)))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Фильтры"}).json()["conversation"]["id"]
@@ -1114,8 +1114,8 @@ def test_generated_markdown_file_to_knowledge_filters_and_retrieval(authenticate
 	message_id = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"][-1]["id"]
 	attachment = authenticated_client.post(f"/api/messages/{message_id}/markdown-file", json={}).json()["attachment"]
 	filters = {
-		"geo": "UK", "celebrity": "Alex",
-		"offer": "Pixum AI", "news_source": "BBC",
+		"geo": "Регион 1", "celebrity": "Персонаж 1",
+		"offer": "Предложение 1", "news_source": "Источник 1",
 	}
 	saved = authenticated_client.post(f"/api/knowledge/attachments/{attachment['id']}", json={"filters": filters})
 	assert saved.status_code == 200
@@ -1124,7 +1124,7 @@ def test_generated_markdown_file_to_knowledge_filters_and_retrieval(authenticate
 	assert item["sourceType"] == "assistant_file"
 	assert item["content"] == markdown
 	assert item["mimeType"] == "text/markdown"
-	assert item["fileName"] == "Pixum AI.md"
+	assert item["fileName"] == "Материал 1.md"
 	assert item["filters"] == filters
 	assert authenticated_client.get(item["downloadUrl"]).content.decode() == markdown
 
@@ -1134,33 +1134,33 @@ def test_generated_markdown_file_to_knowledge_filters_and_retrieval(authenticate
 	assert duplicate.json()["item"]["id"] == item["id"]
 
 	authenticated_client.post("/api/knowledge", json={
-		"title": "Другой оффер", "content": "Не должен попасть", "filters": {"geo": "UK", "offer": "Другой"},
+		"title": "Другой материал", "content": "Не должен попасть", "filters": {"geo": "Регион 1", "offer": "Другое предложение"},
 	})
 	for params in (
-		{"geo": "UK"},
-		{"celebrity": "Alex"},
-		{"offer": "Pixum AI"},
-		{"news_source": "BBC"},
-		{"geo": "UK", "offer": "Pixum AI"},
+		{"geo": "Регион 1"},
+		{"celebrity": "Персонаж 1"},
+		{"offer": "Предложение 1"},
+		{"news_source": "Источник 1"},
+		{"geo": "Регион 1", "offer": "Предложение 1"},
 		filters,
 	):
 		result = authenticated_client.get("/api/knowledge", params=params)
 		assert result.status_code == 200
 		assert item["id"] in [entry["id"] for entry in result.json()["items"]]
-		if "offer" in params and params["offer"] == "Pixum AI":
+		if "offer" in params and params["offer"] == "Предложение 1":
 			assert [entry["id"] for entry in result.json()["items"]] == [item["id"]]
 
 	# Explicit metadata narrows candidates, while normal lexical retrieval still ranks inside that scope.
 	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
 	authenticated_client.post(
 		f"/api/conversations/{conversation_id}/stream",
-		data={"prompt": "Найди тексты для UK по Pixum AI", "search_mode": "none"},
+		data={"prompt": "Найди материалы для Региона 1 по Предложению 1", "search_mode": "none"},
 	)
 	context = completions.calls[-1]["messages"][-1]["content"]
-	assert "Filter: ГЕО = UK" in context
-	assert "Filter: Оффер = Pixum AI" in context
-	assert "Source: Pixum AI.md" in context
-	assert "Другой оффер" not in context
+	assert "Filter: Гео = Регион 1" in context
+	assert "Filter: Оффер = Предложение 1" in context
+	assert "Source: Материал 1.md" in context
+	assert "Другой материал" not in context
 
 
 def test_metadata_filters_are_partial_case_insensitive_and_space_normalized(authenticated_client):

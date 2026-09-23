@@ -63,7 +63,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	await expect(editor.locator('.rating__star--inactive')).toHaveCount(2);
 
 	// Заполняем основные данные
-	await editor.getByLabel('Название').fill('Проверенный оффер');
+	await editor.getByLabel('Название').fill('Тестовый материал');
 
 	await editor.getByLabel('Содержимое').fill('Текст для внутренней базы знаний');
 
@@ -93,7 +93,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(
 		createPreview.getByRole('heading', {
-			name: 'Проверенный оффер',
+			name: 'Тестовый материал',
 		}),
 	).toBeVisible();
 
@@ -102,10 +102,10 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	await expect(createPreview.getByText(/Добавлено вручную ·/)).toBeVisible();
 
 	// Незаполненные метаданные не появляются
-	await expect(createPreview.getByText(/ГЕО ·/)).toHaveCount(0);
-	await expect(createPreview.getByText(/Селеба ·/)).toHaveCount(0);
+	await expect(createPreview.getByText(/Гео ·/)).toHaveCount(0);
+	await expect(createPreview.getByText(/Персонаж ·/)).toHaveCount(0);
 	await expect(createPreview.getByText(/Оффер ·/)).toHaveCount(0);
-	await expect(createPreview.getByText(/Новостник ·/)).toHaveCount(0);
+	await expect(createPreview.getByText(/Источник ·/)).toHaveCount(0);
 
 	// Возвращаемся и сохраняем
 	await editTab.click();
@@ -120,14 +120,14 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	await expect(page).toHaveURL(/\/knowledge$/);
 
 	await expect(
-		page.getByText('Проверенный оффер', {
+		page.getByText('Тестовый материал', {
 			exact: true,
 		}),
 	).toBeVisible();
 
 	await expect(
 		page.getByRole('img', {
-			name: /Рейтинг Проверенный оффер: 3 из 5/,
+			name: /Рейтинг Тестовый материал: 3 из 5/,
 		}),
 	).toBeVisible();
 
@@ -148,11 +148,11 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	// Bulk selection
 	const selectCheckbox = page.getByRole('checkbox', {
-		name: 'Выбрать Проверенный оффер',
+		name: 'Выбрать Тестовый материал',
 	});
 
 	const selectCheckboxLabel = page.locator('label.checkbox').filter({
-		hasText: 'Выбрать Проверенный оффер',
+		hasText: 'Выбрать Тестовый материал',
 	});
 
 	await expect(selectCheckbox).not.toBeChecked();
@@ -189,7 +189,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(
 		page.getByRole('img', {
-			name: /Рейтинг Проверенный оффер: 3 из 5/,
+			name: /Рейтинг Тестовый материал: 3 из 5/,
 		}),
 	).toBeVisible();
 
@@ -197,7 +197,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	// Редактирование через контекстное меню карточки
 	const knowledgeCard = page.locator('article.knowledge-card').filter({
-		hasText: 'Проверенный оффер',
+		hasText: 'Тестовый материал',
 	});
 
 	await expect(knowledgeCard).toBeVisible();
@@ -208,7 +208,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	});
 
 	const cardMenu = page.getByRole('menu', {
-		name: 'Действия с записью «Проверенный оффер»',
+		name: 'Действия с записью «Тестовый материал»',
 	});
 
 	await expect(cardMenu).toBeVisible();
@@ -259,7 +259,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(
 		editPreview.getByRole('heading', {
-			name: 'Проверенный оффер',
+			name: 'Тестовый материал',
 		}),
 	).toBeVisible();
 
@@ -267,10 +267,10 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(editPreview.getByText('Подход · Интервью')).toBeVisible();
 
-	await expect(editPreview.getByText(/ГЕО ·/)).toHaveCount(0);
-	await expect(editPreview.getByText(/Селеба ·/)).toHaveCount(0);
+	await expect(editPreview.getByText(/Гео ·/)).toHaveCount(0);
+	await expect(editPreview.getByText(/Персонаж ·/)).toHaveCount(0);
 	await expect(editPreview.getByText(/Оффер ·/)).toHaveCount(0);
-	await expect(editPreview.getByText(/Новостник ·/)).toHaveCount(0);
+	await expect(editPreview.getByText(/Источник ·/)).toHaveCount(0);
 
 	await editPageTab.click();
 
@@ -285,7 +285,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(
 		page.getByRole('img', {
-			name: /Рейтинг Проверенный оффер: 5 из 5/,
+			name: /Рейтинг Тестовый материал: 5 из 5/,
 		}),
 	).toBeVisible();
 
@@ -296,7 +296,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(
 		page.getByRole('img', {
-			name: /Рейтинг Проверенный оффер: 5 из 5/,
+			name: /Рейтинг Тестовый материал: 5 из 5/,
 		}),
 	).toBeVisible();
 

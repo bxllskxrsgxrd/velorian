@@ -7,10 +7,10 @@ type KnowledgeFilterFieldsProps = {
 };
 
 const fields: Array<{ key: keyof KnowledgeFilters; label: string; placeholder: string }> = [
-	{ key: 'geo', label: 'ГЕО', placeholder: 'Например, UK' },
-	{ key: 'celebrity', label: 'Селеба', placeholder: 'Например, Andrew Bailey' },
-	{ key: 'offer', label: 'Оффер', placeholder: 'Например, Pixum AI' },
-	{ key: 'news_source', label: 'Новостник', placeholder: 'Например, BBC' },
+	{ key: 'geo', label: 'Гео', placeholder: 'Укажите регион' },
+	{ key: 'celebrity', label: 'Персонаж', placeholder: 'Укажите персонажа' },
+	{ key: 'offer', label: 'Оффер', placeholder: 'Укажите оффер' },
+	{ key: 'news_source', label: 'Источник', placeholder: 'Укажите источник' },
 ];
 
 export function KnowledgeFilterFields({ value, onChange, disabled = false }: KnowledgeFilterFieldsProps) {

@@ -952,7 +952,7 @@ async def _extract_file(file_name: str, content_type: str, content: bytes) -> Ex
 
 
 def _format_knowledge_context(result: KnowledgeRetrievalResult) -> str:
-	filter_labels = {"geo": "ГЕО", "celebrity": "Селеба", "offer": "Оффер", "news_source": "Новостник"}
+	filter_labels = {"geo": "Гео", "celebrity": "Персонаж", "offer": "Оффер", "news_source": "Источник"}
 	metadata_filter_lines = "".join(
 		f"Filter: {filter_labels.get(key, key)} = {value}\n" for key, value in result.applied_filters
 	)

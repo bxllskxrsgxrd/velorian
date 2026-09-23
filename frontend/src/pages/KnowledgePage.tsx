@@ -188,10 +188,10 @@ export function KnowledgeDataEditor({
 			(item?.approach?.id === selectedApproachId ? item.approach.name : null))
 		: null;
 	const previewMetadata = [
-		{ label: 'ГЕО', value: formFilters.geo },
-		{ label: 'Селеба', value: formFilters.celebrity },
+		{ label: 'Гео', value: formFilters.geo },
+		{ label: 'Персонаж', value: formFilters.celebrity },
 		{ label: 'Оффер', value: formFilters.offer },
-		{ label: 'Новостник', value: formFilters.news_source },
+		{ label: 'Источник', value: formFilters.news_source },
 		{ label: 'Подход', value: selectedApproachName },
 	].filter(
 		({ label, value }) =>
@@ -886,15 +886,15 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 									/>
 								</label>
 								<label>
-									ГЕО
-									<input value={geo} onChange={(event) => setFilter('geo', event.target.value)} placeholder="ГЕО" />
+									Гео
+									<input value={geo} onChange={(event) => setFilter('geo', event.target.value)} placeholder="Гео" />
 								</label>
 								<label>
-									Селеба
+									Персонаж
 									<input
 										value={celebrity}
 										onChange={(event) => setFilter('celebrity', event.target.value)}
-										placeholder="Селеба"
+										placeholder="Персонаж"
 									/>
 								</label>
 								<label>
@@ -906,11 +906,11 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 									/>
 								</label>
 								<label>
-									Новостник
+									Источник
 									<input
 										value={newsSource}
 										onChange={(event) => setFilter('news_source', event.target.value)}
-										placeholder="Новостник"
+										placeholder="Источник"
 									/>
 								</label>
 							</div>
@@ -1025,10 +1025,10 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 															{
 																(
 																	{
-																		geo: 'ГЕО',
-																		celebrity: 'Селеба',
+																		geo: 'Гео',
+																		celebrity: 'Персонаж',
 																		offer: 'Оффер',
-																		news_source: 'Новостник',
+																		news_source: 'Источник',
 																	} as Record<string, string>
 																)[key]
 															}

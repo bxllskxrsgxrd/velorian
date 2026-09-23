@@ -89,10 +89,10 @@ function createFileDataTransfer(file: File) {
 const item = {
 	id: 'knowledge-1',
 	sourceType: 'manual' as const,
-	title: 'Оффер',
+	title: 'Тестовый материал',
 	content: 'Проверенный текст',
 	mimeType: 'text/plain',
-	fileName: 'Оффер.md',
+	fileName: 'test-material.md',
 	rating: 5,
 	approach: null,
 	isActive: true,
@@ -284,7 +284,7 @@ describe('KnowledgePage', () => {
 			}),
 			{
 				target: {
-					value: 'Оффер',
+					value: 'Тестовый материал',
 				},
 			},
 		);
@@ -313,7 +313,7 @@ describe('KnowledgePage', () => {
 		);
 
 		await waitFor(() => {
-			expect(api.createKnowledgeItem).toHaveBeenCalledWith('Оффер', 'Проверенный текст', 5, true, null, {
+			expect(api.createKnowledgeItem).toHaveBeenCalledWith('Тестовый материал', 'Проверенный текст', 5, true, null, {
 				geo: null,
 				celebrity: null,
 				offer: null,
@@ -424,7 +424,7 @@ describe('KnowledgePage', () => {
 			}),
 			{
 				target: {
-					value: 'Новый оффер',
+					value: 'Новый материал',
 				},
 			},
 		);
@@ -452,7 +452,7 @@ describe('KnowledgePage', () => {
 
 		expect(
 			within(preview).getByRole('heading', {
-				name: 'Новый оффер',
+				name: 'Новый материал',
 			}),
 		).toBeInTheDocument();
 
@@ -462,16 +462,16 @@ describe('KnowledgePage', () => {
 	});
 
 	it('combines all four metadata filters in the list request', async () => {
-		renderKnowledge('/knowledge?geo=UK&celebrity=Alex&offer=Pixum%20AI&news_source=BBC');
+		renderKnowledge('/knowledge?geo=Регион%201&celebrity=Персонаж%201&offer=Предложение%201&news_source=Источник%201');
 
 		await waitFor(() => {
 			expect(api.listKnowledge).toHaveBeenCalledWith(
 				expect.objectContaining({
 					filters: {
-						geo: 'UK',
-						celebrity: 'Alex',
-						offer: 'Pixum AI',
-						news_source: 'BBC',
+						geo: 'Регион 1',
+						celebrity: 'Персонаж 1',
+						offer: 'Предложение 1',
+						news_source: 'Источник 1',
 					},
 				}),
 			);
@@ -548,7 +548,7 @@ describe('KnowledgePage', () => {
 
 		renderKnowledge();
 
-		await openEditFromCard('Оффер');
+		await openEditFromCard('Тестовый материал');
 
 		const dialog = await screen.findByRole('region', { name: /^(Добавить|Редактировать) данные$/ });
 
@@ -601,9 +601,9 @@ describe('KnowledgePage', () => {
 			...item,
 			rating: 4,
 			filters: {
-				geo: 'UK',
+				geo: 'Регион 1',
 				celebrity: null,
-				offer: 'Pixum AI',
+				offer: 'Предложение 1',
 				news_source: null,
 			},
 			approach: null,
@@ -620,7 +620,7 @@ describe('KnowledgePage', () => {
 
 		renderKnowledge();
 
-		await openEditFromCard('Оффер');
+		await openEditFromCard('Тестовый материал');
 
 		const dialog = await screen.findByRole('region', { name: /^(Добавить|Редактировать) данные$/ });
 
@@ -644,19 +644,19 @@ describe('KnowledgePage', () => {
 
 		expect(
 			within(preview).getByRole('heading', {
-				name: 'Оффер',
+				name: 'Тестовый материал',
 			}),
 		).toBeInTheDocument();
 
 		expect(within(preview).getByText('Проверенный текст')).toBeInTheDocument();
 
-		expect(within(preview).getByText('ГЕО · UK')).toBeInTheDocument();
+		expect(within(preview).getByText('Гео · Регион 1')).toBeInTheDocument();
 
-		expect(within(preview).getByText('Оффер · Pixum AI')).toBeInTheDocument();
+		expect(within(preview).getByText('Оффер · Предложение 1')).toBeInTheDocument();
 
-		expect(within(preview).queryByText(/Селеба ·/)).not.toBeInTheDocument();
+		expect(within(preview).queryByText(/Персонаж ·/)).not.toBeInTheDocument();
 
-		expect(within(preview).queryByText(/Новостник ·/)).not.toBeInTheDocument();
+		expect(within(preview).queryByText(/Источник ·/)).not.toBeInTheDocument();
 
 		expect(within(preview).queryByText(/Подход ·/)).not.toBeInTheDocument();
 
