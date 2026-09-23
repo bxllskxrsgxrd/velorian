@@ -123,6 +123,59 @@ describe('MessageBubble actions', () => {
 		expect(onRate).toHaveBeenCalledWith(5, undefined);
 	});
 
+	it('makes the rating read-only while the linked knowledge item is saved', () => {
+		const onRate = vi.fn();
+		const onRemoveRating = vi.fn();
+		render(
+			<MessageBubble
+				message={{
+					id: 'assistant-saved',
+					role: 'assistant',
+					content: 'Ответ',
+					status: 'done',
+					knowledgeItem: { id: 'knowledge-1', deletedAt: null },
+					rating: {
+						id: 'rating-1',
+						score: 4,
+						createdAt: '2026-09-23T00:00:00Z',
+						updatedAt: '2026-09-23T00:00:00Z',
+					},
+				}}
+				onOpenAttachment={vi.fn()}
+				onRate={onRate}
+				onRemoveRating={onRemoveRating}
+				onOpenKnowledge={vi.fn()}
+			/>,
+		);
+
+		expect(screen.getByRole('img', { name: 'Оценка ответа: 4 из 5' })).toBeVisible();
+		expect(screen.queryByRole('button', { name: 'Поставить рейтинг 5 из 5' })).not.toBeInTheDocument();
+		expect(onRate).not.toHaveBeenCalled();
+		expect(onRemoveRating).not.toHaveBeenCalled();
+	});
+
+	it('keeps the rating editable when the linked knowledge item is in trash', () => {
+		const onRate = vi.fn();
+		render(
+			<MessageBubble
+				message={{
+					id: 'assistant-trashed',
+					role: 'assistant',
+					content: 'Ответ',
+					status: 'done',
+					knowledgeItem: { id: 'knowledge-1', deletedAt: '2026-09-23T00:00:00Z' },
+				}}
+				onOpenAttachment={vi.fn()}
+				onRate={onRate}
+				onRemoveRating={vi.fn()}
+				onOpenKnowledge={vi.fn()}
+			/>,
+		);
+
+		fireEvent.click(screen.getByRole('button', { name: 'Поставить рейтинг 5 из 5' }));
+		expect(onRate).toHaveBeenCalledWith(5, undefined);
+	});
+
 	it('creates a Markdown file once and exposes progress state', async () => {
 		const onCreateFile = vi.fn().mockResolvedValue(undefined);
 		render(

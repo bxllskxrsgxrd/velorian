@@ -69,6 +69,7 @@ function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, br
 	const hasText = Boolean(message.content);
 	const isFileCreated = fileState === 'success' || Boolean(generatedFile);
 	const showCompletedAssistantActions = !isUser && !isPending && !isStreaming && !isCancelled;
+	const isKnowledgeSaved = Boolean(message.knowledgeItem && !message.knowledgeItem.deletedAt);
 
 	const contentClassName = ['message__content', hasAttachments && 'message__content--with-attachments']
 		.filter(Boolean)
@@ -137,7 +138,7 @@ function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, br
 			{showCompletedAssistantActions && ((onRate && onRemoveRating) || (onCreateFile && hasText) || onAddToKnowledge || message.knowledgeItem) && (
 				<div className="message__assistant-actions">
 					{onRate && onRemoveRating && (
-						<MessageRating compact messageId={message.id} rating={message.rating} onRate={onRate} onRemove={onRemoveRating} />
+						<MessageRating compact readonly={isKnowledgeSaved} messageId={message.id} rating={message.rating} onRate={onRate} onRemove={onRemoveRating} />
 					)}
 					{onRate && onRemoveRating && onCreateFile && hasText && (
 						<span className="message__assistant-actions-divider" aria-hidden="true" />

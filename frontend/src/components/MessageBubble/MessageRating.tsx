@@ -6,11 +6,12 @@ type MessageRatingProps = {
 	messageId: string;
 	rating?: MessageRatingData | null;
 	compact?: boolean;
+	readonly?: boolean;
 	onRate: (score: number, comment?: string) => void;
 	onRemove: () => void;
 };
 
-export function MessageRating({ messageId, rating, compact = false, onRate, onRemove }: MessageRatingProps) {
+export function MessageRating({ messageId, rating, compact = false, readonly = false, onRate, onRemove }: MessageRatingProps) {
 	const commentOpen = useMessageUiStore((state) => state.byMessageId[messageId]?.isCommentOpen ?? false);
 	const comment = useMessageUiStore((state) => state.byMessageId[messageId]?.comment ?? rating?.comment ?? '');
 	const toggleComment = useMessageUiStore((state) => state.toggleComment);
@@ -23,13 +24,14 @@ export function MessageRating({ messageId, rating, compact = false, onRate, onRe
 				<Rating
 					value={rating?.score}
 					size="small"
+					readonly={readonly}
 					onChange={(score) => {
 						if (score) onRate(score, rating?.comment ?? undefined);
 						else onRemove();
 					}}
 					label="Оценка ответа"
 				/>
-				{!compact && rating && (
+				{!readonly && !compact && rating && (
 					<button
 						className="message__rating-link"
 						type="button"
@@ -38,13 +40,13 @@ export function MessageRating({ messageId, rating, compact = false, onRate, onRe
 						Комментарий
 					</button>
 				)}
-				{!compact && rating && (
+				{!readonly && !compact && rating && (
 					<button className="message__rating-link" type="button" onClick={onRemove}>
 						Убрать
 					</button>
 				)}
 			</div>
-			{!compact && commentOpen && (
+			{!readonly && !compact && commentOpen && (
 				<div className="message__rating-comment">
 					<textarea
 						value={comment}
