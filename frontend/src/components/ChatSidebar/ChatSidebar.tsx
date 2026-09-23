@@ -245,7 +245,12 @@ export function ChatSidebar(props: ChatSidebarProps) {
 					removeDeletedKnowledgeItem(ids[index]);
 					upsertKnowledgeItem(result.value);
 					if (result.value.sourceMessageId) {
-						syncKnowledgeLink(result.value.sourceMessageId, { id: result.value.id, deletedAt: result.value.deletedAt });
+						syncKnowledgeLink(result.value.sourceMessageId, {
+							id: result.value.id,
+							deletedAt: result.value.deletedAt,
+							rating: result.value.rating,
+							updatedAt: result.value.updatedAt,
+						});
 					}
 					restoredIds.push(ids[index]);
 				});

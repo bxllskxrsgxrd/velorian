@@ -7,6 +7,7 @@ import { useConversationsStore } from '../../stores/conversationsStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useSidebarStore } from '../../stores/sidebarStore';
 import { useKnowledgeStore } from '../../stores/knowledgeStore';
+import { useChatStore } from '../../stores/chatStore';
 
 const api = vi.hoisted(() => ({
 	emptyConversationTrash: vi.fn(),
@@ -66,6 +67,7 @@ describe('ChatSidebar menus', () => {
 		useConversationsStore.getState().setSearch('');
 
 		useKnowledgeStore.getState().setDeletedItems([]);
+		useChatStore.getState().resetConversation();
 
 		useSidebarStore.getState().setConversationMenuId(null);
 		useSidebarStore.getState().setAccountOpen(false);
@@ -142,7 +144,8 @@ describe('ChatSidebar menus', () => {
 			content: 'Текст',
 			mimeType: 'text/markdown',
 			fileName: 'deleted.md',
-			rating: null,
+			rating: 4,
+			sourceMessageId: 'assistant-linked',
 			approach: null,
 			isActive: true,
 			metadata: {},
@@ -164,6 +167,21 @@ describe('ChatSidebar menus', () => {
 			...deletedKnowledge,
 			deletedAt: null,
 		});
+		useChatStore.getState().setConversationMessages('conversation-1', [
+			{
+				id: 'assistant-linked',
+				role: 'assistant',
+				content: 'Ответ',
+				status: 'done',
+				knowledgeItem: { id: 'deleted-knowledge', deletedAt: deletedKnowledge.deletedAt },
+				rating: {
+					id: 'message-rating',
+					score: 2,
+					createdAt: '',
+					updatedAt: '',
+				},
+			},
+		]);
 
 		renderSidebar();
 
@@ -212,6 +230,13 @@ describe('ChatSidebar menus', () => {
 
 			expect(useKnowledgeStore.getState().items.some((item) => item.id === 'deleted-knowledge')).toBe(true);
 		});
+		const restoredMessage = useChatStore.getState().messagesByConversation['conversation-1'][0];
+		expect(restoredMessage.rating?.score).toBe(4);
+		expect(restoredMessage.knowledgeItem).toEqual(expect.objectContaining({
+			id: 'deleted-knowledge',
+			deletedAt: null,
+			rating: 4,
+		}));
 	});
 
 	it('expands the collapsed sidebar from the search button', () => {

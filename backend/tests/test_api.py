@@ -96,7 +96,7 @@ def test_conversation_crud(authenticated_client):
 def test_unified_chat_and_knowledge_trash(authenticated_client):
 	chat = authenticated_client.post("/api/conversations", json={"title": "В корзину"}).json()["conversation"]
 	knowledge = authenticated_client.post(
-		"/api/knowledge", json={"title": "Запись в корзину", "content": "Уникальный удалённый материал"},
+		"/api/knowledge", json={"title": "Запись в корзину", "content": "Уникальный удалённый материал", "rating": 4},
 	).json()["item"]
 
 	assert authenticated_client.delete(f"/api/conversations/{chat['id']}").status_code == 204
@@ -106,7 +106,9 @@ def test_unified_chat_and_knowledge_trash(authenticated_client):
 	assert authenticated_client.get(f"/api/conversations/{chat['id']}").status_code == 404
 	assert authenticated_client.get(f"/api/knowledge/{knowledge['id']}").status_code == 404
 	assert chat["id"] in {item["id"] for item in authenticated_client.get("/api/conversations/trash").json()["conversations"]}
-	assert knowledge["id"] in {item["id"] for item in authenticated_client.get("/api/knowledge/trash").json()["items"]}
+	deleted_knowledge = authenticated_client.get("/api/knowledge/trash").json()["items"]
+	assert knowledge["id"] in {item["id"] for item in deleted_knowledge}
+	assert next(item for item in deleted_knowledge if item["id"] == knowledge["id"])["rating"] == 4
 	from app.database import SessionLocal
 	from app.knowledge_retrieval import KnowledgeSearchOptions, knowledge_retrieval_service
 	user_id = authenticated_client.get("/api/auth/me").json()["user"]["id"]
@@ -121,6 +123,7 @@ def test_unified_chat_and_knowledge_trash(authenticated_client):
 	assert restored_chat.status_code == restored_knowledge.status_code == 200
 	assert restored_chat.json()["conversation"]["deletedAt"] is None
 	assert restored_knowledge.json()["item"]["deletedAt"] is None
+	assert restored_knowledge.json()["item"]["rating"] == 4
 
 	assert authenticated_client.delete(f"/api/conversations/{chat['id']}").status_code == 204
 	assert authenticated_client.delete(f"/api/knowledge/{knowledge['id']}").status_code == 204

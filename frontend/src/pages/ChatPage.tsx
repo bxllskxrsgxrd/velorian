@@ -63,6 +63,7 @@ export function ChatPage() {
 		activeConversationId ? Boolean(state.generationByConversation[activeConversationId]) : false,
 	);
 	const setConversationMessages = useChatStore((state) => state.setConversationMessages);
+	const syncKnowledgeLink = useChatStore((state) => state.syncKnowledgeLink);
 	const setConversationGeneration = useChatStore((state) => state.setConversationGeneration);
 	const clearConversationGeneration = useChatStore((state) => state.clearConversationGeneration);
 	const isLoadingConversation = useChatStore((state) => state.isLoadingConversation);
@@ -564,7 +565,12 @@ export function ChatPage() {
 		if (!knowledgeRestore) return;
 		try {
 			const restored = await restoreKnowledgeItem(knowledgeRestore.itemId);
-			setMessageKnowledgeLink(knowledgeRestore.messageId, { id: restored.id, deletedAt: null });
+			syncKnowledgeLink(knowledgeRestore.messageId, {
+				id: restored.id,
+				deletedAt: restored.deletedAt,
+				rating: restored.rating,
+				updatedAt: restored.updatedAt,
+			});
 			setKnowledgeRestore(null);
 			showToast('Запись базы знаний восстановлена', 'success');
 		} catch (error) {

@@ -216,3 +216,59 @@ describe('ChatPage conversation deletion', () => {
 		expect(signals.get(secondConversation.id)?.aborted).toBe(false);
 	});
 });
+
+describe('ChatPage linked knowledge restore', () => {
+	it('uses the restored knowledge rating and locks it again', async () => {
+		vi.clearAllMocks();
+		api.listConversations.mockResolvedValue([conversation]);
+		api.getConversation.mockResolvedValue({
+			...conversation,
+			messages: [
+				{
+					id: 'assistant-linked',
+					role: 'assistant',
+					content: 'Ответ',
+					status: 'done',
+					attachments: [],
+					knowledgeItem: { id: 'knowledge-1', deletedAt: '2026-09-23T00:00:00Z' },
+					rating: {
+						id: 'message-rating',
+						score: 2,
+						createdAt: '2026-09-22T00:00:00Z',
+						updatedAt: '2026-09-22T00:00:00Z',
+					},
+				},
+			],
+		});
+		api.getMessageKnowledgeLink.mockResolvedValue({
+			id: 'knowledge-1',
+			deletedAt: '2026-09-23T00:00:00Z',
+		});
+		api.restoreKnowledgeItem.mockResolvedValue({
+			id: 'knowledge-1',
+			sourceType: 'assistant_message',
+			sourceMessageId: 'assistant-linked',
+			title: 'Ответ',
+			content: 'Ответ',
+			mimeType: 'text/markdown',
+			fileName: 'answer.md',
+			rating: 4,
+			approach: null,
+			isActive: true,
+			metadata: {},
+			filters: { geo: null, celebrity: null, offer: null, news_source: null },
+			createdAt: '2026-09-22T00:00:00Z',
+			updatedAt: '2026-09-24T00:00:00Z',
+			deletedAt: null,
+		});
+
+		renderChatPage();
+		fireEvent.click(await screen.findByRole('button', { name: '↶ В корзине' }));
+		fireEvent.click(await screen.findByRole('button', { name: 'Восстановить' }));
+
+		expect(await screen.findByRole('button', { name: '✓ В базе знаний' })).toBeVisible();
+		expect(screen.getByRole('img', { name: 'Оценка ответа: 4 из 5' })).toBeVisible();
+		expect(screen.queryByRole('button', { name: 'Поставить рейтинг 4 из 5' })).not.toBeInTheDocument();
+		expect(useChatStore.getState().messagesByConversation[conversation.id][0].rating?.score).toBe(4);
+	});
+});
