@@ -1,4 +1,4 @@
-import type { Approach, ApproachInput, AuthUser, ChatAttachment, ChatMessage, Conversation, ConversationSummary, KnowledgeApproach, KnowledgeFilters, KnowledgeItem, KnowledgePageResult, MessageRating, SearchMode } from '../types/chat';
+import type { Approach, ApproachInput, AuthUser, ChatAttachment, ChatMessage, Conversation, ConversationSummary, KnowledgeApproach, KnowledgeCreateSource, KnowledgeFilters, KnowledgeItem, KnowledgePageResult, MessageRating, SearchMode } from '../types/chat';
 import type { AttachmentLimits } from '../constants/attachmentLimits';
 import { getUserFacingError } from '../errors/userErrorMessages';
 import { reportError } from '../utils/reportError';
@@ -255,8 +255,24 @@ export async function listKnowledge(params: { search?: string; sourceType?: stri
 	return { ...result, items: result.items.map(normalizeKnowledgeItem) };
 }
 
-export async function createKnowledgeItem(title: string, content: string, rating: number | null = null, isActive = true, approachId: string | null = null, filters?: Partial<KnowledgeFilters>): Promise<KnowledgeItem> {
-	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>('/knowledge', { method: 'POST', body: JSON.stringify({ title, content, rating, is_active: isActive, approach_id: approachId, filters: cleanFilters(filters) }) })).item);
+export async function createKnowledgeItem(title: string, content: string, rating: number | null = null, isActive = true, approachId: string | null = null, filters?: Partial<KnowledgeFilters>, source?: KnowledgeCreateSource): Promise<KnowledgeItem> {
+	return normalizeKnowledgeItem((await requestJson<{ item: KnowledgeItem }>('/knowledge', {
+		method: 'POST',
+		body: JSON.stringify({
+			title,
+			content,
+			rating,
+			is_active: isActive,
+			approach_id: approachId,
+			filters: cleanFilters(filters),
+			source_message_id: source?.messageId,
+			source_file_id: source?.type === 'assistant_file' ? source.fileId : undefined,
+		}),
+	})).item);
+}
+
+export async function getMessageKnowledgeLink(messageId: string): Promise<Pick<KnowledgeItem, 'id' | 'deletedAt'> | null> {
+	return (await requestJson<{ item: Pick<KnowledgeItem, 'id' | 'deletedAt'> | null }>(`/knowledge/messages/${messageId}/link`)).item;
 }
 
 export async function uploadKnowledgeFile(file: File, title = '', content = '', rating: number | null = null, isActive = true, approachId: string | null = null, filters?: Partial<KnowledgeFilters>): Promise<KnowledgeItem> {

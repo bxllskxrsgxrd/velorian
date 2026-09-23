@@ -24,6 +24,7 @@ const api = vi.hoisted(() => ({
 	restoreConversation: vi.fn(),
 	restoreKnowledgeItem: vi.fn(),
 	getConversation: vi.fn(),
+	getMessageKnowledgeLink: vi.fn(),
 	listConversations: vi.fn(),
 	renameConversation: vi.fn(),
 	streamChat: vi.fn(),

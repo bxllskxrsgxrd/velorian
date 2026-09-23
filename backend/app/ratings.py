@@ -7,7 +7,7 @@ from .auth import get_current_user
 from .config import settings
 from .database import get_db
 from .errors import AppError
-from .models import Conversation, KnowledgeItem, Message, MessageRating, User, utc_now
+from .models import Conversation, Message, MessageRating, User, utc_now
 
 
 router = APIRouter(prefix=f"{settings.api_prefix}/messages", tags=["ratings"])
@@ -49,9 +49,6 @@ def upsert_rating(message_id: str, payload: RatingPayload, user: User = Depends(
 	rating.score = payload.score
 	rating.comment = payload.comment.strip() if payload.comment and payload.comment.strip() else None
 	rating.updated_at = utc_now()
-	for item in db.scalars(select(KnowledgeItem).where(KnowledgeItem.user_id == user.id, KnowledgeItem.source_message_id == message.id)):
-		item.rating = rating.score
-		item.updated_at = utc_now()
 	db.commit()
 	return {"rating": rating_payload(rating), "canSaveToKnowledge": rating.score >= settings.knowledge_rating_threshold}
 
@@ -62,8 +59,5 @@ def delete_rating(message_id: str, user: User = Depends(get_current_user), db: S
 	rating = db.scalar(select(MessageRating).where(MessageRating.user_id == user.id, MessageRating.message_id == message.id))
 	if rating is not None:
 		db.delete(rating)
-	for item in db.scalars(select(KnowledgeItem).where(KnowledgeItem.user_id == user.id, KnowledgeItem.source_message_id == message.id)):
-		item.rating = None
-		item.updated_at = utc_now()
 	db.commit()
 	return Response(status_code=204)

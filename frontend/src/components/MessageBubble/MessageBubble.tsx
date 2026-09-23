@@ -4,6 +4,7 @@ import { CHAT_ROLES } from '../../constants/chatRoles';
 import type { ChatAttachment, ChatMessage } from '../../types/chat';
 import { SubmitLoadingIcon } from '../icons/SubmitLoadingIcon/SubmitLoadingIcon';
 import { CheckIcon, DocumentIcon, EditIcon } from '../icons/AppIcons';
+import { CustomSelect } from '../ui/CustomSelect/CustomSelect';
 import './_messageBubble.scss';
 import { MessageAttachment } from './MessageAttachment';
 import { MessageError } from './MessageError';
@@ -22,12 +23,12 @@ type MessageBubbleProps = {
 	branch?: { index: number; total: number; onPrevious?: () => void; onNext?: () => void };
 	onRate?: (score: number, comment?: string) => void;
 	onRemoveRating?: () => void;
-	onSaveToKnowledge?: () => void;
 	onCreateFile?: () => Promise<void>;
-	onAddAttachmentToKnowledge?: (attachment: ChatAttachment) => void;
+	onAddToKnowledge?: (attachment?: ChatAttachment) => void;
+	onOpenKnowledge?: () => void;
 };
 
-function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, branch, onRate, onRemoveRating, onSaveToKnowledge, onCreateFile, onAddAttachmentToKnowledge }: MessageBubbleProps) {
+function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, branch, onRate, onRemoveRating, onCreateFile, onAddToKnowledge, onOpenKnowledge }: MessageBubbleProps) {
 	const isEditing = useMessageUiStore((state) => state.byMessageId[message.id]?.isEditing ?? false);
 	const draft = useMessageUiStore((state) => state.byMessageId[message.id]?.draft ?? message.content);
 	const fileState = useMessageUiStore((state) => state.byMessageId[message.id]?.fileState ?? 'idle');
@@ -58,6 +59,7 @@ function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, br
 
 	const fileAttachments = attachments.filter((attachment) => !attachment.type.startsWith('image/'));
 	const generatedFileAttachments = isUser ? [] : fileAttachments.filter((attachment) => attachment.generated);
+	const generatedFile = generatedFileAttachments[0];
 	const leadingFileAttachments = isUser
 		? fileAttachments
 		: fileAttachments.filter((attachment) => !attachment.generated);
@@ -65,7 +67,7 @@ function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, br
 	const hasAttachments = attachments.length > 0;
 	const hasImages = imageAttachments.length > 0;
 	const hasText = Boolean(message.content);
-	const isFileCreated = fileState === 'success' || generatedFileAttachments.length > 0;
+	const isFileCreated = fileState === 'success' || Boolean(generatedFile);
 	const showCompletedAssistantActions = !isUser && !isPending && !isStreaming && !isCancelled;
 
 	const contentClassName = ['message__content', hasAttachments && 'message__content--with-attachments']
@@ -107,7 +109,7 @@ function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, br
 			{leadingFileAttachments.length > 0 && (
 				<div className="message__files">
 					{leadingFileAttachments.map((attachment) => (
-						<MessageAttachment key={attachment.id} attachment={attachment} onOpen={() => onOpenAttachment(attachment)} onAddToKnowledge={attachment.generated && onAddAttachmentToKnowledge ? () => onAddAttachmentToKnowledge(attachment) : undefined} />
+						<MessageAttachment key={attachment.id} attachment={attachment} onOpen={() => onOpenAttachment(attachment)} />
 					))}
 				</div>
 			)}
@@ -132,10 +134,10 @@ function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, br
 					)}
 				</div>
 			)}
-			{showCompletedAssistantActions && ((onRate && onRemoveRating) || (onCreateFile && hasText)) && (
+			{showCompletedAssistantActions && ((onRate && onRemoveRating) || (onCreateFile && hasText) || onAddToKnowledge || message.knowledgeItem) && (
 				<div className="message__assistant-actions">
 					{onRate && onRemoveRating && (
-						<MessageRating compact messageId={message.id} rating={message.rating} onRate={onRate} onRemove={onRemoveRating} onSaveToKnowledge={onSaveToKnowledge} />
+						<MessageRating compact messageId={message.id} rating={message.rating} onRate={onRate} onRemove={onRemoveRating} />
 					)}
 					{onRate && onRemoveRating && onCreateFile && hasText && (
 						<span className="message__assistant-actions-divider" aria-hidden="true" />
@@ -162,6 +164,36 @@ function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, br
 						</button>
 					))}
 					{fileState === 'error' && <span className="message__create-file-error" role="status">Не удалось создать файл</span>}
+					{(onAddToKnowledge || message.knowledgeItem) && (
+						<span className="message__assistant-actions-divider" aria-hidden="true" />
+					)}
+					{message.knowledgeItem ? (
+						<button
+							className={`message__knowledge-action${message.knowledgeItem.deletedAt ? ' message__knowledge-action--trash' : ' message__knowledge-action--saved'}`}
+							type="button"
+							onClick={onOpenKnowledge}
+						>
+							{message.knowledgeItem.deletedAt ? '↶ В корзине' : '✓ В базе знаний'}
+						</button>
+					) : generatedFile && onAddToKnowledge ? (
+						<CustomSelect
+							className="message__knowledge-select"
+							value=""
+							ariaLabel="Добавить в базу"
+							triggerLabel="Добавить в базу"
+							placement="top"
+							disabled={fileState === 'loading'}
+							onChange={(value) => onAddToKnowledge(value === 'file' ? generatedFile : undefined)}
+							options={[
+								{ value: 'text', label: <span className="message__knowledge-option"><DocumentIcon size={18} /><span><strong>Текст ответа</strong><small>Добавить содержимое сообщения</small></span></span> },
+								{ value: 'file', label: <span className="message__knowledge-option"><DocumentIcon size={18} /><span><strong>{`Файл «${generatedFile.name}»`}</strong><small>Добавить созданный файл</small></span></span> },
+							]}
+						/>
+					) : onAddToKnowledge ? (
+						<button className="message__knowledge-action" type="button" disabled={fileState === 'loading'} onClick={() => onAddToKnowledge()}>
+							Добавить текст в базу
+						</button>
+					) : null}
 				</div>
 			)}
 			{generatedFileAttachments.length > 0 && (
@@ -171,7 +203,6 @@ function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, br
 							key={attachment.id}
 							attachment={attachment}
 							onOpen={() => onOpenAttachment(attachment)}
-							onAddToKnowledge={onAddAttachmentToKnowledge ? () => onAddAttachmentToKnowledge(attachment) : undefined}
 							showKnowledgeAction={false}
 						/>
 					))}
@@ -204,7 +235,7 @@ export const MessageBubble = memo(MessageBubbleComponent, (previous, next) =>
 	Boolean(previous.onEdit) === Boolean(next.onEdit) &&
 	Boolean(previous.onRate) === Boolean(next.onRate) &&
 	Boolean(previous.onRemoveRating) === Boolean(next.onRemoveRating) &&
-	Boolean(previous.onSaveToKnowledge) === Boolean(next.onSaveToKnowledge) &&
 	Boolean(previous.onCreateFile) === Boolean(next.onCreateFile) &&
-	Boolean(previous.onAddAttachmentToKnowledge) === Boolean(next.onAddAttachmentToKnowledge),
+	Boolean(previous.onAddToKnowledge) === Boolean(next.onAddToKnowledge) &&
+	Boolean(previous.onOpenKnowledge) === Boolean(next.onOpenKnowledge),
 );

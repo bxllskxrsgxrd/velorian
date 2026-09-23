@@ -32,6 +32,7 @@ import { useConversationsStore } from '../../stores/conversationsStore';
 import { useUiStore } from '../../stores/uiStore';
 import { useDebounce } from '../../hooks/useDebounce';
 import { useKnowledgeStore } from '../../stores/knowledgeStore';
+import { useChatStore } from '../../stores/chatStore';
 import { reportError } from '../../utils/reportError';
 import { useToast } from '../../hooks/useToast';
 
@@ -107,6 +108,8 @@ export function ChatSidebar(props: ChatSidebarProps) {
 	const setDeletedKnowledgeItems = useKnowledgeStore((state) => state.setDeletedItems);
 	const upsertKnowledgeItem = useKnowledgeStore((state) => state.upsertItem);
 	const removeDeletedKnowledgeItem = useKnowledgeStore((state) => state.removeDeletedItem);
+	const syncKnowledgeLink = useChatStore((state) => state.syncKnowledgeLink);
+	const removeKnowledgeLink = useChatStore((state) => state.removeKnowledgeLink);
 	const search = useConversationsStore((state) => state.search);
 	const setSearch = useConversationsStore((state) => state.setSearch);
 	const isOpen = useUiStore((state) => state.isSidebarOpen);
@@ -241,6 +244,9 @@ export function ChatSidebar(props: ChatSidebarProps) {
 					if (result.status !== 'fulfilled') return;
 					removeDeletedKnowledgeItem(ids[index]);
 					upsertKnowledgeItem(result.value);
+					if (result.value.sourceMessageId) {
+						syncKnowledgeLink(result.value.sourceMessageId, { id: result.value.id, deletedAt: result.value.deletedAt });
+					}
 					restoredIds.push(ids[index]);
 				});
 				removeSelectedTrashIds(restoredIds);
@@ -273,7 +279,10 @@ export function ChatSidebar(props: ChatSidebarProps) {
 			results.forEach((result, index) => {
 				if (result.status !== 'fulfilled') return;
 				if (type === 'chats') removeDeletedConversation(ids[index]);
-				else removeDeletedKnowledgeItem(ids[index]);
+				else {
+					removeDeletedKnowledgeItem(ids[index]);
+					removeKnowledgeLink(ids[index]);
+				}
 				deletedIds.push(ids[index]);
 			});
 			removeSelectedTrashIds(deletedIds);

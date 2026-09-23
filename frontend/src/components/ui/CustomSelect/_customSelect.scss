@@ -51,6 +51,11 @@
 	box-shadow: var(--shadow-surface);
 }
 
+.custom-select--top .custom-select__menu {
+	top: auto;
+	bottom: calc(100% + 5px);
+}
+
 button.custom-select__option {
 	width: 100%;
 	padding: 8px 9px;

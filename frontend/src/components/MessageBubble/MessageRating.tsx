@@ -8,10 +8,9 @@ type MessageRatingProps = {
 	compact?: boolean;
 	onRate: (score: number, comment?: string) => void;
 	onRemove: () => void;
-	onSaveToKnowledge?: () => void;
 };
 
-export function MessageRating({ messageId, rating, compact = false, onRate, onRemove, onSaveToKnowledge }: MessageRatingProps) {
+export function MessageRating({ messageId, rating, compact = false, onRate, onRemove }: MessageRatingProps) {
 	const commentOpen = useMessageUiStore((state) => state.byMessageId[messageId]?.isCommentOpen ?? false);
 	const comment = useMessageUiStore((state) => state.byMessageId[messageId]?.comment ?? rating?.comment ?? '');
 	const toggleComment = useMessageUiStore((state) => state.toggleComment);
@@ -42,11 +41,6 @@ export function MessageRating({ messageId, rating, compact = false, onRate, onRe
 				{!compact && rating && (
 					<button className="message__rating-link" type="button" onClick={onRemove}>
 						Убрать
-					</button>
-				)}
-				{!compact && onSaveToKnowledge && (
-					<button className="message__rating-save" type="button" onClick={onSaveToKnowledge}>
-						В базу знаний
 					</button>
 				)}
 			</div>

@@ -127,7 +127,7 @@ function TestShell() {
 	);
 }
 
-function renderKnowledge(initialEntry = '/knowledge') {
+function renderKnowledge(initialEntry: string | { pathname: string; state: unknown } = '/knowledge') {
 	const router = createMemoryRouter(
 		[
 			{
@@ -137,6 +137,7 @@ function renderKnowledge(initialEntry = '/knowledge') {
 					{ path: 'knowledge', element: <KnowledgePage user={{ id: 'user', email: 'user@example.com' }} /> },
 					{ path: 'knowledge/new', element: <KnowledgeEditorPage /> },
 					{ path: 'knowledge/:knowledgeId', element: <KnowledgeEditorPage /> },
+					{ path: 'chat/:chatId', element: <div>Чат</div> },
 				],
 			},
 		],
@@ -205,6 +206,90 @@ describe('KnowledgePage', () => {
 		api.createKnowledgeItem.mockResolvedValue(item);
 		api.updateKnowledgeItem.mockResolvedValue(item);
 		api.updateKnowledgeFile.mockResolvedValue(item);
+	});
+
+	it('prefills and saves assistant text with its rating and durable source', async () => {
+		const source = {
+			type: 'assistant_message' as const,
+			messageId: 'assistant-text',
+			title: 'Заголовок ответа',
+			content: 'Полный текст ответа',
+			rating: 4,
+			returnTo: '/chat/conversation-1',
+		};
+		renderKnowledge({ pathname: '/knowledge/new', state: { knowledgeSource: source } });
+
+		expect(await screen.findByRole('textbox', { name: 'Название' })).toHaveValue(source.title);
+		expect(screen.getByRole('textbox', { name: 'Содержимое' })).toHaveValue(source.content);
+		expect(screen.getByRole('button', { name: 'Поставить рейтинг 4 из 5' })).toHaveAttribute('aria-pressed', 'true');
+		fireEvent.click(screen.getByRole('button', { name: 'Добавить данные' }));
+
+		await waitFor(() => expect(api.createKnowledgeItem).toHaveBeenCalledWith(
+			source.title,
+			source.content,
+			4,
+			true,
+			null,
+			expect.objectContaining({ geo: null, celebrity: null, offer: null, news_source: null }),
+			source,
+		));
+	});
+
+	it('prefills a generated file and preserves an absent rating', async () => {
+		const source = {
+			type: 'assistant_file' as const,
+			messageId: 'assistant-file',
+			fileId: 'file-1',
+			title: 'Ответ.md',
+			content: '# Ответ\n\nСодержимое',
+			rating: null,
+			fileName: 'Ответ.md',
+			mimeType: 'text/markdown',
+		};
+		renderKnowledge({ pathname: '/knowledge/new', state: { knowledgeSource: source } });
+
+		expect(await screen.findByRole('button', { name: 'Выбрать файл' })).toHaveTextContent('Ответ.md');
+		fireEvent.click(screen.getByRole('button', { name: 'Добавить данные' }));
+		await waitFor(() => expect(api.createKnowledgeItem).toHaveBeenCalledWith(
+			source.title,
+			source.content,
+			null,
+			true,
+			null,
+			expect.any(Object),
+			source,
+		));
+		expect(api.uploadKnowledgeFile).not.toHaveBeenCalled();
+	});
+
+	it('returns to the source chat on cancel without creating a record', async () => {
+		const source = {
+			type: 'assistant_message' as const,
+			messageId: 'assistant-cancel',
+			title: 'Ответ',
+			content: 'Не сохранять',
+			rating: null,
+			returnTo: '/chat/conversation-1',
+		};
+		renderKnowledge({ pathname: '/knowledge/new', state: { knowledgeSource: source } });
+		fireEvent.click(await screen.findByRole('button', { name: 'Отмена' }));
+		expect(await screen.findByLabelText('Текущий URL')).toHaveTextContent('/chat/conversation-1');
+		expect(api.createKnowledgeItem).not.toHaveBeenCalled();
+	});
+
+	it('keeps the editor open when linked record creation fails', async () => {
+		api.createKnowledgeItem.mockRejectedValueOnce(new Error('Ошибка сохранения'));
+		const source = {
+			type: 'assistant_message' as const,
+			messageId: 'assistant-error',
+			title: 'Ответ',
+			content: 'Сохранить позже',
+			rating: null,
+		};
+		renderKnowledge({ pathname: '/knowledge/new', state: { knowledgeSource: source } });
+		fireEvent.click(await screen.findByRole('button', { name: 'Добавить данные' }));
+		expect(await screen.findByText('Ошибка сохранения')).toBeInTheDocument();
+		expect(screen.getByLabelText('Текущий URL')).toHaveTextContent('/knowledge/new');
 	});
 
 	it('shows created and updated card metadata using full timestamps', async () => {

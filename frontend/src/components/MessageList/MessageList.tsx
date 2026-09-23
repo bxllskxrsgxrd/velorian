@@ -1,5 +1,4 @@
 import type { ChatAttachment, ChatMessage } from '../../types/chat';
-import { KNOWLEDGE_RATING_THRESHOLD } from '../../constants/limits';
 import { MessageBubble } from '../MessageBubble/MessageBubble';
 import './_messageList.scss';
 import { useChatStore } from '../../stores/chatStore';
@@ -13,9 +12,9 @@ type MessageListProps = {
 	canEdit?: boolean;
 	onRate: (message: ChatMessage, score: number, comment?: string) => void;
 	onRemoveRating: (message: ChatMessage) => void;
-	onSaveToKnowledge: (message: ChatMessage) => void;
+	onAddToKnowledge: (message: ChatMessage, attachment?: ChatAttachment) => void;
+	onOpenKnowledge: (message: ChatMessage) => void;
 	onCreateFile?: (message: ChatMessage) => Promise<void>;
-	onAddAttachmentToKnowledge?: (attachment: ChatAttachment) => void;
 };
 
 type BranchInfo = { variants: ChatMessage[]; active: ChatMessage };
@@ -68,7 +67,7 @@ function getRetryMessageIds(messages: ChatMessage[]) {
 }
 
 
-export function MessageList({ conversationId, onOpenAttachment, onRetry, onEdit, onActivateBranch, onRate, onRemoveRating, onSaveToKnowledge, onCreateFile, onAddAttachmentToKnowledge, canEdit = true }: MessageListProps) {
+export function MessageList({ conversationId, onOpenAttachment, onRetry, onEdit, onActivateBranch, onRate, onRemoveRating, onAddToKnowledge, onOpenKnowledge, onCreateFile, canEdit = true }: MessageListProps) {
 	const messages = useChatStore((state) => conversationId ? (state.messagesByConversation[conversationId] ?? EMPTY_MESSAGES) : state.messages);
 	const { displayed, branches } = buildDisplay(messages);
 	const retryMessageIds = getRetryMessageIds(displayed);
@@ -87,9 +86,9 @@ export function MessageList({ conversationId, onOpenAttachment, onRetry, onEdit,
 						onEdit={message.role === 'user' && canEdit ? (content) => onEdit(message, content) : undefined}
 						onRate={message.role === 'assistant' && message.status === 'done' ? (score, comment) => onRate(message, score, comment) : undefined}
 						onRemoveRating={message.role === 'assistant' && message.status === 'done' ? () => onRemoveRating(message) : undefined}
-						onSaveToKnowledge={message.role === 'assistant' && (message.rating?.score ?? 0) >= KNOWLEDGE_RATING_THRESHOLD ? () => onSaveToKnowledge(message) : undefined}
+						onAddToKnowledge={message.role === 'assistant' && message.status === 'done' && message.content.trim() ? (attachment) => onAddToKnowledge(message, attachment) : undefined}
+						onOpenKnowledge={message.knowledgeItem ? () => onOpenKnowledge(message) : undefined}
 						onCreateFile={onCreateFile && message.role === 'assistant' && message.status === 'done' && message.content.trim() ? () => onCreateFile(message) : undefined}
-						onAddAttachmentToKnowledge={onAddAttachmentToKnowledge}
 						branch={branchInfo ? {
 							index: branchIndex,
 							total: branchInfo.variants.length,

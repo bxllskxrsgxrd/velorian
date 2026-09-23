@@ -102,6 +102,7 @@ def _attachment_payload(attachment: Attachment) -> dict:
 
 def _message_payload(message: Message) -> dict:
 	rating = message.ratings[0] if message.ratings else None
+	knowledge_item = max(message.knowledge_items, key=lambda item: item.updated_at) if message.knowledge_items else None
 	return {
 		"id": message.id,
 		"role": message.role,
@@ -125,6 +126,10 @@ def _message_payload(message: Message) -> dict:
 			"createdAt": rating.created_at.isoformat(),
 			"updatedAt": rating.updated_at.isoformat(),
 		} if rating else None,
+		"knowledgeItem": {
+			"id": knowledge_item.id,
+			"deletedAt": knowledge_item.deleted_at.isoformat() if knowledge_item.deleted_at else None,
+		} if knowledge_item else None,
 	}
 
 
@@ -155,6 +160,7 @@ def _owned_conversation(
 		statement = statement.options(
 			selectinload(Conversation.messages).selectinload(Message.attachments),
 			selectinload(Conversation.messages).selectinload(Message.ratings),
+			selectinload(Conversation.messages).selectinload(Message.knowledge_items),
 		)
 	conversation = db.scalar(statement)
 	if conversation is None:

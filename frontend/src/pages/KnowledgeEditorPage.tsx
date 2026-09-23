@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from 'react';
-import { useBlocker, useNavigate, useParams } from 'react-router-dom';
+import { useBlocker, useLocation, useNavigate, useParams } from 'react-router-dom';
 import {
 	createKnowledgeItem,
 	getKnowledgeItem,
@@ -12,7 +12,7 @@ import { EMPTY_KNOWLEDGE_FILTERS } from '../constants/knowledgeFilters';
 import { useToast } from '../hooks/useToast';
 import { useApproachesStore } from '../stores/approachesStore';
 import { useKnowledgeStore } from '../stores/knowledgeStore';
-import type { KnowledgeItem } from '../types/chat';
+import type { KnowledgeCreateSource, KnowledgeItem } from '../types/chat';
 import { reportError } from '../utils/reportError';
 import { KnowledgeDataEditor } from './KnowledgePage';
 
@@ -37,8 +37,10 @@ function fingerprint(value: {
 
 export function KnowledgeEditorPage() {
 	const navigate = useNavigate();
+	const location = useLocation();
 	const { knowledgeId } = useParams<{ knowledgeId: string }>();
 	const isCreate = !knowledgeId;
+	const createSource = (location.state as { knowledgeSource?: KnowledgeCreateSource } | null)?.knowledgeSource;
 	const items = useKnowledgeStore((state) => state.items);
 	const item = knowledgeId ? items.find((entry) => entry.id === knowledgeId) : undefined;
 	const upsertItem = useKnowledgeStore((state) => state.upsertItem);
@@ -96,14 +98,17 @@ export function KnowledgeEditorPage() {
 		let cancelled = false;
 		allowNavigationRef.current = false;
 		if (isCreate) {
+			const sourceFile = createSource?.type === 'assistant_file' && createSource.fileName
+				? new File([createSource.content], createSource.fileName, { type: createSource.mimeType || 'text/markdown' })
+				: null;
 			const initial = {
-				title: '',
-				content: '',
-				rating: null,
+				title: createSource?.title ?? '',
+				content: createSource?.content ?? '',
+				rating: createSource?.rating ?? null,
 				isActive: true,
 				approachId: '',
 				filters: { ...EMPTY_KNOWLEDGE_FILTERS },
-				file: null,
+				file: sourceFile,
 			};
 			// Route changes can reuse this component instance, so reset the comparison snapshot too
 			// eslint-disable-next-line react-hooks/set-state-in-effect
@@ -114,7 +119,7 @@ export function KnowledgeEditorPage() {
 			setIsActive(initial.isActive);
 			setSelectedApproachId(initial.approachId);
 			setFormFilters(initial.filters);
-			setFile(null);
+			setFile(sourceFile);
 			return;
 		}
 		if (!knowledgeId) return;
@@ -148,6 +153,7 @@ export function KnowledgeEditorPage() {
 			cancelled = true;
 		};
 	}, [
+		createSource,
 		isCreate,
 		knowledgeId,
 		setContent,
@@ -166,7 +172,9 @@ export function KnowledgeEditorPage() {
 		setSaving(true);
 		try {
 			const saved = isCreate
-				? file
+				? createSource
+					? await createKnowledgeItem(title.trim(), content, rating, isActive, selectedApproachId || null, formFilters, createSource)
+					: file
 					? await uploadKnowledgeFile(
 							file,
 							title.trim(),
@@ -212,7 +220,7 @@ export function KnowledgeEditorPage() {
 			showToast(isCreate ? 'Данные добавлены в базу знаний' : 'Изменения сохранены', 'success');
 			if (isCreate) {
 				allowNavigationRef.current = true;
-				navigate(`/knowledge/${saved.id}`, { replace: true });
+				navigate(createSource?.returnTo ?? `/knowledge/${saved.id}`, { replace: true });
 			}
 		} catch (error) {
 			reportError('KNOWLEDGE_SAVE_FAILED', error);
@@ -250,7 +258,7 @@ export function KnowledgeEditorPage() {
 				file={file}
 				setFile={setFile}
 				saving={saving}
-				onCancel={() => navigate('/knowledge')}
+				onCancel={() => navigate(createSource?.returnTo ?? '/knowledge')}
 				onConfirm={() => void save()}
 			/>
 			{blocker.state === 'blocked' && (

@@ -201,6 +201,69 @@
 		color: var(--color-error);
 		font-size: 12px;
 	}
+	&__knowledge-action,
+	&__knowledge-select .custom-select__trigger {
+		min-height: 32px;
+		padding: 4px 6px;
+		border: 0;
+		border-radius: var(--radius-small);
+		color: var(--color-text-secondary);
+		background: transparent;
+		font: inherit;
+		white-space: nowrap;
+		cursor: pointer;
+	}
+	&__knowledge-action:hover:not(:disabled),
+	&__knowledge-select .custom-select__trigger:hover:not(:disabled) {
+		color: var(--color-text-primary);
+		background: var(--color-accent-soft);
+	}
+	&__knowledge-action:focus-visible,
+	&__knowledge-select .custom-select__trigger:focus-visible {
+		outline: 1px solid var(--color-accent-focus);
+		outline-offset: 2px;
+		box-shadow: var(--focus-ring);
+	}
+	&__knowledge-action:disabled,
+	&__knowledge-select .custom-select__trigger:disabled {
+		cursor: wait;
+		opacity: 0.6;
+	}
+	&__knowledge-action--saved {
+		color: var(--color-success);
+	}
+	&__knowledge-action--trash {
+		color: var(--color-warning, #d59b38);
+	}
+	&__knowledge-select {
+		width: auto;
+	}
+	&__knowledge-select .custom-select__menu {
+		right: 0;
+		left: auto;
+		width: min(340px, calc(100vw - 32px));
+		padding: 6px;
+	}
+	&__knowledge-select button.custom-select__option {
+		padding: 10px 12px;
+	}
+	&__knowledge-option {
+		display: flex;
+		align-items: flex-start;
+		gap: 10px;
+	}
+	&__knowledge-option > span {
+		display: grid;
+		gap: 2px;
+	}
+	&__knowledge-option strong {
+		font-size: 13px;
+		font-weight: 500;
+	}
+	&__knowledge-option small {
+		color: var(--color-text-secondary);
+		font-size: 12px;
+	}
 
 	&__actions {
 		display: flex;

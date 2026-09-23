@@ -22,7 +22,8 @@ describe('MessageList branches', () => {
 				onActivateBranch={onActivateBranch}
 				onRate={vi.fn()}
 				onRemoveRating={vi.fn()}
-				onSaveToKnowledge={vi.fn()}
+				onAddToKnowledge={vi.fn()}
+				onOpenKnowledge={vi.fn()}
 			/>,
 		);
 

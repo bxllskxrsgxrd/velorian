@@ -79,6 +79,8 @@ class KnowledgeCreatePayload(BaseModel):
 	rating: RatingValue | None = None
 	approach_id: str | None = Field(default=None, max_length=36)
 	filters: KnowledgeFiltersPayload = Field(default_factory=KnowledgeFiltersPayload)
+	source_message_id: str | None = Field(default=None, max_length=36)
+	source_file_id: str | None = Field(default=None, max_length=36)
 
 
 class KnowledgeUpdatePayload(BaseModel):
@@ -330,22 +332,87 @@ def list_knowledge_items(
 
 
 @router.post("")
-def create_manual_knowledge_item(payload: KnowledgeCreatePayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def create_manual_knowledge_item(payload: KnowledgeCreatePayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	approach = optional_owned_approach(db, payload.approach_id, user.id)
+	message: Message | None = None
+	attachment: Attachment | None = None
+	if payload.source_message_id:
+		message = db.scalar(
+			select(Message)
+			.join(Conversation, Conversation.id == Message.conversation_id)
+			.where(
+				Message.id == payload.source_message_id,
+				Message.role == "assistant",
+				Conversation.user_id == user.id,
+			)
+		)
+		if message is None:
+			raise AppError(404, "MESSAGE_NOT_FOUND", "Ответ не найден")
+	if payload.source_file_id:
+		if message is None:
+			raise AppError(422, "KNOWLEDGE_SOURCE_INVALID", "Для файла не указан исходный ответ")
+		attachment = db.scalar(select(Attachment).where(
+			Attachment.id == payload.source_file_id,
+			Attachment.message_id == message.id,
+		))
+		if attachment is None:
+			raise AppError(404, "ATTACHMENT_NOT_FOUND", "Созданный файл не найден")
+	if message is not None:
+		conditions = [KnowledgeItem.source_message_id == message.id]
+		if attachment is not None:
+			conditions.append(KnowledgeItem.source_file_id == attachment.id)
+		existing = db.scalar(select(KnowledgeItem).where(
+			KnowledgeItem.user_id == user.id,
+			or_(*conditions),
+		))
+		if existing is not None:
+			raise AppError(409, "KNOWLEDGE_SOURCE_EXISTS", "Для этого ответа уже существует запись в базе знаний", {
+				"itemId": existing.id,
+				"deletedAt": existing.deleted_at.isoformat() if existing.deleted_at else None,
+			})
 	item = KnowledgeItem(
 		user_id=user.id,
-		source_type="manual",
+		source_type="assistant_file" if attachment is not None else ("assistant_message" if message is not None else "manual"),
+		source_message_id=message.id if message is not None else None,
+		source_file_id=attachment.id if attachment is not None else None,
 		title=payload.title.strip(),
 		content=payload.content,
-		mime_type="text/markdown",
+		mime_type=attachment.content_type if attachment is not None else "text/markdown",
+		original_filename=attachment.name if attachment is not None else None,
 		is_active=payload.is_active,
 		rating=payload.rating,
 		approach=approach,
 		item_metadata=merge_knowledge_filters({}, payload.filters),
 	)
 	db.add(item)
-	db.commit()
+	try:
+		db.flush()
+		if attachment is not None:
+			await _persist_attachment_copy(db, item, attachment, commit=False)
+		db.commit()
+	except IntegrityError as error:
+		db.rollback()
+		raise AppError(409, "KNOWLEDGE_SOURCE_EXISTS", "Для этого ответа уже существует запись в базе знаний") from error
 	return {"item": knowledge_payload(item)}
+
+
+@router.get("/messages/{message_id}/link")
+def get_message_knowledge_link(message_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+	message = db.scalar(
+		select(Message)
+		.join(Conversation, Conversation.id == Message.conversation_id)
+		.where(Message.id == message_id, Message.role == "assistant", Conversation.user_id == user.id)
+	)
+	if message is None:
+		raise AppError(404, "MESSAGE_NOT_FOUND", "Ответ не найден")
+	item = db.scalar(select(KnowledgeItem).where(
+		KnowledgeItem.user_id == user.id,
+		KnowledgeItem.source_message_id == message.id,
+	))
+	return {"item": {
+		"id": item.id,
+		"deletedAt": item.deleted_at.isoformat() if item.deleted_at else None,
+	} if item is not None else None}
 
 
 @router.post("/files")

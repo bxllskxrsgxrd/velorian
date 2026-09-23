@@ -921,7 +921,7 @@ def test_three_active_items_retrieval_browse_toggle_and_sources(authenticated_cl
 	assert "Source: Facebook Hooks" in completions.calls[-1]["messages"][-1]["content"]
 
 
-def test_lower_rating_keeps_saved_knowledge_active(authenticated_client, monkeypatch):
+def test_message_rating_changes_do_not_update_saved_knowledge(authenticated_client, monkeypatch):
 	import app.main as main_module
 	monkeypatch.setattr(main_module, "client", FakeGroq())
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Порог"}).json()["conversation"]["id"]
@@ -932,7 +932,7 @@ def test_lower_rating_keeps_saved_knowledge_active(authenticated_client, monkeyp
 	authenticated_client.put(f"/api/messages/{message_id}/rating", json={"score": 2})
 	items = authenticated_client.get("/api/knowledge").json()["items"]
 	assert items[0]["isActive"] is True
-	assert items[0]["rating"] == 2
+	assert items[0]["rating"] == 5
 
 
 def test_knowledge_approach_crud_filter_delete_and_user_isolation(authenticated_client):
@@ -1101,6 +1101,79 @@ def test_assistant_response_markdown_file_is_exact_idempotent_and_downloadable(a
 	assert duplicate.status_code == 200
 	assert duplicate.json()["created"] is False
 	assert duplicate.json()["attachment"]["id"] == attachment["id"]
+
+
+def test_message_editor_knowledge_link_lifecycle_and_file_reuse(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	markdown = "## Связанный материал\n\nТочное содержимое файла."
+	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(markdown)))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Связь"}).json()["conversation"]["id"]
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Создай материал"})
+	message = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"][-1]
+	attachment = authenticated_client.post(f"/api/messages/{message['id']}/markdown-file", json={}).json()["attachment"]
+
+	created = authenticated_client.post("/api/knowledge", json={
+		"title": attachment["name"],
+		"content": markdown,
+		"rating": None,
+		"source_message_id": message["id"],
+		"source_file_id": attachment["id"],
+	})
+	assert created.status_code == 200
+	item = created.json()["item"]
+	assert item["sourceType"] == "assistant_file"
+	assert item["sourceMessageId"] == message["id"]
+	assert item["sourceFileId"] == attachment["id"]
+	assert item["rating"] is None
+	assert authenticated_client.get(item["originalDownloadUrl"]).content.decode() == markdown
+	assert authenticated_client.get(f"/api/knowledge/messages/{message['id']}/link").json()["item"] == {
+		"id": item["id"], "deletedAt": None,
+	}
+	conversation = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]
+	assert conversation["messages"][-1]["knowledgeItem"] == {"id": item["id"], "deletedAt": None}
+
+	duplicate = authenticated_client.post("/api/knowledge", json={
+		"title": "Дубликат", "content": markdown, "source_message_id": message["id"],
+	})
+	assert duplicate.status_code == 409
+
+	assert authenticated_client.delete(f"/api/knowledge/{item['id']}").status_code == 204
+	trashed_link = authenticated_client.get(f"/api/knowledge/messages/{message['id']}/link").json()["item"]
+	assert trashed_link["id"] == item["id"]
+	assert trashed_link["deletedAt"] is not None
+	assert authenticated_client.post(f"/api/knowledge/trash/{item['id']}/restore").status_code == 200
+	assert authenticated_client.get(f"/api/knowledge/messages/{message['id']}/link").json()["item"]["deletedAt"] is None
+
+	assert authenticated_client.delete(f"/api/knowledge/{item['id']}").status_code == 204
+	assert authenticated_client.delete(f"/api/knowledge/trash/{item['id']}").status_code == 204
+	assert authenticated_client.get(f"/api/knowledge/messages/{message['id']}/link").json()["item"] is None
+	conversation = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]
+	assert conversation["messages"][-1]["knowledgeItem"] is None
+	assert conversation["messages"][-1]["attachments"][0]["id"] == attachment["id"]
+	assert authenticated_client.get(attachment["downloadUrl"]).content.decode() == markdown
+
+
+def test_message_editor_text_source_preserves_selected_or_absent_rating(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions("Текст ответа")))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Оценки редактора"}).json()["conversation"]["id"]
+	created_ratings = []
+	for prompt, rating in (("С оценкой", 3), ("Без оценки", None)):
+		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
+		message = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"][-1]
+		created = authenticated_client.post("/api/knowledge", json={
+			"title": prompt,
+			"content": message["content"],
+			"rating": rating,
+			"source_message_id": message["id"],
+		})
+		assert created.status_code == 200
+		assert created.json()["item"]["sourceType"] == "assistant_message"
+		created_ratings.append(created.json()["item"]["rating"])
+
+	assert created_ratings == [3, None]
 
 
 def test_generated_markdown_file_to_knowledge_filters_and_retrieval(authenticated_client, monkeypatch):

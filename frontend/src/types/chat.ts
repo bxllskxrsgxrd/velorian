@@ -88,6 +88,7 @@ export type ChatMessage = {
 	requestId?: string;
 	searchMode?: SearchMode;
 	knowledgeSources?: KnowledgeSource[];
+	knowledgeItem?: Pick<KnowledgeItem, 'id' | 'deletedAt'> | null;
 };
 
 export type PreviewFile = {
@@ -135,6 +136,18 @@ export type KnowledgeItem = {
 	deletedAt?: string | null;
 	downloadUrl?: string | null;
 	originalDownloadUrl?: string | null;
+};
+
+export type KnowledgeCreateSource = {
+	type: 'assistant_message' | 'assistant_file';
+	messageId: string;
+	fileId?: string;
+	title: string;
+	content: string;
+	rating: number | null;
+	fileName?: string;
+	mimeType?: string;
+	returnTo?: string;
 };
 
 export type KnowledgePageResult = {

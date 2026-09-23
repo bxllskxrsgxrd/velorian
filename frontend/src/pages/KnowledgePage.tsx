@@ -86,7 +86,7 @@ const knowledgeDateFormatter = new Intl.DateTimeFormat('ru-RU', {
 });
 
 function knowledgeSourceLabel(sourceType: KnowledgeItem['sourceType']) {
-	if (sourceType === 'rated_content') return 'Ответ агента';
+	if (sourceType === 'rated_content' || sourceType === 'assistant_message') return 'Ответ агента';
 	if (sourceType === 'assistant_file') return 'Файл из диалога';
 	if (sourceType === 'uploaded_file') return 'Файл';
 	return 'Добавлено вручную';
@@ -238,7 +238,7 @@ export function KnowledgeDataEditor({
 		: mode === 'create'
 			? `Добавлено вручную · ${new Date().toLocaleDateString('ru-RU')}`
 			: `${
-					item?.sourceType === 'rated_content'
+					item?.sourceType === 'rated_content' || item?.sourceType === 'assistant_message'
 						? 'Ответ агента'
 						: item?.sourceType === 'assistant_file'
 							? 'Файл из диалога'

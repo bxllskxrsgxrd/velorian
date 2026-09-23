@@ -137,4 +137,62 @@ describe('MessageBubble actions', () => {
 		expect(await screen.findByRole('status')).toHaveTextContent('Файл создан');
 		expect(screen.queryByRole('button', { name: 'Файл создан' })).not.toBeInTheDocument();
 	});
+
+	it('opens the text editor directly when no generated file exists', () => {
+		const onAddToKnowledge = vi.fn();
+		render(
+			<MessageBubble
+				message={{ id: 'assistant-text', role: 'assistant', content: 'Текст ответа', status: 'done' }}
+				onOpenAttachment={vi.fn()}
+				onAddToKnowledge={onAddToKnowledge}
+			/>,
+		);
+
+		fireEvent.click(screen.getByRole('button', { name: 'Добавить текст в базу' }));
+		expect(onAddToKnowledge).toHaveBeenCalledWith();
+		expect(screen.queryByRole('button', { name: 'Добавить в базу' })).not.toBeInTheDocument();
+	});
+
+	it('uses the custom select for text or generated file', () => {
+		const onAddToKnowledge = vi.fn();
+		const attachment = {
+			id: 'generated-file', name: 'Ответ.md', size: 12, type: 'text/markdown', url: '/file', isImage: false, generated: true,
+		};
+		render(
+			<MessageBubble
+				message={{ id: 'assistant-options', role: 'assistant', content: 'Ответ', status: 'done', attachments: [attachment] }}
+				onOpenAttachment={vi.fn()}
+				onAddToKnowledge={onAddToKnowledge}
+			/>,
+		);
+
+		fireEvent.click(screen.getByRole('button', { name: 'Добавить в базу' }));
+		fireEvent.click(screen.getByRole('option', { name: /Текст ответа/ }));
+		expect(onAddToKnowledge).toHaveBeenLastCalledWith(undefined);
+		fireEvent.click(screen.getByRole('button', { name: 'Добавить в базу' }));
+		fireEvent.click(screen.getByRole('option', { name: /Файл «Ответ.md»/ }));
+		expect(onAddToKnowledge).toHaveBeenLastCalledWith(attachment);
+	});
+
+	it('renders the persisted knowledge state instead of an add action', () => {
+		const onOpenKnowledge = vi.fn();
+		const { rerender } = render(
+			<MessageBubble
+				message={{ id: 'assistant-linked', role: 'assistant', content: 'Ответ', status: 'done', knowledgeItem: { id: 'knowledge-1', deletedAt: null } }}
+				onOpenAttachment={vi.fn()}
+				onOpenKnowledge={onOpenKnowledge}
+			/>,
+		);
+		fireEvent.click(screen.getByRole('button', { name: '✓ В базе знаний' }));
+		expect(onOpenKnowledge).toHaveBeenCalledOnce();
+
+		rerender(
+			<MessageBubble
+				message={{ id: 'assistant-linked', role: 'assistant', content: 'Ответ', status: 'done', knowledgeItem: { id: 'knowledge-1', deletedAt: '2026-09-23T00:00:00Z' } }}
+				onOpenAttachment={vi.fn()}
+				onOpenKnowledge={onOpenKnowledge}
+			/>,
+		);
+		expect(screen.getByRole('button', { name: '↶ В корзине' })).toBeInTheDocument();
+	});
 });

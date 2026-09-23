@@ -16,6 +16,8 @@ type CustomSelectProps = {
 	error?: boolean;
 	ariaLabel: string;
 	className?: string;
+	triggerLabel?: ReactNode;
+	placement?: 'bottom' | 'top';
 };
 
 export function CustomSelect({
@@ -26,6 +28,8 @@ export function CustomSelect({
 	error = false,
 	ariaLabel,
 	className = '',
+	triggerLabel,
+	placement = 'bottom',
 }: CustomSelectProps) {
 	const [open, setOpen] = useState(false);
 	const [activeIndex, setActiveIndex] = useState(-1);
@@ -116,6 +120,7 @@ export function CustomSelect({
 			className={[
 				'custom-select',
 				isOpen && 'custom-select--open',
+				placement === 'top' && 'custom-select--top',
 				disabled && 'custom-select--disabled',
 				error && 'custom-select--error',
 				className,
@@ -135,7 +140,7 @@ export function CustomSelect({
 				onClick={() => (isOpen ? closeMenu() : openMenu())}
 				onKeyDown={handleTriggerKeyDown}
 			>
-				<span className="custom-select__value">{selectedOption?.label ?? ''}</span>
+				<span className="custom-select__value">{triggerLabel ?? selectedOption?.label ?? ''}</span>
 				<ChevronIcon className="custom-select__chevron" aria-hidden="true" />
 			</button>
 

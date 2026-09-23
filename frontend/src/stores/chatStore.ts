@@ -34,6 +34,8 @@ type ChatStore = {
 	closeKnowledgeAttachment: () => void;
 	setKnowledgeFilters: (filters: KnowledgeFilters) => void;
 	setKnowledgeSaveState: (value: KnowledgeSaveState) => void;
+	syncKnowledgeLink: (sourceMessageId: string, item: NonNullable<ChatMessage['knowledgeItem']>) => void;
+	removeKnowledgeLink: (itemId: string) => void;
 	resetConversation: () => void;
 };
 
@@ -85,6 +87,24 @@ export const useChatStore = create<ChatStore>((set) => ({
 	closeKnowledgeAttachment: () => set({ knowledgeAttachment: null }),
 	setKnowledgeFilters: (knowledgeFilters) => set({ knowledgeFilters }),
 	setKnowledgeSaveState: (knowledgeSaveState) => set({ knowledgeSaveState }),
+	syncKnowledgeLink: (sourceMessageId, item) =>
+		set((state) => ({
+			messagesByConversation: Object.fromEntries(
+				Object.entries(state.messagesByConversation).map(([conversationId, messages]) => [
+					conversationId,
+					messages.map((message) => message.id === sourceMessageId ? { ...message, knowledgeItem: item } : message),
+				]),
+			),
+		})),
+	removeKnowledgeLink: (itemId) =>
+		set((state) => ({
+			messagesByConversation: Object.fromEntries(
+				Object.entries(state.messagesByConversation).map(([conversationId, messages]) => [
+					conversationId,
+					messages.map((message) => message.knowledgeItem?.id === itemId ? { ...message, knowledgeItem: null } : message),
+				]),
+			),
+		})),
 	resetConversation: () =>
 		set({
 			messagesByConversation: {},

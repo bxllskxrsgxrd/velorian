@@ -1,14 +1,14 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useNavigate, useOutletContext, useParams } from 'react-router-dom';
 import {
 	activateMessageBranch,
 	createMessageMarkdownFile,
 	createConversation,
 	getConversation,
+	getMessageKnowledgeLink,
 	listConversations,
 	removeMessageRating,
-	saveAttachmentToKnowledge,
-	saveMessageToKnowledge,
+	restoreKnowledgeItem,
 	setMessageRating,
 	streamChat,
 } from '../api/chatApi';
@@ -16,7 +16,6 @@ import { ApiError } from '../api/httpClient';
 import { MessageList } from '../components/MessageList/MessageList';
 import { PromptBar } from '../components/PromptBar/PromptBar';
 import { RequestMap } from '../components/RequestMap/RequestMap';
-import { KnowledgeFilterFields } from '../components/KnowledgeFilterFields/KnowledgeFilterFields';
 import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
 import { DropZone } from '../components/ui/DropZone/DropZone';
 import { CHAT_MESSAGE_STATUSES } from '../constants/chatMessageStatuses';
@@ -26,6 +25,7 @@ import type {
 	ChatAttachment,
 	ChatMessage,
 	ConversationSummary,
+	KnowledgeCreateSource,
 	SearchMode,
 } from '../types/chat';
 import { attachmentToPreviewFile, createChatAttachment, fileToPreviewFile } from '../utils/files';
@@ -41,6 +41,10 @@ import { useFilesStore } from '../stores/filesStore';
 import { useUiStore } from '../stores/uiStore';
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
+
+function knowledgeTitle(content: string) {
+	return content.split('\n').map((line) => line.trim().replace(/^#+\s*/, '')).find(Boolean)?.slice(0, 255) || 'Ответ ассистента';
+}
 
 export function ChatPage() {
 	const { showToast } = useToast();
@@ -67,13 +71,6 @@ export function ChatPage() {
 	const pageError = useChatStore((state) => state.pageError);
 	const setPageError = useChatStore((state) => state.setPageError);
 	const setIsCreatingConversation = useChatStore((state) => state.setCreatingConversation);
-	const knowledgeAttachment = useChatStore((state) => state.knowledgeAttachment);
-	const knowledgeFilters = useChatStore((state) => state.knowledgeFilters);
-	const knowledgeSaveState = useChatStore((state) => state.knowledgeSaveState);
-	const openKnowledgeAttachment = useChatStore((state) => state.openKnowledgeAttachment);
-	const closeKnowledgeAttachment = useChatStore((state) => state.closeKnowledgeAttachment);
-	const setKnowledgeFilters = useChatStore((state) => state.setKnowledgeFilters);
-	const setKnowledgeSaveState = useChatStore((state) => state.setKnowledgeSaveState);
 	const setPreviewFile = useFilesStore((state) => state.setPreviewFile);
 	const setIsSidebarOpen = useUiStore((state) => state.setSidebarOpen);
 	const showScrollButton = useUiStore((state) => state.showScrollButton);
@@ -88,6 +85,7 @@ export function ChatPage() {
 	const conversationCreationRef = useRef<Promise<ConversationSummary> | null>(null);
 	const sendOperationsRef = useRef(new Map<string, Promise<void>>());
 	const previousConversationIdRef = useRef<string | null>(activeConversationId);
+	const [knowledgeRestore, setKnowledgeRestore] = useState<{ messageId: string; itemId: string } | null>(null);
 	const { addFiles } = useDragAndDrop(activeConversationId);
 
 	const hasMessages = messages.length > 0;
@@ -100,11 +98,6 @@ export function ChatPage() {
 	useEffect(() => {
 		if (!activeConversationId) return;
 		const sequence = ++loadSequenceRef.current;
-		if (activeConversationId in useChatStore.getState().messagesByConversation) {
-			setPageError('');
-			setIsLoadingConversation(false);
-			return;
-		}
 		setPageError('');
 		setIsLoadingConversation(true);
 		getConversation(activeConversationId)
@@ -515,12 +508,67 @@ export function ChatPage() {
 		}
 	}
 
-	async function handleSaveToKnowledge(message: ChatMessage) {
+	function setMessageKnowledgeLink(messageId: string, knowledgeItem: ChatMessage['knowledgeItem']) {
+		if (!activeConversationId) return;
+		setConversationMessages(activeConversationId, (current) =>
+			current.map((entry) => (entry.id === messageId ? { ...entry, knowledgeItem } : entry)),
+		);
+	}
+
+	function openExistingKnowledge(messageId: string, item: NonNullable<ChatMessage['knowledgeItem']>) {
+		if (item.deletedAt) setKnowledgeRestore({ messageId, itemId: item.id });
+		else navigate(`/knowledge/${item.id}`);
+	}
+
+	async function refreshMessageKnowledgeLink(message: ChatMessage) {
+		const item = await getMessageKnowledgeLink(message.id);
+		setMessageKnowledgeLink(message.id, item);
+		return item;
+	}
+
+	async function handleOpenKnowledge(message: ChatMessage) {
 		try {
-			await saveMessageToKnowledge(message.id);
-			showToast('Ответ сохранён в базу знаний', 'success');
+			const item = await refreshMessageKnowledgeLink(message);
+			if (item) openExistingKnowledge(message.id, item);
 		} catch (error) {
-			showToast(error instanceof Error ? error.message : 'Не удалось сохранить ответ', 'error');
+			showToast(error instanceof Error ? error.message : 'Не удалось проверить запись базы знаний', 'error');
+		}
+	}
+
+	async function handleAddToKnowledge(message: ChatMessage, attachment?: ChatAttachment) {
+		if (!activeConversationId) return;
+		try {
+			const existing = await refreshMessageKnowledgeLink(message);
+			if (existing) {
+				openExistingKnowledge(message.id, existing);
+				return;
+			}
+			const source: KnowledgeCreateSource = {
+				type: attachment ? 'assistant_file' : 'assistant_message',
+				messageId: message.id,
+				fileId: attachment?.id,
+				title: attachment?.name ?? knowledgeTitle(message.content),
+				content: message.content,
+				rating: message.rating?.score ?? null,
+				fileName: attachment?.name,
+				mimeType: attachment?.type,
+				returnTo: `/chat/${activeConversationId}`,
+			};
+			navigate('/knowledge/new', { state: { knowledgeSource: source } });
+		} catch (error) {
+			showToast(error instanceof Error ? error.message : 'Не удалось открыть редактор базы знаний', 'error');
+		}
+	}
+
+	async function handleRestoreLinkedKnowledge() {
+		if (!knowledgeRestore) return;
+		try {
+			const restored = await restoreKnowledgeItem(knowledgeRestore.itemId);
+			setMessageKnowledgeLink(knowledgeRestore.messageId, { id: restored.id, deletedAt: null });
+			setKnowledgeRestore(null);
+			showToast('Запись базы знаний восстановлена', 'success');
+		} catch (error) {
+			showToast(error instanceof Error ? error.message : 'Не удалось восстановить запись', 'error');
 		}
 	}
 
@@ -544,37 +592,6 @@ export function ChatPage() {
 			reportError('MESSAGE_MARKDOWN_FILE_FAILED', error, { messageId: message.id });
 			showToast(error instanceof Error ? error.message : 'Не удалось создать файл', 'error');
 			throw error;
-		}
-	}
-
-	function openKnowledgeAttachmentDialog(attachment: ChatAttachment) {
-		openKnowledgeAttachment(attachment);
-	}
-
-	async function handleSaveAttachmentToKnowledge() {
-		if (!activeConversationId || !knowledgeAttachment || knowledgeSaveState === 'loading' || knowledgeSaveState === 'success') return;
-		const conversationId = activeConversationId;
-		const attachmentId = knowledgeAttachment.id;
-		setKnowledgeSaveState('loading');
-		try {
-			const result = await saveAttachmentToKnowledge(attachmentId, knowledgeFilters);
-			setConversationMessages(conversationId, (current) =>
-				current.map((message) => ({
-					...message,
-					attachments: message.attachments?.map((attachment) =>
-						attachment.id === attachmentId ? { ...attachment, knowledgeSaved: true } : attachment,
-					),
-				})),
-			);
-			setKnowledgeSaveState('success');
-			showToast(
-				result.created ? 'Добавлено в базу знаний' : 'Файл уже находится в базе знаний',
-				result.created ? 'success' : 'info',
-			);
-		} catch (error) {
-			reportError('ATTACHMENT_KNOWLEDGE_SAVE_FAILED', error, { attachmentId });
-			setKnowledgeSaveState('error');
-			showToast(error instanceof Error ? error.message : 'Не удалось добавить файл в базу знаний', 'error');
 		}
 	}
 
@@ -622,9 +639,9 @@ export function ChatPage() {
 								}
 								onRate={(message, score, comment) => void handleRateMessage(message, score, comment)}
 								onRemoveRating={(message) => void handleRemoveRating(message)}
-								onSaveToKnowledge={(message) => void handleSaveToKnowledge(message)}
+								onAddToKnowledge={(message, attachment) => void handleAddToKnowledge(message, attachment)}
+								onOpenKnowledge={(message) => void handleOpenKnowledge(message)}
 								onCreateFile={handleCreateFile}
-								onAddAttachmentToKnowledge={openKnowledgeAttachmentDialog}
 							/>
 						) : (
 							<div className="chat-page__start">
@@ -657,32 +674,14 @@ export function ChatPage() {
 				</div>
 			</DropZone>
 			<RequestMap conversationId={activeConversationId} />
-			{knowledgeAttachment && (
+			{knowledgeRestore && (
 				<ModalDialog
-					title={`Добавить «${knowledgeAttachment.name}» в БД`}
-					confirmLabel={
-						knowledgeSaveState === 'loading'
-							? 'Добавление…'
-							: knowledgeSaveState === 'success'
-								? 'Добавлено'
-								: 'Добавить в БД'
-					}
-					confirmDisabled={knowledgeSaveState === 'loading' || knowledgeSaveState === 'success'}
-					closeDisabled={knowledgeSaveState === 'loading'}
-					onClose={closeKnowledgeAttachment}
-					onConfirm={() => void handleSaveAttachmentToKnowledge()}
+					title="Запись находится в корзине"
+					confirmLabel="Восстановить"
+					onClose={() => setKnowledgeRestore(null)}
+					onConfirm={() => void handleRestoreLinkedKnowledge()}
 				>
-					<div className="chat-knowledge-form">
-						<p>Фильтры необязательны. Markdown будет сохранён без преобразования в HTML</p>
-						<KnowledgeFilterFields
-							value={knowledgeFilters}
-							onChange={setKnowledgeFilters}
-							disabled={knowledgeSaveState === 'loading' || knowledgeSaveState === 'success'}
-						/>
-						{knowledgeSaveState === 'error' && (
-							<p role="alert">Не удалось добавить файл в базу знаний. Можно повторить попытку</p>
-						)}
-					</div>
+					<p>Восстановить связанную запись базы знаний?</p>
 				</ModalDialog>
 			)}
 		</div>
