@@ -3,7 +3,7 @@ import { CHAT_MESSAGE_STATUSES } from '../../constants/chatMessageStatuses';
 import { CHAT_ROLES } from '../../constants/chatRoles';
 import type { ChatAttachment, ChatMessage } from '../../types/chat';
 import { SubmitLoadingIcon } from '../icons/SubmitLoadingIcon/SubmitLoadingIcon';
-import { CheckIcon, DocumentIcon, EditIcon, TextIcon, UndoIcon } from '../icons/AppIcons';
+import { CheckIcon, DocumentCheckIcon, DocumentIcon, EditIcon, TextIcon, UndoIcon } from '../icons/AppIcons';
 import { CustomSelect } from '../ui/CustomSelect/CustomSelect';
 import './_messageBubble.scss';
 import { MessageAttachment } from './MessageAttachment';
@@ -142,11 +142,18 @@ function MessageBubbleComponent({
 				<div className="message__editor">
 					<textarea autoFocus value={draft} onChange={(event) => setDraft(message.id, event.target.value)} />
 					<div>
-						<button type="button" onClick={() => cancelEditing(message.id, message.content)}>
+						<Button
+							variant="filled"
+							tone="neutral"
+							size="medium"
+							onClick={() => cancelEditing(message.id, message.content)}
+						>
 							Отмена
-						</button>
-						<button
-							type="button"
+						</Button>
+						<Button
+							variant="filled"
+							tone="accent"
+							size="medium"
 							disabled={!draft.trim() || draft.trim() === message.content.trim()}
 							onClick={() => {
 								onEdit?.(draft.trim());
@@ -154,7 +161,7 @@ function MessageBubbleComponent({
 							}}
 						>
 							Отправить
-						</button>
+						</Button>
 					</div>
 				</div>
 			) : (
@@ -190,9 +197,7 @@ function MessageBubbleComponent({
 							hasText &&
 							(isFileCreated ? (
 								<span className="message__file-created" role="status">
-									<span className="message__file-created-icon" aria-hidden="true">
-										<CheckIcon size={10} />
-									</span>
+									<DocumentCheckIcon />
 									Файл создан
 								</span>
 							) : (
@@ -222,9 +227,11 @@ function MessageBubbleComponent({
 							<span className="message__assistant-actions-divider" aria-hidden="true" />
 						)}
 						{message.knowledgeItem ? (
-							<button
+							<Button
+								variant="outline"
+								tone="neutral"
+								size="small"
 								className={`message__knowledge-action${message.knowledgeItem.deletedAt ? ' message__knowledge-action--trash' : ' message__knowledge-action--saved'}`}
-								type="button"
 								onClick={onOpenKnowledge}
 							>
 								{message.knowledgeItem.deletedAt ? (
@@ -236,8 +243,23 @@ function MessageBubbleComponent({
 										<CheckIcon size={10} /> <span>В базе знаний</span>
 									</>
 								)}
-							</button>
-						) : generatedFile && onAddToKnowledge ? (
+							</Button>
+						) : // <button
+						// 	className={`message__knowledge-action${message.knowledgeItem.deletedAt ? ' message__knowledge-action--trash' : ' message__knowledge-action--saved'}`}
+						// 	type="button"
+						// 	onClick={onOpenKnowledge}
+						// >
+						// 	{message.knowledgeItem.deletedAt ? (
+						// 		<>
+						// 			<UndoIcon size={10} /> <span>В корзине</span>
+						// 		</>
+						// 	) : (
+						// 		<>
+						// 			<CheckIcon size={10} /> <span>В базе знаний</span>
+						// 		</>
+						// 	)}
+						// </button>
+						generatedFile && onAddToKnowledge ? (
 							<CustomSelect
 								className="message__knowledge-select"
 								value=""
@@ -284,15 +306,7 @@ function MessageBubbleComponent({
 							>
 								Добавить текст в базу
 							</Button>
-						) : // <button
-						// 	className="message__knowledge-action"
-						// 	type="button"
-						// 	disabled={fileState === 'loading'}
-						// 	onClick={() => onAddToKnowledge()}
-						// >
-						// 	Добавить текст в базу
-						// </button>
-						null}
+						) : null}
 					</div>
 				)}
 			{generatedFileAttachments.length > 0 && (

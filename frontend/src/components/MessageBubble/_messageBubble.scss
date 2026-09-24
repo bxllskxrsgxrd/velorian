@@ -190,14 +190,7 @@
 	&__file-created {
 		color: var(--color-success);
 	}
-	&__file-created-icon {
-		display: grid;
-		place-items: center;
-		width: 20px;
-		height: 20px;
-		border: 1px solid currentColor;
-		border-radius: 50%;
-	}
+
 	&__create-file-error {
 		align-self: center;
 		color: var(--color-error);
@@ -224,6 +217,13 @@
 		font: inherit;
 		white-space: nowrap;
 		cursor: pointer;
+
+		&.message__knowledge-action--saved {
+			color: var(--color-success);
+		}
+		&.message__knowledge-action--trash {
+			color: var(--color-warning, #d59b38);
+		}
 	}
 
 	&__knowledge-select .custom-select__trigger {
@@ -296,12 +296,7 @@
 		cursor: wait;
 		opacity: 0.6;
 	}
-	&__knowledge-action--saved {
-		color: var(--color-success);
-	}
-	&__knowledge-action--trash {
-		color: var(--color-warning, #d59b38);
-	}
+
 	&__knowledge-select {
 		width: auto;
 	}

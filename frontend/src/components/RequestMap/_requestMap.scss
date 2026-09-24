@@ -69,11 +69,11 @@
 		text-align: left;
 		cursor: pointer;
 		@include ui-transition;
-	}
 
-	&__item:hover,
-	&__item:focus-visible {
-		background-color: color-mix(in srgb, var(--color-bg-elevated) 72%, transparent);
+		&:hover,
+		&:focus-visible {
+			color: var(--color--text-light);
+		}
 	}
 
 	&__item:focus-visible {
@@ -118,5 +118,7 @@
 		background-color: currentColor;
 	}
 
-	@media (max-width: 1280px) { display: none; }
+	@media (max-width: 1280px) {
+		display: none;
+	}
 }
