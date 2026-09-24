@@ -44,7 +44,7 @@
 	}
 }
 
-@mixin interactive-transition {
+@mixin ui-transition {
 	transition:
 		color var(--transition-fast),
 		background-color var(--transition-fast),

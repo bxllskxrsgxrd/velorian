@@ -23,6 +23,7 @@
 	input {
 		width: 100%; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-medium);
 		color: var(--color-text-primary); background: var(--color-bg-elevated); outline: none;
+		@include ui-transition;
 		&:focus { border-color: var(--color-accent); box-shadow: var(--focus-ring); }
 	}
 

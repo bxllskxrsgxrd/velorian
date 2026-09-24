@@ -20,10 +20,7 @@
 	border: 0;
 	color: color-mix(in srgb, var(--color-text-secondary) 58%, transparent);
 	background: transparent;
-	transition:
-		color var(--transition-fast),
-		background var(--transition-fast),
-		transform var(--transition-fast);
+	@include ui-transition;
 }
 .rating .rating__star svg {
 	display: block;
@@ -68,4 +65,3 @@ button.rating__star {
 .rating--disabled {
 	opacity: 0.55;
 }
-

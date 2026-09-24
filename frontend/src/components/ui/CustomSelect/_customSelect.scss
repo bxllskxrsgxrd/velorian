@@ -15,6 +15,7 @@
 	font: inherit;
 	text-align: left;
 	cursor: pointer;
+	@include ui-transition;
 }
 
 .custom-select__value {
@@ -67,6 +68,7 @@ button.custom-select__option {
 	font: inherit;
 	text-align: left;
 	cursor: pointer;
+	@include ui-transition;
 }
 
 button.custom-select__option:hover:not(:disabled),

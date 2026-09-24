@@ -21,12 +21,7 @@
 
 	cursor: pointer;
 	user-select: none;
-	transition:
-		border-color var(--transition-fast),
-		color var(--transition-fast),
-		background-color var(--transition-fast),
-		box-shadow var(--transition-fast),
-		opacity var(--transition-fast);
+	@include ui-transition;
 
 	&__count {
 		display: inline-grid;

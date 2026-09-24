@@ -33,6 +33,7 @@
 		outline: none;
 		color: var(--color-text-primary);
 		background: var(--color-bg-elevated);
+		@include ui-transition;
 		&:focus {
 			border-color: var(--color-accent);
 			box-shadow: var(--focus-ring);

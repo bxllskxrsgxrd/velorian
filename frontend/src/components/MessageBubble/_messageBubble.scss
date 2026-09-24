@@ -106,6 +106,9 @@
 		background: transparent;
 		cursor: pointer;
 	}
+	&__rating-link {
+		@include ui-transition;
+	}
 	&__rating-link:hover {
 		color: var(--color-text-primary);
 	}
@@ -171,9 +174,7 @@
 		background: transparent;
 		cursor: pointer;
 		border: 0;
-		transition:
-			color var(--transition-fast),
-			background-color var(--transition-fast);
+		@include ui-transition;
 
 		&:hover:not(:disabled) {
 			color: var(--color-text-primary);
@@ -247,13 +248,7 @@
 		white-space: nowrap;
 
 		cursor: pointer;
-
-		transition:
-			border-color var(--transition-fast),
-			color var(--transition-fast),
-			background-color var(--transition-fast),
-			box-shadow var(--transition-fast),
-			opacity var(--transition-fast);
+		@include ui-transition;
 
 		&:hover:not(:disabled) {
 			background: var(--color-bg-elevated);
@@ -349,6 +344,7 @@
 			background: transparent;
 			font-size: 12px;
 			cursor: pointer;
+			@include ui-transition;
 			&:hover {
 				color: var(--color-accent);
 				border-color: var(--color-border);
@@ -412,6 +408,7 @@
 		border-left: 1px solid var(--color-border);
 		color: var(--color-accent);
 		background: transparent;
+		@include ui-transition;
 		&:hover {
 			background: var(--color-accent-soft-hover);
 		}
@@ -430,6 +427,7 @@
 		background: transparent;
 		white-space: nowrap;
 		cursor: pointer;
+		@include ui-transition;
 	}
 	&__attachment-knowledge:hover {
 		background: var(--color-accent-soft-hover);
@@ -516,6 +514,7 @@
 			font: inherit;
 			text-align: left;
 			cursor: pointer;
+			@include ui-transition;
 			&:hover {
 				background: var(--color-accent-soft-hover);
 			}
@@ -560,9 +559,7 @@
 			text-align: left;
 
 			cursor: pointer;
-			transition:
-				transform var(--transition-fast),
-				filter var(--transition-fast);
+			@include ui-transition;
 
 			&:hover {
 				filter: brightness(1.08);
@@ -594,6 +591,7 @@
 			color: var(--color-text-secondary);
 			background: transparent;
 			cursor: pointer;
+			@include ui-transition;
 		}
 		button:hover:not(:disabled) {
 			background: var(--color-bg-elevated);

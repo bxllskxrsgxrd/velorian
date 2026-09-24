@@ -12,10 +12,7 @@
 	cursor: pointer;
 
 	line-height: 0;
-	transition:
-		color var(--transition-fast),
-		background-color var(--transition-fast),
-		transform var(--transition-fast);
+	@include ui-transition;
 
 	& svg {
 		display: block;

@@ -117,9 +117,7 @@
 	background: var(--color-bg-elevated);
 	font: inherit;
 	outline: none;
-	transition:
-		border-color var(--transition-fast),
-		box-shadow var(--transition-fast);
+	@include ui-transition;
 }
 
 .approach-editor__form input:focus,
@@ -166,7 +164,7 @@
 	align-items: center;
 	min-height: 40px;
 	background: var(--color-bg-elevated);
-	transition: box-shadow var(--transition-fast);
+	@include ui-transition;
 }
 
 .approach-editor__list-row + .approach-editor__list-row {
@@ -209,6 +207,7 @@
 	color: var(--color-text-secondary);
 	background: transparent;
 	cursor: pointer;
+	@include ui-transition;
 }
 
 .approach-editor__remove-item {
@@ -247,10 +246,7 @@
 	background: transparent;
 	font: inherit;
 	cursor: pointer;
-	transition:
-		border-color var(--transition-fast),
-		color var(--transition-fast),
-		background var(--transition-fast);
+	@include ui-transition;
 }
 
 .approach-editor__add-item svg {
@@ -276,6 +272,7 @@
 	border-radius: var(--radius-medium);
 	color: var(--color-text-secondary);
 	background: var(--color-bg-elevated);
+	@include ui-transition;
 }
 
 .approach-editor__examples ul {
