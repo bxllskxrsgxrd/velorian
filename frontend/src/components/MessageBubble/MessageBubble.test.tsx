@@ -228,11 +228,23 @@ describe('MessageBubble actions', () => {
 	it('uses the custom select for text or generated file', () => {
 		const onAddToKnowledge = vi.fn();
 		const attachment = {
-			id: 'generated-file', name: 'Ответ.md', size: 12, type: 'text/markdown', url: '/file', isImage: false, generated: true,
+			id: 'generated-file',
+			name: 'Ответ.md',
+			size: 12,
+			type: 'text/markdown',
+			url: '/file',
+			isImage: false,
+			generated: true,
 		};
 		render(
 			<MessageBubble
-				message={{ id: 'assistant-options', role: 'assistant', content: 'Ответ', status: 'done', attachments: [attachment] }}
+				message={{
+					id: 'assistant-options',
+					role: 'assistant',
+					content: 'Ответ',
+					status: 'done',
+					attachments: [attachment],
+				}}
 				onOpenAttachment={vi.fn()}
 				onAddToKnowledge={onAddToKnowledge}
 			/>,
@@ -250,21 +262,33 @@ describe('MessageBubble actions', () => {
 		const onOpenKnowledge = vi.fn();
 		const { rerender } = render(
 			<MessageBubble
-				message={{ id: 'assistant-linked', role: 'assistant', content: 'Ответ', status: 'done', knowledgeItem: { id: 'knowledge-1', deletedAt: null } }}
+				message={{
+					id: 'assistant-linked',
+					role: 'assistant',
+					content: 'Ответ',
+					status: 'done',
+					knowledgeItem: { id: 'knowledge-1', deletedAt: null },
+				}}
 				onOpenAttachment={vi.fn()}
 				onOpenKnowledge={onOpenKnowledge}
 			/>,
 		);
-		fireEvent.click(screen.getByRole('button', { name: '✓ В базе знаний' }));
+		fireEvent.click(screen.getByRole('button', { name: 'В базе знаний' }));
 		expect(onOpenKnowledge).toHaveBeenCalledOnce();
 
 		rerender(
 			<MessageBubble
-				message={{ id: 'assistant-linked', role: 'assistant', content: 'Ответ', status: 'done', knowledgeItem: { id: 'knowledge-1', deletedAt: '2026-09-23T00:00:00Z' } }}
+				message={{
+					id: 'assistant-linked',
+					role: 'assistant',
+					content: 'Ответ',
+					status: 'done',
+					knowledgeItem: { id: 'knowledge-1', deletedAt: '2026-09-23T00:00:00Z' },
+				}}
 				onOpenAttachment={vi.fn()}
 				onOpenKnowledge={onOpenKnowledge}
 			/>,
 		);
-		expect(screen.getByRole('button', { name: '↶ В корзине' })).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'В корзине' })).toBeInTheDocument();
 	});
 });

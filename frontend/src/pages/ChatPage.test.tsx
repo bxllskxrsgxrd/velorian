@@ -263,10 +263,10 @@ describe('ChatPage linked knowledge restore', () => {
 		});
 
 		renderChatPage();
-		fireEvent.click(await screen.findByRole('button', { name: '↶ В корзине' }));
+		fireEvent.click(await screen.findByRole('button', { name: 'В корзине' }));
 		fireEvent.click(await screen.findByRole('button', { name: 'Восстановить' }));
 
-		expect(await screen.findByRole('button', { name: '✓ В базе знаний' })).toBeVisible();
+		expect(await screen.findByRole('button', { name: 'В базе знаний' })).toBeVisible();
 		expect(screen.getByRole('img', { name: 'Оценка ответа: 4 из 5' })).toBeVisible();
 		expect(screen.queryByRole('button', { name: 'Поставить рейтинг 4 из 5' })).not.toBeInTheDocument();
 		expect(useChatStore.getState().messagesByConversation[conversation.id][0].rating?.score).toBe(4);
