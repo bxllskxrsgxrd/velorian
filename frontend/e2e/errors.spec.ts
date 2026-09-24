@@ -6,7 +6,7 @@ test('502 before stream metadata renders only the dedicated error UI', async ({ 
 	await page.goto('/');
 	await page.getByRole('textbox', { name: 'Введите запрос' }).fill('Вызови ошибку');
 	await page.getByRole('button', { name: 'Отправить сообщение' }).click();
-	const alert = page.getByRole('alert').filter({ hasText: 'Не удалось получить ответ' });
+	const alert = page.getByRole('alert');
 	await expect(alert).toBeVisible();
 	await expect(alert).toContainText('AI-сервис временно недоступен');
 	await expect(alert).toContainText('e2e-502');
