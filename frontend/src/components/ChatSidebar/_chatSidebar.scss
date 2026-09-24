@@ -1064,21 +1064,29 @@
 		--trash-section-divider-inset: 0px;
 		--trash-scrollbar-space: 11px;
 
-		position: relative;
-
 		height: 100%;
 		min-height: 0;
+
 		display: grid;
-		grid-template-rows: auto auto 18px auto minmax(0, 1fr);
+		grid-template-rows: auto auto auto 18px auto minmax(0, 1fr);
 		gap: 10px;
 	}
 
-	&__trash-close {
-		position: absolute;
-		top: -50px;
-		right: 0;
-		z-index: 1;
+	&__trash-header {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 16px;
 
+		h2 {
+			margin: 0;
+
+			font-size: 20px;
+			font-weight: 600;
+		}
+	}
+
+	&__trash-close {
 		width: 32px;
 		height: 32px;
 		display: grid !important;
@@ -1347,7 +1355,7 @@
 	}
 
 	&__trash-list li#{&}__trash-row--selected {
-		background-color: color-mix(in srgb, #edf7f0 8%, transparent);
+		background-color: var(--color-bg-elevated);
 		box-shadow:
 			inset 1px 0 0 color-mix(in srgb, #e1f0e6 24%, transparent),
 			inset -1px 0 0 color-mix(in srgb, #e1f0e6 24%, transparent);

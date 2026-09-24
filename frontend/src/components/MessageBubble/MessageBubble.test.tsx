@@ -154,16 +154,23 @@ describe('MessageBubble actions', () => {
 		expect(onRemoveRating).not.toHaveBeenCalled();
 	});
 
-	it('keeps the rating editable when the linked knowledge item is in trash', () => {
+	it('keeps the stored rating read-only while the linked knowledge item is in trash', () => {
 		const onRate = vi.fn();
-		render(
+		const rating = {
+			id: 'message-rating',
+			score: 4,
+			createdAt: '2026-09-22T00:00:00Z',
+			updatedAt: '2026-09-23T00:00:00Z',
+		};
+		const { rerender } = render(
 			<MessageBubble
 				message={{
 					id: 'assistant-trashed',
 					role: 'assistant',
 					content: 'Ответ',
 					status: 'done',
-					knowledgeItem: { id: 'knowledge-1', deletedAt: '2026-09-23T00:00:00Z' },
+					knowledgeItem: { id: 'knowledge-1', deletedAt: '2026-09-23T00:00:00Z', rating: 4 },
+					rating,
 				}}
 				onOpenAttachment={vi.fn()}
 				onRate={onRate}
@@ -172,6 +179,18 @@ describe('MessageBubble actions', () => {
 			/>,
 		);
 
+		expect(screen.getByRole('img', { name: 'Оценка ответа: 4 из 5' })).toBeVisible();
+		expect(screen.queryByRole('button', { name: 'Поставить рейтинг 5 из 5' })).not.toBeInTheDocument();
+		expect(onRate).not.toHaveBeenCalled();
+
+		rerender(
+			<MessageBubble
+				message={{ id: 'assistant-trashed', role: 'assistant', content: 'Ответ', status: 'done', rating }}
+				onOpenAttachment={vi.fn()}
+				onRate={onRate}
+				onRemoveRating={vi.fn()}
+			/>,
+		);
 		fireEvent.click(screen.getByRole('button', { name: 'Поставить рейтинг 5 из 5' }));
 		expect(onRate).toHaveBeenCalledWith(5, undefined);
 	});

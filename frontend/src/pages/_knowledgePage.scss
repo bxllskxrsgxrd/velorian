@@ -609,6 +609,9 @@
 	}
 
 	.knowledge-editor-page__back {
+		display: flex;
+		align-items: center;
+		gap: 6px;
 		padding: 0;
 		border: 0;
 		color: var(--color-text-secondary);

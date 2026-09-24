@@ -78,12 +78,12 @@ export const useChatStore = create<ChatStore>((set) => ({
 				);
 				messages = messages.map((message) => {
 					const savedLink = message.knowledgeItem ? savedLinks.get(message.knowledgeItem.id) : undefined;
-					if (!savedLink) return message;
-					const knowledgeItem = {
-						...message.knowledgeItem,
-						rating: savedLink.rating,
-						updatedAt: savedLink.updatedAt,
-					};
+					if (!message.knowledgeItem) return message;
+					const knowledgeItem = Object.prototype.hasOwnProperty.call(message.knowledgeItem, 'rating')
+						? message.knowledgeItem
+						: savedLink
+							? { ...message.knowledgeItem, rating: savedLink.rating, updatedAt: savedLink.updatedAt }
+							: message.knowledgeItem;
 					return { ...message, knowledgeItem, rating: ratingFromKnowledge(message, knowledgeItem) };
 				});
 			}

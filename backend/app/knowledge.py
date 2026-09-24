@@ -412,6 +412,7 @@ def get_message_knowledge_link(message_id: str, user: User = Depends(get_current
 	return {"item": {
 		"id": item.id,
 		"deletedAt": item.deleted_at.isoformat() if item.deleted_at else None,
+		"rating": item.rating,
 	} if item is not None else None}
 
 

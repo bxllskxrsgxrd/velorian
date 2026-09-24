@@ -1,4 +1,20 @@
+.approaches-page {
+
+	&__navigation {
+		display: flex;
+		justify-content: space-between;
+		align-items: center;
+
+		.approaches-page__back {
+			margin: 0;
+		}
+	}
+}
+
 .approaches-page__back {
+	display: flex;
+	align-items: center;
+	gap: 6px;
 	margin-bottom: 10px;
 	border: 0 !important;
 	padding: 0 !important;
@@ -23,6 +39,22 @@
 	background: var(--color-bg-surface);
 	text-align: left;
 	cursor: default;
+
+	&__description {
+		display: grid;
+		grid-template-columns: minmax(0, 1fr) auto;
+		align-items: center;
+		gap: 16px;
+
+		min-width: 0;
+
+		&--text {
+			min-width: 0;
+
+			overflow-wrap: anywhere;
+			word-break: break-word;
+		}
+	}
 }
 
 .approach-card__head {
@@ -85,7 +117,9 @@
 	background: var(--color-bg-elevated);
 	font: inherit;
 	outline: none;
-	transition: border-color var(--transition-fast), box-shadow var(--transition-fast);
+	transition:
+		border-color var(--transition-fast),
+		box-shadow var(--transition-fast);
 }
 
 .approach-editor__form input:focus,
@@ -213,7 +247,10 @@
 	background: transparent;
 	font: inherit;
 	cursor: pointer;
-	transition: border-color var(--transition-fast), color var(--transition-fast), background var(--transition-fast);
+	transition:
+		border-color var(--transition-fast),
+		color var(--transition-fast),
+		background var(--transition-fast);
 }
 
 .approach-editor__add-item svg {
@@ -306,7 +343,9 @@
 	border-radius: 50%;
 	background: var(--color-text-secondary);
 	content: '';
-	transition: transform var(--transition-fast), background var(--transition-fast);
+	transition:
+		transform var(--transition-fast),
+		background var(--transition-fast);
 }
 
 .approach-editor__active-toggle .checkbox__control svg,

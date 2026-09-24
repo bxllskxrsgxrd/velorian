@@ -21,6 +21,7 @@ import {
 	UndoIcon,
 	UserIcon,
 	InfoIcon,
+	CrossIcon,
 } from '../icons/AppIcons';
 import { VelorianIcon } from '../icons/VelorianIcon';
 import { ModalDialog } from '../ui/ModalDialog/ModalDialog';
@@ -35,6 +36,8 @@ import { useKnowledgeStore } from '../../stores/knowledgeStore';
 import { useChatStore } from '../../stores/chatStore';
 import { reportError } from '../../utils/reportError';
 import { useToast } from '../../hooks/useToast';
+import { IconButton } from '../ui/IconButton/IconButton';
+import { Button } from '../ui/Button/Button';
 
 const DAY_MS = 24 * 60 * 60 * 1000;
 
@@ -276,9 +279,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 		setTrashError(null);
 		try {
 			const results = await Promise.allSettled(
-				ids.map((id) =>
-					type === 'chats' ? permanentlyDeleteConversation(id) : permanentlyDeleteKnowledgeItem(id),
-				),
+				ids.map((id) => (type === 'chats' ? permanentlyDeleteConversation(id) : permanentlyDeleteKnowledgeItem(id))),
 			);
 			const deletedIds: string[] = [];
 			results.forEach((result, index) => {
@@ -363,7 +364,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 						onClick={() => setSidebarOpen(false)}
 						aria-label="Закрыть меню"
 					>
-						×
+						<CrossIcon />
 					</button>
 				</div>
 				<SidebarButton icon={<NewChatIcon />} onClick={props.onNew} title="Новый чат">
@@ -439,8 +440,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 										type="button"
 										onClick={() => openDialog('delete', conversation)}
 									>
-										<TrashIcon />
-										В корзину
+										<TrashIcon />В корзину
 									</button>
 								</div>
 							)}
@@ -529,16 +529,20 @@ export function ChatSidebar(props: ChatSidebarProps) {
 				</ModalDialog>
 			)}
 			{trashOpen && (
-				<ModalDialog title="Корзина" confirmLabel="Закрыть" onClose={closeTrash} onConfirm={closeTrash}>
+				<ModalDialog title="" confirmLabel="Закрыть" onClose={closeTrash} onConfirm={closeTrash}>
 					<div className="chat-sidebar__trash">
-						<button
-							className="chat-sidebar__trash-close"
-							type="button"
-							aria-label="Закрыть корзину"
-							onClick={closeTrash}
-						>
-							×
-						</button>
+						<div className="chat-sidebar__trash-header">
+							<h2>Корзина</h2>
+							<IconButton
+								className="chat-sidebar__trash-close"
+								type="button"
+								aria-label="Закрыть корзину"
+								onClick={closeTrash}
+							>
+								<CrossIcon />
+							</IconButton>
+						</div>
+
 						<div className="chat-sidebar__trash-tabs" role="tablist" aria-label="Раздел корзины">
 							<button
 								className={
@@ -575,7 +579,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 						</div>
 						<div className="chat-sidebar__info">
 							<InfoIcon />
-								<p className="chat-sidebar__trash-note">Объекты автоматически удаляются через 30 дней</p>
+							<p className="chat-sidebar__trash-note">Объекты автоматически удаляются через 30 дней</p>
 						</div>
 
 						<div className="chat-sidebar__trash-error-slot" aria-live="polite">
@@ -593,12 +597,16 @@ export function ChatSidebar(props: ChatSidebarProps) {
 										setSelectedTrashIds(checked ? new Set(activeTrashItems.map((item) => item.id)) : new Set())
 									}
 								/>
-								<span>Выбрано: {selectedTrashItems.length} из {activeTrashItems.length}</span>
+								<span>
+									Выбрано: {selectedTrashItems.length} из {activeTrashItems.length}
+								</span>
 							</div>
 							<div className="chat-sidebar__trash-toolbar-actions">
-								<button
-									className="chat-sidebar__trash-restore-selected"
-									type="button"
+								<Button
+									variant="outline"
+									tone="accent"
+									size="small"
+									icon={<UndoIcon />}
 									aria-label={`Восстановить выбранные (${selectedTrashItems.length})`}
 									disabled={selectedTrashItems.length === 0 || trashBusyId !== null}
 									onClick={() =>
@@ -608,18 +616,19 @@ export function ChatSidebar(props: ChatSidebarProps) {
 										)
 									}
 								>
-									<UndoIcon />
 									Восстановить
-								</button>
-								<button
-									className="chat-sidebar__trash-delete-selected"
-									type="button"
+								</Button>
+
+								<Button
+									variant="outline"
+									tone="danger"
+									size="small"
+									icon={<TrashIcon />}
 									disabled={selectedTrashItems.length === 0 || trashBusyId !== null}
 									onClick={() => setTrashConfirmation({ type: trashTab, items: selectedTrashItems })}
 								>
-									<TrashIcon />
 									Удалить
-								</button>
+								</Button>
 							</div>
 						</div>
 						<div className="chat-sidebar__trash-list-viewport" role="tabpanel">
@@ -672,7 +681,17 @@ export function ChatSidebar(props: ChatSidebarProps) {
 													<small>{trashDateLabel(item.deletedAt)}</small>
 												</div>
 												<div className="chat-sidebar__trash-actions">
-													<button
+													<Button
+														variant="outline"
+														tone="accent"
+														size="small"
+														aria-label="Восстановить"
+														disabled={trashBusyId !== null}
+														onClick={() => void handleRestoreItems(trashTab, [item.id])}
+													>
+														<UndoIcon />
+													</Button>
+													{/* <button
 														className="chat-sidebar__trash-action chat-sidebar__trash-action--restore"
 														type="button"
 														aria-label="Восстановить"
@@ -680,16 +699,30 @@ export function ChatSidebar(props: ChatSidebarProps) {
 														onClick={() => void handleRestoreItems(trashTab, [item.id])}
 													>
 														<UndoIcon />
-													</button>
-													<button
+													</button> */}
+															<Button
+														variant="outline"
+														tone="danger"
+														size="small"
+														aria-label="Удалить навсегда"
+														disabled={trashBusyId !== null}
+														onClick={() =>
+															setTrashConfirmation({ type: trashTab, items: [{ id: item.id, title: item.title }] })
+														}
+													>
+														<TrashIcon />
+													</Button>
+													{/* <button
 														className="chat-sidebar__trash-action chat-sidebar__trash-action--delete"
 														type="button"
 														aria-label="Удалить навсегда"
 														disabled={trashBusyId !== null}
-														onClick={() => setTrashConfirmation({ type: trashTab, items: [{ id: item.id, title: item.title }] })}
+														onClick={() =>
+															setTrashConfirmation({ type: trashTab, items: [{ id: item.id, title: item.title }] })
+														}
 													>
 														<TrashIcon />
-													</button>
+													</button> */}
 												</div>
 											</li>
 										);

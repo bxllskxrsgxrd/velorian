@@ -1,9 +1,9 @@
 @mixin hover {
-  @media (any-hover: hover) {
-    &:hover {
-      @content;
-    }
-  }
+	@media (any-hover: hover) {
+		&:hover {
+			@content;
+		}
+	}
 }
 
 @mixin app-scrollbar {
@@ -42,4 +42,12 @@
 			background-color: var(--color-scrollbar-thumb-active);
 		}
 	}
+}
+
+@mixin interactive-transition {
+	transition:
+		color var(--transition-fast),
+		background-color var(--transition-fast),
+		border-color var(--transition-fast),
+		box-shadow var(--transition-fast);
 }

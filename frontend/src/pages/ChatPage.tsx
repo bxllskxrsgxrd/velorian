@@ -34,7 +34,7 @@ import './_chatPage.scss';
 import { useToast } from '../hooks/useToast';
 import { getUserFacingError } from '../errors/userErrorMessages';
 
-import { ArrowDownIcon } from '../components/icons/AppIcons';
+import { ArrowDownIcon, BurgerIcon, CrossIcon } from '../components/icons/AppIcons';
 import { useChatStore } from '../stores/chatStore';
 import { useConversationsStore } from '../stores/conversationsStore';
 import { useFilesStore } from '../stores/filesStore';
@@ -523,7 +523,8 @@ export function ChatPage() {
 
 	async function refreshMessageKnowledgeLink(message: ChatMessage) {
 		const item = await getMessageKnowledgeLink(message.id);
-		setMessageKnowledgeLink(message.id, item);
+		if (item) syncKnowledgeLink(message.id, item);
+		else setMessageKnowledgeLink(message.id, null);
 		return item;
 	}
 
@@ -616,7 +617,7 @@ export function ChatPage() {
 				>
 					<header className="chat-page__topbar">
 						<button type="button" onClick={() => setIsSidebarOpen(true)} aria-label="Открыть историю">
-							☰
+							<BurgerIcon />
 						</button>
 						<span>{conversations.find((item) => item.id === activeConversationId)?.title ?? 'Новый чат'}</span>
 					</header>
@@ -625,7 +626,7 @@ export function ChatPage() {
 							<div className="chat-page__error" role="alert">
 								{pageError}
 								<button type="button" onClick={() => setPageError('')}>
-									×
+									<CrossIcon />
 								</button>
 							</div>
 						)}

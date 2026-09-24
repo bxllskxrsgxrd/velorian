@@ -17,7 +17,7 @@ import { useKnowledgeStore } from '../stores/knowledgeStore';
 import { useUiStore } from '../stores/uiStore';
 import { useApproachesStore } from '../stores/approachesStore';
 import './_knowledgePage.scss';
-import { CrossIcon, DocumentIcon, ListIcon, SearchIcon, TrashIcon } from '../components/icons/AppIcons';
+import { BurgerIcon, CrossIcon, DocumentIcon, ListIcon, MoveIcon, SearchIcon, TrashIcon } from '../components/icons/AppIcons';
 import { Button } from '../components/ui/Button/Button';
 
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor/MarkdownEditor'));
@@ -260,7 +260,7 @@ export function KnowledgeDataEditor({
 		<main className="knowledge-editor-page knowledge-page">
 			<header className="knowledge-editor-page__header">
 				<button className="knowledge-editor-page__back" type="button" onClick={onCancel}>
-					← База знаний
+					<MoveIcon /> База знаний
 				</button>
 				<h1 id="knowledge-editor-title">{mode === 'create' ? 'Добавить данные' : 'Редактировать данные'}</h1>
 				<p>
@@ -775,7 +775,7 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 				<header>
 					<div>
 						<button className="knowledge-page__mobile-menu" type="button" onClick={() => setSidebarOpen(true)}>
-							☰
+							<BurgerIcon />
 						</button>
 						<h1>База знаний</h1>
 						<p>

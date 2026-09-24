@@ -271,8 +271,8 @@ export async function createKnowledgeItem(title: string, content: string, rating
 	})).item);
 }
 
-export async function getMessageKnowledgeLink(messageId: string): Promise<Pick<KnowledgeItem, 'id' | 'deletedAt'> | null> {
-	return (await requestJson<{ item: Pick<KnowledgeItem, 'id' | 'deletedAt'> | null }>(`/knowledge/messages/${messageId}/link`)).item;
+export async function getMessageKnowledgeLink(messageId: string): Promise<Pick<KnowledgeItem, 'id' | 'deletedAt' | 'rating'> | null> {
+	return (await requestJson<{ item: Pick<KnowledgeItem, 'id' | 'deletedAt' | 'rating'> | null }>(`/knowledge/messages/${messageId}/link`)).item;
 }
 
 export async function uploadKnowledgeFile(file: File, title = '', content = '', rating: number | null = null, isActive = true, approachId: string | null = null, filters?: Partial<KnowledgeFilters>): Promise<KnowledgeItem> {

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { useBlocker, useNavigate, useParams } from 'react-router-dom';
 import { listKnowledge } from '../api/chatApi';
-import { CrossIcon, MoreIcon, PlusIcon } from '../components/icons/AppIcons';
+import { CrossIcon, MoreIcon, MoveIcon, PlusIcon } from '../components/icons/AppIcons';
 import { Checkbox } from '../components/ui/Checkbox/Checkbox';
 import { CustomSelect } from '../components/ui/CustomSelect/CustomSelect';
 import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
@@ -187,7 +187,7 @@ export function ApproachEditorPage() {
 			<header>
 				<div>
 					<button className="approaches-page__back" type="button" onClick={() => navigate('/knowledge/approaches')}>
-						← Подходы
+						<MoveIcon /> Подходы
 					</button>
 					<h1>{isCreate ? 'Создать подход' : 'Редактировать подход'}</h1>
 				</div>

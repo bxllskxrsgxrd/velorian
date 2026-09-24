@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { ListIcon } from '../components/icons/AppIcons';
+import { BurgerIcon, ListIcon, MoveIcon } from '../components/icons/AppIcons';
 import { Checkbox } from '../components/ui/Checkbox/Checkbox';
 import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
 import { useToast } from '../hooks/useToast';
@@ -134,12 +134,14 @@ export function ApproachesPage() {
 		<main className="approaches-page knowledge-page">
 			<header>
 				<div>
-					<button className="knowledge-page__mobile-menu" type="button" onClick={() => setSidebarOpen(true)}>
-						☰
-					</button>
-					<button className="approaches-page__back" type="button" onClick={() => navigate('/knowledge')}>
-						← База знаний
-					</button>
+					<div className="approaches-page__navigation">
+						<button className="knowledge-page__mobile-menu" type="button" onClick={() => setSidebarOpen(true)}>
+							<BurgerIcon />
+						</button>
+						<button className="approaches-page__back" type="button" onClick={() => navigate('/knowledge')}>
+							<MoveIcon /> База знаний
+						</button>
+					</div>
 					<h1>Подходы</h1>
 					<p>Глобальные профили, которыми руководствуется агент</p>
 				</div>
@@ -164,8 +166,11 @@ export function ApproachesPage() {
 							openCardMenu(item.id, event.clientX, event.clientY);
 						}}
 					>
-						<span className="approach-card__head">
-							<strong>{item.name}</strong>
+						<strong className="approach-card__head">{item.name}</strong>
+
+						<span className="approach-card__description">
+							<span className="approach-card__description--text">{item.description || 'Описание не заполнено'}</span>
+
 							<Checkbox
 								checked={item.isActive}
 								disabled={saving}
@@ -174,7 +179,6 @@ export function ApproachesPage() {
 								className="approach-card__active-toggle"
 							/>
 						</span>
-						<span>{item.description || 'Описание не заполнено'}</span>
 						<small>Связанных материалов: {item.linkedKnowledgeItemsCount ?? 0}</small>
 					</article>
 				))}

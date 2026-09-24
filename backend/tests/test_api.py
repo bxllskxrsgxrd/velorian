@@ -1131,10 +1131,12 @@ def test_message_editor_knowledge_link_lifecycle_and_file_reuse(authenticated_cl
 	assert item["rating"] is None
 	assert authenticated_client.get(item["originalDownloadUrl"]).content.decode() == markdown
 	assert authenticated_client.get(f"/api/knowledge/messages/{message['id']}/link").json()["item"] == {
-		"id": item["id"], "deletedAt": None,
+		"id": item["id"], "deletedAt": None, "rating": None,
 	}
 	conversation = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]
-	assert conversation["messages"][-1]["knowledgeItem"] == {"id": item["id"], "deletedAt": None}
+	assert conversation["messages"][-1]["knowledgeItem"] == {
+		"id": item["id"], "deletedAt": None, "rating": None,
+	}
 
 	duplicate = authenticated_client.post("/api/knowledge", json={
 		"title": "Дубликат", "content": markdown, "source_message_id": message["id"],

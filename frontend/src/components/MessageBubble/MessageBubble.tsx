@@ -3,7 +3,7 @@ import { CHAT_MESSAGE_STATUSES } from '../../constants/chatMessageStatuses';
 import { CHAT_ROLES } from '../../constants/chatRoles';
 import type { ChatAttachment, ChatMessage } from '../../types/chat';
 import { SubmitLoadingIcon } from '../icons/SubmitLoadingIcon/SubmitLoadingIcon';
-import { CheckIcon, DocumentIcon, EditIcon } from '../icons/AppIcons';
+import { CheckIcon, DocumentIcon, EditIcon, TextIcon, UndoIcon } from '../icons/AppIcons';
 import { CustomSelect } from '../ui/CustomSelect/CustomSelect';
 import './_messageBubble.scss';
 import { MessageAttachment } from './MessageAttachment';
@@ -12,6 +12,7 @@ import { MessageRating } from './MessageRating';
 import { UserMessageContent } from './UserMessageContent';
 import { getUserFacingError } from '../../errors/userErrorMessages';
 import { useMessageUiStore } from '../../stores/messageUiStore';
+import { Button } from '../ui/Button/Button';
 
 const AssistantMessageContent = lazy(() => import('./AssistantMessageContent'));
 
@@ -28,7 +29,18 @@ type MessageBubbleProps = {
 	onOpenKnowledge?: () => void;
 };
 
-function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, branch, onRate, onRemoveRating, onCreateFile, onAddToKnowledge, onOpenKnowledge }: MessageBubbleProps) {
+function MessageBubbleComponent({
+	message,
+	onOpenAttachment,
+	onRetry,
+	onEdit,
+	branch,
+	onRate,
+	onRemoveRating,
+	onCreateFile,
+	onAddToKnowledge,
+	onOpenKnowledge,
+}: MessageBubbleProps) {
 	const isEditing = useMessageUiStore((state) => state.byMessageId[message.id]?.isEditing ?? false);
 	const draft = useMessageUiStore((state) => state.byMessageId[message.id]?.draft ?? message.content);
 	const fileState = useMessageUiStore((state) => state.byMessageId[message.id]?.fileState ?? 'idle');
@@ -46,11 +58,12 @@ function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, br
 	const isHistoricalCancelledError = isCancelled && !message.content.trim();
 	const shouldRenderError = isError || isHistoricalCancelledError;
 	const error = shouldRenderError
-		? message.error ?? getUserFacingError(
-			message.errorCode ?? (isHistoricalCancelledError ? 'AI_REQUEST_INTERRUPTED' : 'HISTORICAL_MESSAGE_ERROR'),
-			0,
-			message.requestId,
-		)
+		? (message.error ??
+			getUserFacingError(
+				message.errorCode ?? (isHistoricalCancelledError ? 'AI_REQUEST_INTERRUPTED' : 'HISTORICAL_MESSAGE_ERROR'),
+				0,
+				message.requestId,
+			))
 		: undefined;
 
 	const attachments = message.attachments ?? [];
@@ -69,7 +82,7 @@ function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, br
 	const hasText = Boolean(message.content);
 	const isFileCreated = fileState === 'success' || Boolean(generatedFile);
 	const showCompletedAssistantActions = !isUser && !isPending && !isStreaming && !isCancelled;
-	const isKnowledgeSaved = Boolean(message.knowledgeItem && !message.knowledgeItem.deletedAt);
+	const hasKnowledgeItem = Boolean(message.knowledgeItem);
 
 	const contentClassName = ['message__content', hasAttachments && 'message__content--with-attachments']
 		.filter(Boolean)
@@ -110,7 +123,11 @@ function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, br
 			{leadingFileAttachments.length > 0 && (
 				<div className="message__files">
 					{leadingFileAttachments.map((attachment) => (
-						<MessageAttachment key={attachment.id} attachment={attachment} onOpen={() => onOpenAttachment(attachment)} />
+						<MessageAttachment
+							key={attachment.id}
+							attachment={attachment}
+							onOpen={() => onOpenAttachment(attachment)}
+						/>
 					))}
 				</div>
 			)}
@@ -124,79 +141,160 @@ function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, br
 			{isUser && isEditing ? (
 				<div className="message__editor">
 					<textarea autoFocus value={draft} onChange={(event) => setDraft(message.id, event.target.value)} />
-					<div><button type="button" onClick={() => cancelEditing(message.id, message.content)}>Отмена</button><button type="button" disabled={!draft.trim() || draft.trim() === message.content.trim()} onClick={() => { onEdit?.(draft.trim()); finishEditing(message.id); }}>Отправить</button></div>
-				</div>
-			) : hasText && (
-				<div className={contentClassName}>
-					{isUser ? (
-						<UserMessageContent content={message.content} />
-					) : (
-						<Suspense fallback={<span className="message__markdown-loading">Форматирование ответа…</span>}><AssistantMessageContent content={message.content} isStreaming={isStreaming} /></Suspense>
-					)}
-				</div>
-			)}
-			{showCompletedAssistantActions && ((onRate && onRemoveRating) || (onCreateFile && hasText) || onAddToKnowledge || message.knowledgeItem) && (
-				<div className="message__assistant-actions">
-					{onRate && onRemoveRating && (
-						<MessageRating compact readonly={isKnowledgeSaved} messageId={message.id} rating={message.rating} onRate={onRate} onRemove={onRemoveRating} />
-					)}
-					{onRate && onRemoveRating && onCreateFile && hasText && (
-						<span className="message__assistant-actions-divider" aria-hidden="true" />
-					)}
-					{onCreateFile && hasText && (isFileCreated ? (
-						<span className="message__file-created" role="status">
-							<span className="message__file-created-icon" aria-hidden="true"><CheckIcon size={10} /></span>
-							Файл создан
-						</span>
-					) : (
+					<div>
+						<button type="button" onClick={() => cancelEditing(message.id, message.content)}>
+							Отмена
+						</button>
 						<button
-							className="message__create-file"
 							type="button"
-							disabled={fileState === 'loading'}
+							disabled={!draft.trim() || draft.trim() === message.content.trim()}
 							onClick={() => {
-								setFileState(message.id, 'loading');
-								void onCreateFile()
-									.then(() => setFileState(message.id, 'success'))
-									.catch(() => setFileState(message.id, 'error'));
+								onEdit?.(draft.trim());
+								finishEditing(message.id);
 							}}
 						>
-							<DocumentIcon size={16} />
-							{fileState === 'loading' ? 'Создание…' : 'Создать файл'}
+							Отправить
 						</button>
-					))}
-					{fileState === 'error' && <span className="message__create-file-error" role="status">Не удалось создать файл</span>}
-					{(onAddToKnowledge || message.knowledgeItem) && (
-						<span className="message__assistant-actions-divider" aria-hidden="true" />
-					)}
-					{message.knowledgeItem ? (
-						<button
-							className={`message__knowledge-action${message.knowledgeItem.deletedAt ? ' message__knowledge-action--trash' : ' message__knowledge-action--saved'}`}
-							type="button"
-							onClick={onOpenKnowledge}
-						>
-							{message.knowledgeItem.deletedAt ? '↶ В корзине' : '✓ В базе знаний'}
-						</button>
-					) : generatedFile && onAddToKnowledge ? (
-						<CustomSelect
-							className="message__knowledge-select"
-							value=""
-							ariaLabel="Добавить в базу"
-							triggerLabel="Добавить в базу"
-							placement="top"
-							disabled={fileState === 'loading'}
-							onChange={(value) => onAddToKnowledge(value === 'file' ? generatedFile : undefined)}
-							options={[
-								{ value: 'text', label: <span className="message__knowledge-option"><DocumentIcon size={18} /><span><strong>Текст ответа</strong><small>Добавить содержимое сообщения</small></span></span> },
-								{ value: 'file', label: <span className="message__knowledge-option"><DocumentIcon size={18} /><span><strong>{`Файл «${generatedFile.name}»`}</strong><small>Добавить созданный файл</small></span></span> },
-							]}
-						/>
-					) : onAddToKnowledge ? (
-						<button className="message__knowledge-action" type="button" disabled={fileState === 'loading'} onClick={() => onAddToKnowledge()}>
-							Добавить текст в базу
-						</button>
-					) : null}
+					</div>
 				</div>
+			) : (
+				hasText && (
+					<div className={contentClassName}>
+						{isUser ? (
+							<UserMessageContent content={message.content} />
+						) : (
+							<Suspense fallback={<span className="message__markdown-loading">Форматирование ответа…</span>}>
+								<AssistantMessageContent content={message.content} isStreaming={isStreaming} />
+							</Suspense>
+						)}
+					</div>
+				)
 			)}
+			{showCompletedAssistantActions &&
+				((onRate && onRemoveRating) || (onCreateFile && hasText) || onAddToKnowledge || message.knowledgeItem) && (
+					<div className="message__assistant-actions">
+						{onRate && onRemoveRating && (
+							<MessageRating
+								compact
+								readonly={hasKnowledgeItem}
+								messageId={message.id}
+								rating={message.rating}
+								onRate={onRate}
+								onRemove={onRemoveRating}
+							/>
+						)}
+						{onRate && onRemoveRating && onCreateFile && hasText && (
+							<span className="message__assistant-actions-divider" aria-hidden="true" />
+						)}
+						{onCreateFile &&
+							hasText &&
+							(isFileCreated ? (
+								<span className="message__file-created" role="status">
+									<span className="message__file-created-icon" aria-hidden="true">
+										<CheckIcon size={10} />
+									</span>
+									Файл создан
+								</span>
+							) : (
+								<Button
+									variant="outline"
+									tone="neutral"
+									size="small"
+									icon={<DocumentIcon />}
+									className="message__create-file"
+									disabled={fileState === 'loading'}
+									onClick={() => {
+										setFileState(message.id, 'loading');
+										void onCreateFile()
+											.then(() => setFileState(message.id, 'success'))
+											.catch(() => setFileState(message.id, 'error'));
+									}}
+								>
+									{fileState === 'loading' ? 'Создание…' : 'Создать файл'}
+								</Button>
+							))}
+						{fileState === 'error' && (
+							<span className="message__create-file-error" role="status">
+								Не удалось создать файл
+							</span>
+						)}
+						{(onAddToKnowledge || message.knowledgeItem) && (
+							<span className="message__assistant-actions-divider" aria-hidden="true" />
+						)}
+						{message.knowledgeItem ? (
+							<button
+								className={`message__knowledge-action${message.knowledgeItem.deletedAt ? ' message__knowledge-action--trash' : ' message__knowledge-action--saved'}`}
+								type="button"
+								onClick={onOpenKnowledge}
+							>
+								{message.knowledgeItem.deletedAt ? (
+									<>
+										<UndoIcon size={10} /> <span>В корзине</span>
+									</>
+								) : (
+									<>
+										<CheckIcon size={10} /> <span>В базе знаний</span>
+									</>
+								)}
+							</button>
+						) : generatedFile && onAddToKnowledge ? (
+							<CustomSelect
+								className="message__knowledge-select"
+								value=""
+								ariaLabel="Добавить в базу"
+								triggerLabel="Добавить в базу"
+								placement="bottom"
+								disabled={fileState === 'loading'}
+								onChange={(value) => onAddToKnowledge(value === 'file' ? generatedFile : undefined)}
+								options={[
+									{
+										value: 'text',
+										label: (
+											<span className="message__knowledge-option">
+												<TextIcon size={16} />
+												<span>
+													<strong>Текст ответа</strong>
+													<small>Добавить содержимое сообщения</small>
+												</span>
+											</span>
+										),
+									},
+									{
+										value: 'file',
+										label: (
+											<span className="message__knowledge-option">
+												<DocumentIcon size={16} />
+												<span>
+													<strong>{`Файл «${generatedFile.name}»`}</strong>
+													<small>Добавить созданный файл</small>
+												</span>
+											</span>
+										),
+									},
+								]}
+							/>
+						) : onAddToKnowledge ? (
+							<Button
+								variant="outline"
+								tone="neutral"
+								size="small"
+								className="message__knowledge-action"
+								disabled={fileState === 'loading'}
+								onClick={() => onAddToKnowledge()}
+							>
+								Добавить текст в базу
+							</Button>
+						) : // <button
+						// 	className="message__knowledge-action"
+						// 	type="button"
+						// 	disabled={fileState === 'loading'}
+						// 	onClick={() => onAddToKnowledge()}
+						// >
+						// 	Добавить текст в базу
+						// </button>
+						null}
+					</div>
+				)}
 			{generatedFileAttachments.length > 0 && (
 				<div className="message__files message__files--generated">
 					{generatedFileAttachments.map((attachment) => (
@@ -211,8 +309,33 @@ function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, br
 			)}
 			{isUser && !isEditing && (onEdit || (branch && branch.total > 1)) && (
 				<div className="message__user-actions">
-					{branch && branch.total > 1 && <div className="message__branches"><button type="button" onClick={branch.onPrevious} disabled={!branch.onPrevious} aria-label="Предыдущая версия">‹</button><span>{branch.index + 1} / {branch.total}</span><button type="button" onClick={branch.onNext} disabled={!branch.onNext} aria-label="Следующая версия">›</button></div>}
-					{onEdit && <button type="button" onClick={() => startEditing(message.id, message.content)} aria-label="Редактировать сообщение"><EditIcon size={15} /></button>}
+					{branch && branch.total > 1 && (
+						<div className="message__branches">
+							<button
+								type="button"
+								onClick={branch.onPrevious}
+								disabled={!branch.onPrevious}
+								aria-label="Предыдущая версия"
+							>
+								‹
+							</button>
+							<span>
+								{branch.index + 1} / {branch.total}
+							</span>
+							<button type="button" onClick={branch.onNext} disabled={!branch.onNext} aria-label="Следующая версия">
+								›
+							</button>
+						</div>
+					)}
+					{onEdit && (
+						<button
+							type="button"
+							onClick={() => startEditing(message.id, message.content)}
+							aria-label="Редактировать сообщение"
+						>
+							<EditIcon size={15} />
+						</button>
+					)}
 				</div>
 			)}
 			{!isUser && !isPending && !isStreaming && isCancelled && onRetry && (
@@ -226,17 +349,19 @@ function MessageBubbleComponent({ message, onOpenAttachment, onRetry, onEdit, br
 	);
 }
 
-export const MessageBubble = memo(MessageBubbleComponent, (previous, next) =>
-	previous.message === next.message &&
-	previous.branch?.index === next.branch?.index &&
-	previous.branch?.total === next.branch?.total &&
-	Boolean(previous.branch?.onPrevious) === Boolean(next.branch?.onPrevious) &&
-	Boolean(previous.branch?.onNext) === Boolean(next.branch?.onNext) &&
-	Boolean(previous.onRetry) === Boolean(next.onRetry) &&
-	Boolean(previous.onEdit) === Boolean(next.onEdit) &&
-	Boolean(previous.onRate) === Boolean(next.onRate) &&
-	Boolean(previous.onRemoveRating) === Boolean(next.onRemoveRating) &&
-	Boolean(previous.onCreateFile) === Boolean(next.onCreateFile) &&
-	Boolean(previous.onAddToKnowledge) === Boolean(next.onAddToKnowledge) &&
-	Boolean(previous.onOpenKnowledge) === Boolean(next.onOpenKnowledge),
+export const MessageBubble = memo(
+	MessageBubbleComponent,
+	(previous, next) =>
+		previous.message === next.message &&
+		previous.branch?.index === next.branch?.index &&
+		previous.branch?.total === next.branch?.total &&
+		Boolean(previous.branch?.onPrevious) === Boolean(next.branch?.onPrevious) &&
+		Boolean(previous.branch?.onNext) === Boolean(next.branch?.onNext) &&
+		Boolean(previous.onRetry) === Boolean(next.onRetry) &&
+		Boolean(previous.onEdit) === Boolean(next.onEdit) &&
+		Boolean(previous.onRate) === Boolean(next.onRate) &&
+		Boolean(previous.onRemoveRating) === Boolean(next.onRemoveRating) &&
+		Boolean(previous.onCreateFile) === Boolean(next.onCreateFile) &&
+		Boolean(previous.onAddToKnowledge) === Boolean(next.onAddToKnowledge) &&
+		Boolean(previous.onOpenKnowledge) === Boolean(next.onOpenKnowledge),
 );

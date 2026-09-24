@@ -129,6 +129,7 @@ def _message_payload(message: Message) -> dict:
 		"knowledgeItem": {
 			"id": knowledge_item.id,
 			"deletedAt": knowledge_item.deleted_at.isoformat() if knowledge_item.deleted_at else None,
+			"rating": knowledge_item.rating,
 		} if knowledge_item else None,
 	}
 
