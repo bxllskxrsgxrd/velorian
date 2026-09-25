@@ -333,7 +333,7 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 		})
 		.click();
 
-	const filtersDropdown = page.locator('.knowledge-page__dropdown--filters');
+	const filtersDropdown = page.locator('.knowledge-page__dropdown--filters').getByRole('button', { name: 'Источник' });
 
 	await expect(filtersDropdown).toBeVisible();
 
