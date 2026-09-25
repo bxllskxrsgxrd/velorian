@@ -1165,6 +1165,7 @@ def test_message_editor_text_source_preserves_selected_or_absent_rating(authenti
 	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions("Текст ответа")))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Оценки редактора"}).json()["conversation"]["id"]
 	created_ratings = []
+	created_ids = []
 	for prompt, rating in (("С оценкой", 3), ("Без оценки", None)):
 		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
 		message = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"][-1]
@@ -1177,8 +1178,11 @@ def test_message_editor_text_source_preserves_selected_or_absent_rating(authenti
 		assert created.status_code == 200
 		assert created.json()["item"]["sourceType"] == "assistant_message"
 		created_ratings.append(created.json()["item"]["rating"])
+		created_ids.append(created.json()["item"]["id"])
 
 	assert created_ratings == [3, None]
+	filtered = authenticated_client.get("/api/knowledge", params={"source_type": "rated_content"})
+	assert {item["id"] for item in filtered.json()["items"]} == set(created_ids)
 
 
 def test_generated_markdown_file_to_knowledge_filters_and_retrieval(authenticated_client, monkeypatch):
@@ -1205,6 +1209,8 @@ def test_generated_markdown_file_to_knowledge_filters_and_retrieval(authenticate
 	assert item["fileName"] == "Материал 1.md"
 	assert item["filters"] == filters
 	assert authenticated_client.get(item["downloadUrl"]).content.decode() == markdown
+	filtered = authenticated_client.get("/api/knowledge", params={"source_type": "uploaded_file"})
+	assert [entry["id"] for entry in filtered.json()["items"]] == [item["id"]]
 
 	duplicate = authenticated_client.post(f"/api/knowledge/attachments/{attachment['id']}", json={"filters": filters})
 	assert duplicate.status_code == 200

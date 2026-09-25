@@ -31,6 +31,10 @@ router = APIRouter(prefix=f"{settings.api_prefix}/knowledge", tags=["knowledge"]
 logger = logging.getLogger("velorian")
 RatingValue = Annotated[int, Field(strict=True, ge=1, le=5)]
 KNOWLEDGE_FILTER_KEYS = ("geo", "celebrity", "offer", "news_source")
+KNOWLEDGE_SOURCE_FILTER_GROUPS = {
+	"rated_content": ("rated_content", "assistant_message"),
+	"uploaded_file": ("uploaded_file", "assistant_file"),
+}
 TRASH_RETENTION = timedelta(days=30)
 
 
@@ -278,7 +282,9 @@ def list_knowledge_items(
 		for term in search.split():
 			statement = statement.where(_knowledge_search_condition(db, term))
 	if source_type:
-		statement = statement.where(KnowledgeItem.source_type == source_type)
+		statement = statement.where(
+			KnowledgeItem.source_type.in_(KNOWLEDGE_SOURCE_FILTER_GROUPS.get(source_type, (source_type,)))
+		)
 	if approach_id:
 		owned_approach(db, approach_id, user.id)
 		statement = statement.where(KnowledgeItem.approach_id == approach_id)
