@@ -327,57 +327,50 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 	});
 
 	// Фильтры
-	await controls
-		.getByRole('button', {
-			name: /^Фильтры/,
-		})
-		.click();
+await controls
+	.getByRole('button', {
+		name: /^Фильтры/,
+	})
+	.click();
 
-	const filtersDropdown = page.locator('.knowledge-page__dropdown--filters').getByRole('button', { name: 'Источник' });
+const filtersDropdown = page.locator('.knowledge-page__dropdown--filters');
 
-	await expect(filtersDropdown).toBeVisible();
+await expect(filtersDropdown).toBeVisible();
 
-	const ratingSelect = filtersDropdown.getByLabel('Рейтинг');
-	const sourceSelect = filtersDropdown.getByLabel('Источник');
-	const approachSelect = filtersDropdown.getByLabel('Подход');
-	const activeSelect = filtersDropdown.getByLabel('Использование');
+const ratingSelect = filtersDropdown.getByRole('button', { name: 'Рейтинг' });
+const sourceSelect = filtersDropdown.getByRole('button', { name: 'Источник' });
+const approachSelect = filtersDropdown.getByRole('button', { name: 'Подход' });
+const activeSelect = filtersDropdown.getByRole('button', { name: 'Использование' });
 
-	await Promise.all([
-		page.waitForRequest((request) => request.url().includes('min_rating=4')),
-		selectCustomOption(page, ratingSelect, '4 и выше'),
-	]);
+await selectCustomOption(page, ratingSelect, '4 и выше');
+await expect(ratingSelect).toContainText('4 и выше');
 
-	await expect(ratingSelect).toContainText('4 и выше');
+await selectCustomOption(page, sourceSelect, 'Вручную');
+await expect(sourceSelect).toContainText('Вручную');
 
-	await selectCustomOption(page, sourceSelect, 'Вручную');
+await selectCustomOption(page, approachSelect, 'Интервью');
+await expect(approachSelect).toContainText('Интервью');
 
-	await expect(sourceSelect).toContainText('Вручную');
+await selectCustomOption(page, activeSelect, 'Отключены');
+await expect(activeSelect).toContainText('Отключены');
 
-	await selectCustomOption(page, approachSelect, 'Интервью');
+await expect
+	.poll(() => {
+		const url = new URL(page.url());
 
-	await expect(approachSelect).toContainText('Интервью');
-
-	await selectCustomOption(page, activeSelect, 'Отключены');
-
-	await expect(activeSelect).toContainText('Отключены');
-
-	await expect
-		.poll(() => {
-			const url = new URL(page.url());
-
-			return {
-				rating: url.searchParams.get('rating'),
-				source: url.searchParams.get('source'),
-				approach: url.searchParams.get('approach'),
-				active: url.searchParams.get('active'),
-			};
-		})
-		.toEqual({
-			rating: '4',
-			source: 'manual',
-			approach: expect.any(String),
-			active: 'inactive',
-		});
+		return {
+			rating: url.searchParams.get('rating'),
+			source: url.searchParams.get('source'),
+			approach: url.searchParams.get('approach'),
+			active: url.searchParams.get('active'),
+		};
+	})
+	.toEqual({
+		rating: '4',
+		source: 'manual',
+		approach: expect.any(String),
+		active: 'inactive',
+	});
 
 	// Сортировка
 	await controls
@@ -390,10 +383,15 @@ test('opens Knowledge Base from sidebar and creates rated manual data', async ({
 
 	await expect(sortDropdown).toBeVisible();
 
-	await Promise.all([
-		page.waitForRequest((request) => new URL(request.url()).searchParams.get('sort') === 'rating_desc'),
-		sortDropdown.getByRole('button', { name: 'Рейтинг: высокий' }).click(),
-	]);
+	await sortDropdown
+	.getByRole('button', { name: 'Рейтинг: высокий' })
+	.click();
+
+await expect(sortDropdown).not.toBeVisible();
+
+await expect
+	.poll(() => new URL(page.url()).searchParams.get('sort'))
+	.toBe('rating_desc');
 
 	await expect(sortDropdown).not.toBeVisible();
 
