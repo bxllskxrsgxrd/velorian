@@ -110,6 +110,31 @@ describe('ChatPage retry', () => {
 		expect(container.querySelector('.message__content--pending')).not.toBeInTheDocument();
 	});
 
+	it('keeps a pre-metadata HTTP error when the initial history request resolves later', async () => {
+		let resolveConversation!: (value: typeof conversation & { messages: [] }) => void;
+		api.getConversation.mockReturnValueOnce(new Promise((resolve) => { resolveConversation = resolve; }));
+		api.streamChat.mockRejectedValueOnce(new ApiError('AI_SERVICE_ERROR', 502, 'request-502'));
+		const { container } = renderChatPage();
+
+		await waitFor(() => expect(useChatStore.getState().isLoadingConversation).toBe(true));
+		fireEvent.change(await screen.findByRole('textbox', { name: /введите запрос/i }), {
+			target: { value: 'Запрос с ошибкой' },
+		});
+		fireEvent.click(screen.getByRole('button', { name: 'Отправить сообщение' }));
+		await waitFor(() => expect(useChatStore.getState().messagesByConversation[conversation.id]?.at(-1)?.status).toBe('error'));
+
+		resolveConversation({ ...conversation, messages: [] });
+
+		await waitFor(() => expect(useChatStore.getState().isLoadingConversation).toBe(false));
+		const errorText = await screen.findByText(/AI-сервис временно недоступен/i);
+		const alert = errorText.closest('[role="alert"]');
+		expect(alert).not.toBeNull();
+		if (!alert) throw new Error('Error UI is missing');
+		expect(alert).toHaveTextContent('request-502');
+		expect(alert.closest('.message')).toHaveClass('message--error');
+		expect(container.querySelector('.message__content--pending')).not.toBeInTheDocument();
+	});
+
 	it('maps an error event after stream metadata from streaming to the dedicated error UI', async () => {
 		api.getConversation.mockResolvedValueOnce({ ...conversation, messages: [] });
 		api.streamChat.mockImplementationOnce(async ({ onEvent }: { onEvent: (event: StreamEvent) => void }) => {
@@ -172,6 +197,23 @@ describe('ChatPage lazy conversation creation', () => {
 		await waitFor(() => expect(prompt).toHaveValue('Не теряй этот текст'));
 		expect(api.streamChat).not.toHaveBeenCalled();
 		expect(api.createConversation).toHaveBeenCalledTimes(1);
+	});
+
+	it('does not replace a new conversation error with an initial history load', async () => {
+		api.streamChat.mockRejectedValueOnce(new ApiError('AI_SERVICE_ERROR', 502, 'request-502'));
+		renderChatPage('/chat/new');
+
+		const prompt = await screen.findByRole('textbox', { name: /введите запрос/i });
+		fireEvent.change(prompt, { target: { value: 'Запрос с ошибкой' } });
+		fireEvent.click(screen.getByRole('button', { name: 'Отправить сообщение' }));
+
+		const errorText = await screen.findByText(/AI-сервис временно недоступен/i);
+		const alert = errorText.closest('[role="alert"]');
+		expect(alert).not.toBeNull();
+		if (!alert) throw new Error('Error UI is missing');
+		expect(alert).toHaveTextContent('request-502');
+		expect(alert.closest('.message')).toHaveClass('message--error');
+		expect(api.getConversation).not.toHaveBeenCalled();
 	});
 });
 

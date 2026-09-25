@@ -84,6 +84,7 @@ export function ChatPage() {
 	const ratingSequenceRef = useRef(new Map<string, number>());
 	const localRetryPayloadsRef = useRef(new Map<string, { prompt: string; files: File[]; searchMode: SearchMode }>());
 	const conversationCreationRef = useRef<Promise<ConversationSummary> | null>(null);
+	const locallyCreatedConversationIdsRef = useRef(new Set<string>());
 	const sendOperationsRef = useRef(new Map<string, Promise<void>>());
 	const previousConversationIdRef = useRef<string | null>(activeConversationId);
 	const [knowledgeRestore, setKnowledgeRestore] = useState<{ messageId: string; itemId: string } | null>(null);
@@ -98,18 +99,31 @@ export function ChatPage() {
 
 	useEffect(() => {
 		if (!activeConversationId) return;
+		if (locallyCreatedConversationIdsRef.current.delete(activeConversationId)) {
+			setPageError('');
+			setIsLoadingConversation(false);
+			return;
+		}
 		const sequence = ++loadSequenceRef.current;
+		const messagesAtLoadStart = useChatStore.getState().messagesByConversation[activeConversationId];
+		const canApplyLoadedConversation = () => {
+			const state = useChatStore.getState();
+			return (
+				state.messagesByConversation[activeConversationId] === messagesAtLoadStart &&
+				!state.generationByConversation[activeConversationId]
+			);
+		};
 		setPageError('');
 		setIsLoadingConversation(true);
 		getConversation(activeConversationId)
 			.then((conversation) => {
-				if (sequence === loadSequenceRef.current) {
+				if (sequence === loadSequenceRef.current && canApplyLoadedConversation()) {
 					setConversationMessages(activeConversationId, conversation.messages);
 				}
 			})
 			.catch((error: unknown) => {
 				reportError('Не удалось открыть диалог', error, { conversationId: activeConversationId });
-				if (sequence === loadSequenceRef.current) {
+				if (sequence === loadSequenceRef.current && canApplyLoadedConversation()) {
 					setConversationMessages(activeConversationId, []);
 					setPageError(
 						error instanceof ApiError && error.status === 404
@@ -185,6 +199,7 @@ export function ChatPage() {
 			setIsCreatingConversation(true);
 			conversationCreationRef.current = createConversation().then((created) => {
 				loadSequenceRef.current += 1;
+				locallyCreatedConversationIdsRef.current.add(created.id);
 				setConversations((current) => [created, ...current.filter((item) => item.id !== created.id)]);
 				setConversationMessages(created.id, []);
 				navigate(`/chat/${created.id}`, { replace: true });
