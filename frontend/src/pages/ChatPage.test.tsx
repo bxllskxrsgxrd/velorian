@@ -27,6 +27,7 @@ const api = vi.hoisted(() => ({
 	getConversation: vi.fn(),
 	getMessageKnowledgeLink: vi.fn(),
 	listConversations: vi.fn(),
+	loadAttachmentFile: vi.fn(),
 	renameConversation: vi.fn(),
 	streamChat: vi.fn(),
 	activateMessageBranch: vi.fn(),
@@ -198,25 +199,28 @@ describe('ChatPage assistant title extraction', () => {
 		await waitFor(() => expect(api.createMessageMarkdownFile).toHaveBeenCalledWith('assistant-title', 'Ласковый след'));
 	});
 
-	it('uses the source response title and body when adding its generated file', async () => {
+	it('uses the selected generated file name and content instead of the response text', async () => {
+		const fileContent = 'Тихий шёпот осени\nЛистья кружат над землёй.';
 		api.getConversation.mockResolvedValue({
 			...conversation,
 			messages: [{
-				id: 'assistant-title', role: 'assistant', content, status: 'done',
+				id: 'assistant-title', role: 'assistant', content: 'Файл подготовлен. Его можно скачать ниже.', status: 'done',
 				attachments: [{
-					id: 'generated-file', name: '1-2.md', size: 42, type: 'text/markdown',
+					id: 'generated-file', name: 'poem.txt', size: 42, type: 'text/plain',
 					url: '/file', isImage: false, generated: true,
 				}],
 			}],
 		});
+		api.loadAttachmentFile.mockResolvedValue(new File([fileContent], 'poem.txt', { type: 'text/plain' }));
 		renderChatPage();
 
 		fireEvent.click(await screen.findByRole('button', { name: 'Добавить в базу' }));
-		fireEvent.click(screen.getByRole('option', { name: /Файл «1-2.md»/ }));
+		fireEvent.click(screen.getByRole('option', { name: /Файл «poem.txt»/ }));
 		const source = JSON.parse((await screen.findByTestId('knowledge-source')).textContent ?? '{}') as KnowledgeCreateSource;
-		expect(source.title).toBe('Ласковый след');
-		expect(source.content).toBe('Тихий шёпот утра,\nИ хвост, как клятва, виляя,');
-		expect(source.fileName).toBe('1-2.md');
+		expect(api.loadAttachmentFile).toHaveBeenCalledWith(expect.objectContaining({ id: 'generated-file', name: 'poem.txt' }));
+		expect(source.title).toBe('poem.txt');
+		expect(source.content).toBe(fileContent);
+		expect(source.fileName).toBe('poem.txt');
 	});
 });
 

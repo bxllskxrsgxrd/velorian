@@ -7,6 +7,7 @@ import {
 	getConversation,
 	getMessageKnowledgeLink,
 	listConversations,
+	loadAttachmentFile,
 	removeMessageRating,
 	restoreKnowledgeItem,
 	setMessageRating,
@@ -562,21 +563,32 @@ export function ChatPage() {
 				openExistingKnowledge(message.id, existing);
 				return;
 			}
-			const response = splitAssistantResponse(message.content);
-			const attachmentTitle = attachment
-				? (response.content !== message.content ? response.title : attachment.name.replace(/\.md$/i, ''))
-				: null;
-			const source: KnowledgeCreateSource = {
-				type: attachment ? 'assistant_file' : 'assistant_message',
-				messageId: message.id,
-				fileId: attachment?.id,
-				title: attachmentTitle ?? response.title,
-				content: response.content,
-				rating: message.rating?.score ?? null,
-				fileName: attachment?.name,
-				mimeType: attachment?.type,
-				returnTo: `/chat/${activeConversationId}`,
-			};
+			let source: KnowledgeCreateSource;
+			if (attachment) {
+				const file = await loadAttachmentFile(attachment);
+				source = {
+					type: 'assistant_file',
+					messageId: message.id,
+					fileId: attachment.id,
+					title: attachment.name,
+					content: await file.text(),
+					rating: message.rating?.score ?? null,
+					fileName: attachment.name,
+					mimeType: attachment.type,
+					file,
+					returnTo: `/chat/${activeConversationId}`,
+				};
+			} else {
+				const response = splitAssistantResponse(message.content);
+				source = {
+					type: 'assistant_message',
+					messageId: message.id,
+					title: response.title,
+					content: response.content,
+					rating: message.rating?.score ?? null,
+					returnTo: `/chat/${activeConversationId}`,
+				};
+			}
 			navigate('/knowledge/new', { state: { knowledgeSource: source } });
 		} catch (error) {
 			showToast(error instanceof Error ? error.message : 'Не удалось открыть редактор базы знаний', 'error');

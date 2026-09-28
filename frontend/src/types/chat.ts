@@ -15,6 +15,8 @@ export type ChatAttachment = {
 	extractionStatus?: 'ready' | 'empty' | 'ocr_unavailable' | 'unsupported' | 'generated' | 'generated_markdown';
 	generated?: boolean;
 	knowledgeSaved?: boolean;
+	content?: string;
+	file?: File | Blob;
 };
 
 export type ChatMessageStatus = (typeof CHAT_MESSAGE_STATUSES)[keyof typeof CHAT_MESSAGE_STATUSES];
@@ -151,6 +153,7 @@ export type KnowledgeCreateSource = {
 	rating: number | null;
 	fileName?: string;
 	mimeType?: string;
+	file?: File;
 	returnTo?: string;
 };
 

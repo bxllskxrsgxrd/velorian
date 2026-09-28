@@ -228,6 +228,19 @@ export async function createMessageMarkdownFile(messageId: string, name?: string
 	return { ...result, attachment: normalizeAttachment(result.attachment) };
 }
 
+export async function loadAttachmentFile(attachment: ChatAttachment): Promise<File> {
+	if (attachment.file instanceof File) return attachment.file;
+	if (attachment.file instanceof Blob) {
+		return new File([attachment.file], attachment.name, { type: attachment.type || attachment.file.type });
+	}
+	if (attachment.content !== undefined) {
+		return new File([attachment.content], attachment.name, { type: attachment.type || 'text/plain' });
+	}
+	const response = await apiFetch(`/attachments/${encodeURIComponent(attachment.id)}`);
+	const blob = await response.blob();
+	return new File([blob], attachment.name, { type: attachment.type || blob.type });
+}
+
 export async function saveAttachmentToKnowledge(attachmentId: string, filters?: Partial<KnowledgeFilters>): Promise<{ item: KnowledgeItem; created: boolean }> {
 	const result = await requestJson<{ item: KnowledgeItem; created: boolean }>(`/knowledge/attachments/${attachmentId}`, {
 		method: 'POST', body: JSON.stringify({ filters: cleanFilters(filters) }),

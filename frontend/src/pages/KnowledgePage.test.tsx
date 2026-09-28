@@ -238,19 +238,23 @@ describe('KnowledgePage', () => {
 	});
 
 	it('prefills a generated file and preserves an absent rating', async () => {
+		const generatedFile = new File(['Тихий шёпот осени\nПродолжение стихотворения.'], 'poem.txt', { type: 'text/plain' });
 		const source = {
 			type: 'assistant_file' as const,
 			messageId: 'assistant-file',
 			fileId: 'file-1',
-			title: 'Ответ.md',
-			content: '# Ответ\n\nСодержимое',
+			title: 'poem.txt',
+			content: 'Тихий шёпот осени\nПродолжение стихотворения.',
 			rating: null,
-			fileName: 'Ответ.md',
-			mimeType: 'text/markdown',
+			fileName: 'poem.txt',
+			mimeType: 'text/plain',
+			file: generatedFile,
 		};
 		renderKnowledge({ pathname: '/knowledge/new', state: { knowledgeSource: source } });
 
-		expect(await screen.findByRole('button', { name: 'Выбрать файл' })).toHaveTextContent('Ответ.md');
+		expect(await screen.findByRole('textbox', { name: 'Название' })).toHaveValue('poem.txt');
+		expect(screen.getByRole('textbox', { name: 'Содержимое' })).toHaveValue(source.content);
+		expect(screen.getByRole('button', { name: 'Выбрать файл' })).toHaveTextContent('poem.txt');
 		fireEvent.click(screen.getByRole('button', { name: 'Добавить данные' }));
 		await waitFor(() => expect(api.createKnowledgeItem).toHaveBeenCalledWith(
 			source.title,
