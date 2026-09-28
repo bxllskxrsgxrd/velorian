@@ -9,7 +9,7 @@ import { Rating } from '../components/ui/Rating/Rating';
 import { Checkbox } from '../components/ui/Checkbox/Checkbox';
 import { CustomSelect } from '../components/ui/CustomSelect/CustomSelect';
 import { DropZone } from '../components/ui/DropZone/DropZone';
-import { Tooltip } from '../components/ui/Tooltip/Tooltip';
+import { KnowledgeCardMetadata } from '../components/KnowledgeCardMetadata/KnowledgeCardMetadata';
 import { KnowledgeFilterFields } from '../components/KnowledgeFilterFields/KnowledgeFilterFields';
 import type { AuthUser, KnowledgeApproach, KnowledgeFilters, KnowledgeItem } from '../types/chat';
 import { reportError } from '../utils/reportError';
@@ -79,48 +79,11 @@ function extractionStatusLabel(item: KnowledgeItem) {
 	return null;
 }
 
-const knowledgeDateFormatter = new Intl.DateTimeFormat('ru-RU', {
-	day: '2-digit',
-	month: '2-digit',
-	year: 'numeric',
-});
-
 function knowledgeSourceLabel(sourceType: KnowledgeItem['sourceType']) {
 	if (sourceType === 'rated_content' || sourceType === 'assistant_message') return 'Ответ агента';
 	if (sourceType === 'assistant_file') return 'Файл из диалога';
 	if (sourceType === 'uploaded_file') return 'Файл';
 	return 'Добавлено вручную';
-}
-
-function KnowledgeCardMetadata({
-	source,
-	createdAt,
-	updatedAt,
-}: {
-	source: string;
-	createdAt: string;
-	updatedAt?: string | null;
-}) {
-	const createdTimestamp = new Date(createdAt).getTime();
-	const updatedTimestamp = updatedAt ? new Date(updatedAt).getTime() : null;
-	const wasUpdated = updatedTimestamp !== null && updatedTimestamp !== createdTimestamp;
-	const createdDate = knowledgeDateFormatter.format(new Date(createdAt));
-	const updatedDate = updatedAt ? knowledgeDateFormatter.format(new Date(updatedAt)) : null;
-
-	return (
-		<Tooltip
-			className="knowledge-card__metadata-summary"
-			content={
-				<>
-					<span>{source}</span>
-					<span>Создано {createdDate}</span>
-					{wasUpdated && <span>Изменено {updatedDate}</span>}
-				</>
-			}
-		>
-			{source} · {wasUpdated ? `Изменено ${updatedDate}` : `Создано ${createdDate}`}
-		</Tooltip>
-	);
 }
 
 function storedFilters(item: KnowledgeItem): KnowledgeFilters {
@@ -986,7 +949,7 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 					{!loading &&
 						items.map((item) => (
 							<article
-								className={`knowledge-card ${selectedItemIds.has(item.id) ? 'knowledge-card--selected' : ''}`}
+								className={`knowledge-card ${selectedItemIds.has(item.id) ? 'knowledge-card--selected' : ''} ${!item.isActive ? 'knowledge-card--inactive' : ''}`}
 								key={item.id}
 								onMouseEnter={(event) => updateCardCursorIndicator(event.target, event.clientX, event.clientY)}
 								onMouseMove={(event) => updateCardCursorIndicator(event.target, event.clientX, event.clientY)}

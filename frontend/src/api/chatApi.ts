@@ -329,6 +329,7 @@ function approachBody(value: Partial<ApproachInput>) {
 		writing_guidelines: value.writingGuidelines,
 		avoid: value.avoid,
 		example_knowledge_item_ids: value.exampleKnowledgeItemIds,
+		rating: value.rating,
 		is_active: value.isActive,
 	};
 }

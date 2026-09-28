@@ -300,6 +300,15 @@
 	border-color: var(--color-accent);
 	box-shadow: 0 0 0 1px var(--color-accent);
 }
+.knowledge-card--inactive {
+	background: color-mix(in srgb, var(--color-bg-surface) 74%, var(--color-bg-elevated));
+}
+.knowledge-card--inactive .knowledge-card__content {
+	opacity: 0.62;
+}
+.knowledge-card--inactive .knowledge-card__active-toggle .checkbox__control {
+	background: var(--color-bg-elevated);
+}
 .knowledge-card__head {
 	display: flex;
 	justify-content: space-between;

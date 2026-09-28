@@ -1,9 +1,12 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
 import { BurgerIcon, ListIcon, MoveIcon } from '../components/icons/AppIcons';
 import { Checkbox } from '../components/ui/Checkbox/Checkbox';
+import { CustomSelect } from '../components/ui/CustomSelect/CustomSelect';
 import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
+import { Rating } from '../components/ui/Rating/Rating';
+import { KnowledgeCardMetadata } from '../components/KnowledgeCardMetadata/KnowledgeCardMetadata';
 import { useToast } from '../hooks/useToast';
 import { useApproachesStore } from '../stores/approachesStore';
 import { useUiStore } from '../stores/uiStore';
@@ -13,6 +16,7 @@ import './_approaches.scss';
 import { Button } from '../components/ui/Button/Button';
 
 type ApproachCardMenuState = { itemId: string; top: number; left: number };
+type ApproachSortMode = 'name_asc' | 'rating_desc' | 'rating_asc';
 
 export function ApproachesPage() {
 	const navigate = useNavigate();
@@ -26,12 +30,22 @@ export function ApproachesPage() {
 	const { showToast } = useToast();
 	const [cardMenu, setCardMenu] = useState<ApproachCardMenuState | null>(null);
 	const [deleteItemId, setDeleteItemId] = useState<string | null>(null);
+	const [sort, setSort] = useState<ApproachSortMode>('name_asc');
 	const cardMenuRef = useRef<HTMLDivElement>(null);
 	const cardCursorIndicatorRef = useRef<HTMLDivElement>(null);
 	const cardCursorPositionRef = useRef<{ clientX: number; clientY: number } | null>(null);
 	const cardCursorTimerRef = useRef<number | null>(null);
 	const cardMenuItem = cardMenu ? items.find((item) => item.id === cardMenu.itemId) : null;
 	const deleteItem = deleteItemId ? items.find((item) => item.id === deleteItemId) : null;
+	const displayedItems = useMemo(() => {
+		if (sort === 'name_asc') return items;
+		return [...items].sort((left, right) => {
+			if (left.rating == null) return right.rating == null ? 0 : 1;
+			if (right.rating == null) return -1;
+			const difference = sort === 'rating_desc' ? right.rating - left.rating : left.rating - right.rating;
+			return difference || left.name.localeCompare(right.name, 'ru');
+		});
+	}, [items, sort]);
 
 	useEffect(() => {
 		void load().catch((error: unknown) => {
@@ -119,6 +133,15 @@ export function ApproachesPage() {
 		}
 	}
 
+	async function rateApproach(itemId: string, rating: number | null) {
+		try {
+			await update(itemId, { rating });
+		} catch (error) {
+			reportError('APPROACH_RATING_UPDATE_FAILED', error, { itemId });
+			showToast(error instanceof Error ? error.message : 'Не удалось изменить рейтинг подхода', 'error');
+		}
+	}
+
 	async function deleteApproach() {
 		if (!deleteItem) return;
 		try {
@@ -149,12 +172,27 @@ export function ApproachesPage() {
 					Создать подход
 				</Button>
 			</header>
+			<div className="approaches-page__controls">
+				<label>
+					Сортировка
+					<CustomSelect
+						value={sort}
+						onChange={(value) => setSort(value as ApproachSortMode)}
+						ariaLabel="Сортировка подходов"
+						options={[
+							{ value: 'name_asc', label: 'По названию' },
+							{ value: 'rating_desc', label: 'Сначала высокий рейтинг' },
+							{ value: 'rating_asc', label: 'Сначала низкий рейтинг' },
+						]}
+					/>
+				</label>
+			</div>
 			<section className="approaches-page__list">
 				{loading && <p>Загрузка…</p>}
 				{!loading && items.length === 0 && <p>Подходов пока нет</p>}
-				{items.map((item) => (
+				{displayedItems.map((item) => (
 					<article
-						className="approach-card"
+						className={`knowledge-card approach-card ${!item.isActive ? 'knowledge-card--inactive' : ''}`}
 						key={item.id}
 						onMouseEnter={(event) => updateCardCursorIndicator(event.target, event.clientX, event.clientY)}
 						onMouseMove={(event) => updateCardCursorIndicator(event.target, event.clientX, event.clientY)}
@@ -166,20 +204,32 @@ export function ApproachesPage() {
 							openCardMenu(item.id, event.clientX, event.clientY);
 						}}
 					>
-						<strong className="approach-card__head">{item.name}</strong>
-
-						<span className="approach-card__description">
-							<span className="approach-card__description--text">{item.description || 'Описание не заполнено'}</span>
-
-							<Checkbox
-								checked={item.isActive}
-								disabled={saving}
-								onChange={(isActive) => void toggleApproach(item.id, isActive)}
-								label="Подход активен"
-								className="approach-card__active-toggle"
-							/>
-						</span>
-						<small>Связанных материалов: {item.linkedKnowledgeItemsCount ?? 0}</small>
+						<div className="knowledge-card__content">
+							<div className="knowledge-card__head">
+								<div>
+									<strong>{item.name}</strong>
+									<Rating
+										value={item.rating}
+										onChange={(rating) => void rateApproach(item.id, rating)}
+										disabled={saving}
+										size="small"
+										ariaLabel={`Рейтинг подхода ${item.name}`}
+									/>
+									<KnowledgeCardMetadata createdAt={item.createdAt} updatedAt={item.updatedAt} />
+								</div>
+								<Checkbox
+									checked={item.isActive}
+									disabled={saving}
+									onChange={(isActive) => void toggleApproach(item.id, isActive)}
+									label="Подход активен"
+									className="knowledge-card__active-toggle"
+								/>
+							</div>
+							<p>{item.description || 'Описание не заполнено'}</p>
+							<small className="approach-card__linked-count">
+								Связанных материалов: {item.linkedKnowledgeItemsCount ?? 0}
+							</small>
+						</div>
 					</article>
 				))}
 			</section>

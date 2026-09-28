@@ -140,6 +140,15 @@ def _expand_knowledge_approaches(connection: Connection) -> None:
 	))
 
 
+def _add_knowledge_approach_ratings(connection: Connection) -> None:
+	columns = {column["name"] for column in inspect(connection).get_columns("knowledge_approaches")}
+	if "rating" not in columns:
+		connection.execute(text("ALTER TABLE knowledge_approaches ADD COLUMN rating INTEGER"))
+	connection.execute(text(
+		"CREATE INDEX IF NOT EXISTS ix_knowledge_approach_user_rating ON knowledge_approaches (user_id, rating)"
+	))
+
+
 MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260825_01_ratings_and_knowledge", _create_ratings_and_knowledge),
 	("20260825_02_storage_keys", _add_storage_keys),
@@ -151,6 +160,7 @@ MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260904_01_unified_trash", _add_trash_timestamps),
 	("20260911_01_knowledge_current_files", _add_knowledge_current_files),
 	("20260916_01_expand_knowledge_approaches", _expand_knowledge_approaches),
+	("20260928_01_knowledge_approach_ratings", _add_knowledge_approach_ratings),
 )
 
 

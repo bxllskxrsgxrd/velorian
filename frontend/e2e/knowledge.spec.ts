@@ -23,6 +23,28 @@ async function selectCustomOption(page: Page, trigger: Locator, optionName: stri
 		.click();
 }
 
+test('shows unified approach cards with editable rating and inactive state', async ({ page }) => {
+	await installMockApi(page);
+	await page.goto('/knowledge/approaches');
+
+	const interviewCard = page.locator('article.knowledge-card').filter({ hasText: 'Интервью' });
+	const showCard = page.locator('article.knowledge-card').filter({ hasText: 'Шоу' });
+
+	await expect(interviewCard).toContainText('Связанных материалов: 3');
+	await expect(interviewCard.locator('.rating__star')).toHaveCount(5);
+	await expect(showCard.locator('.rating__star--active')).toHaveCount(5);
+	await showCard.getByText('Подход активен').click();
+	await expect(showCard).toHaveClass(/knowledge-card--inactive/);
+
+	const ratingFour = interviewCard.getByRole('button', { name: 'Поставить рейтинг 4 из 5' });
+	await ratingFour.click();
+	await expect(ratingFour).toHaveAttribute('aria-pressed', 'true');
+	await expect(interviewCard.getByRole('checkbox', { name: 'Подход активен' })).toBeChecked();
+
+	await selectCustomOption(page, page.getByRole('button', { name: 'Сортировка подходов' }), 'Сначала высокий рейтинг');
+	await expect(page.locator('article.knowledge-card').first()).toContainText('Шоу');
+});
+
 test('opens Knowledge Base from sidebar and creates rated manual data', async ({ page }) => {
 	await installMockApi(page);
 

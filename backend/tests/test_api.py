@@ -756,7 +756,13 @@ def test_knowledge_schema_has_non_destructive_constraints_and_indexes():
 	assert foreign_keys["source_file_id"]["options"]["ondelete"] == "SET NULL"
 	assert foreign_keys["approach_id"]["options"]["ondelete"] == "SET NULL"
 	approach_indexes = {index["name"] for index in inspector.get_indexes("knowledge_approaches")}
-	assert {"ix_knowledge_approaches_user_id", "ix_knowledge_approach_user_name"}.issubset(approach_indexes)
+	approach_columns = {column["name"]: column for column in inspector.get_columns("knowledge_approaches")}
+	assert approach_columns["rating"]["nullable"] is True
+	assert {
+		"ix_knowledge_approaches_user_id",
+		"ix_knowledge_approach_user_name",
+		"ix_knowledge_approach_user_rating",
+	}.issubset(approach_indexes)
 	conversation_columns = {column["name"]: column for column in inspector.get_columns("conversations")}
 	assert conversation_columns["deleted_at"]["nullable"] is True
 	assert "ix_conversations_deleted_at" in {index["name"] for index in inspector.get_indexes("conversations")}
@@ -1022,6 +1028,7 @@ def test_global_approach_crud_preserves_linked_items(authenticated_client):
 		"writing_guidelines": ["ссылаться на источники"],
 		"avoid": ["сенсационность"],
 		"example_knowledge_item_ids": [example["id"]],
+		"rating": 4,
 		"is_active": True,
 	}
 	created_response = authenticated_client.post("/api/approaches", json=payload)
@@ -1029,16 +1036,23 @@ def test_global_approach_crud_preserves_linked_items(authenticated_client):
 	created = created_response.json()["item"]
 	assert created["writingGuidelines"] == payload["writing_guidelines"]
 	assert created["exampleKnowledgeItemIds"] == [example["id"]]
+	assert created["rating"] == 4
 
 	linked = authenticated_client.post("/api/knowledge", json={
 		"title": "Связанный материал", "content": "Содержимое", "approach_id": created["id"],
 	}).json()["item"]
 	updated = authenticated_client.patch(f"/api/approaches/{created['id']}", json={
-		"description": "Обновлённое описание", "is_active": True,
+		"description": "Обновлённое описание", "rating": None,
 	})
 	assert updated.status_code == 200
 	assert updated.json()["item"]["description"] == "Обновлённое описание"
+	assert updated.json()["item"]["rating"] is None
+	assert updated.json()["item"]["isActive"] is True
 	assert updated.json()["item"]["linkedKnowledgeItemsCount"] == 1
+	for invalid_rating in (0, 6, -1, 3.7, "5"):
+		assert authenticated_client.patch(
+			f"/api/approaches/{created['id']}", json={"rating": invalid_rating},
+		).status_code == 422
 
 	assert authenticated_client.delete(f"/api/approaches/{created['id']}").status_code == 204
 	deactivated = authenticated_client.get(f"/api/approaches/{created['id']}")

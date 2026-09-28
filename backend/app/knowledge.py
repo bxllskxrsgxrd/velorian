@@ -127,6 +127,7 @@ def approach_payload(approach: KnowledgeApproach) -> dict:
 		"writingGuidelines": approach.writing_guidelines or [],
 		"avoid": approach.avoid or [],
 		"exampleKnowledgeItemIds": approach.example_knowledge_item_ids or [],
+		"rating": approach.rating,
 		"isActive": approach.is_active,
 		"createdAt": approach.created_at.isoformat(),
 		"updatedAt": approach.updated_at.isoformat(),

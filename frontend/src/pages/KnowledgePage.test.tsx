@@ -411,6 +411,18 @@ describe('KnowledgePage', () => {
 		expect(screen.getByLabelText('Текущий URL')).toHaveTextContent('/knowledge/knowledge-1');
 	});
 
+	it('uses the shared inactive card state for disabled knowledge items', async () => {
+		api.listKnowledge.mockResolvedValue({
+			items: [{ ...item, isActive: false }],
+			pageInfo: { nextCursor: null, hasMore: false },
+		});
+
+		renderKnowledge();
+
+		const title = await screen.findByText(item.title, { selector: 'strong' });
+		expect(title.closest('article')).toHaveClass('knowledge-card--inactive');
+	});
+
 	it('updates an existing card through the selected file', async () => {
 		api.listKnowledge.mockResolvedValue({
 			items: [item],

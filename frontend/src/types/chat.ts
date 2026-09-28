@@ -55,6 +55,7 @@ export type KnowledgeApproach = {
 	writingGuidelines: string[];
 	avoid: string[];
 	exampleKnowledgeItemIds: string[];
+	rating: number | null;
 	isActive: boolean;
 	linkedKnowledgeItemsCount?: number;
 	createdAt: string;
@@ -62,7 +63,9 @@ export type KnowledgeApproach = {
 };
 
 export type Approach = KnowledgeApproach;
-export type ApproachInput = Omit<Approach, 'id' | 'createdAt' | 'updatedAt' | 'linkedKnowledgeItemsCount' | 'slug'>;
+export type ApproachInput = Omit<Approach, 'id' | 'createdAt' | 'updatedAt' | 'linkedKnowledgeItemsCount' | 'slug' | 'rating'> & {
+	rating?: number | null;
+};
 
 export type KnowledgeFilters = {
 	geo: string | null;

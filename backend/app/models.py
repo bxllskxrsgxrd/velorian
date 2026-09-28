@@ -124,7 +124,9 @@ class KnowledgeApproach(Base):
 	__tablename__ = "knowledge_approaches"
 	__table_args__ = (
 		UniqueConstraint("user_id", "slug", name="uq_knowledge_approach_user_slug"),
+		CheckConstraint("rating IS NULL OR (rating >= 1 AND rating <= 5)", name="ck_knowledge_approach_rating"),
 		Index("ix_knowledge_approach_user_name", "user_id", "name"),
+		Index("ix_knowledge_approach_user_rating", "user_id", "rating"),
 	)
 
 	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -138,6 +140,7 @@ class KnowledgeApproach(Base):
 	writing_guidelines: Mapped[list] = mapped_column(JSON, default=list)
 	avoid: Mapped[list] = mapped_column(JSON, default=list)
 	example_knowledge_item_ids: Mapped[list] = mapped_column(JSON, default=list)
+	rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
 	is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)

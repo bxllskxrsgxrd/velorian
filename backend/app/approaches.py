@@ -1,4 +1,5 @@
 import re
+from typing import Annotated
 
 from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field, field_validator
@@ -14,6 +15,7 @@ from .models import KnowledgeApproach, KnowledgeItem, User, utc_now
 
 
 router = APIRouter(prefix=f"{settings.api_prefix}/approaches", tags=["approaches"])
+RatingValue = Annotated[int, Field(strict=True, ge=1, le=5)]
 
 
 def normalize_slug(value: str) -> str:
@@ -29,6 +31,7 @@ class ApproachPayload(BaseModel):
 	writing_guidelines: list[str] = Field(default_factory=list, max_length=100)
 	avoid: list[str] = Field(default_factory=list, max_length=100)
 	example_knowledge_item_ids: list[str] = Field(default_factory=list, max_length=100)
+	rating: RatingValue | None = None
 	is_active: bool = True
 
 	@field_validator("name", "description", "purpose")
@@ -51,6 +54,7 @@ class ApproachPatch(BaseModel):
 	writing_guidelines: list[str] | None = Field(default=None, max_length=100)
 	avoid: list[str] | None = Field(default=None, max_length=100)
 	example_knowledge_item_ids: list[str] | None = Field(default=None, max_length=100)
+	rating: RatingValue | None = None
 	is_active: bool | None = None
 
 	@field_validator("name", "description", "purpose")
@@ -104,6 +108,7 @@ def approach_payload(db: Session, item: KnowledgeApproach) -> dict:
 		"writingGuidelines": item.writing_guidelines or [],
 		"avoid": item.avoid or [],
 		"exampleKnowledgeItemIds": item.example_knowledge_item_ids or [],
+		"rating": item.rating,
 		"isActive": item.is_active,
 		"linkedKnowledgeItemsCount": linked_count,
 		"createdAt": item.created_at.isoformat(),
@@ -135,6 +140,7 @@ def create_approach(data: ApproachPayload, user: User = Depends(get_current_user
 		writing_guidelines=data.writing_guidelines,
 		avoid=data.avoid,
 		example_knowledge_item_ids=validate_examples(db, user.id, data.example_knowledge_item_ids),
+		rating=data.rating,
 		is_active=data.is_active,
 	)
 	db.add(item)
@@ -161,7 +167,7 @@ def update_approach(approach_id: str, data: ApproachPatch, user: User = Depends(
 		item.slug = normalize_slug(item.name)
 		if not item.slug:
 			raise AppError(422, "INVALID_APPROACH_NAME", "Введите название подхода")
-	for field in ("description", "purpose", "characteristics", "structure", "avoid", "is_active"):
+	for field in ("description", "purpose", "characteristics", "structure", "avoid", "rating", "is_active"):
 		if field in changes:
 			setattr(item, field, changes[field])
 	if "writing_guidelines" in changes:
