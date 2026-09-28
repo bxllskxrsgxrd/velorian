@@ -88,6 +88,7 @@ describe('ApproachesPage', () => {
 		const showCard = screen.getByText('Шоу', { selector: 'strong' }).closest('article') as HTMLElement;
 
 		expect(interviewCard).toHaveClass('knowledge-card', 'approach-card');
+		expect(interviewCard.querySelector(':scope > .knowledge-card__select-column')).toBeInTheDocument();
 		expect(interviewCard).toHaveTextContent('Связанных материалов: 3');
 		expect(showCard).toHaveClass('knowledge-card--inactive');
 		expect(showCard.querySelector('.knowledge-card__metadata-summary')).toHaveTextContent('Изменено 21.09.2026');
@@ -102,12 +103,55 @@ describe('ApproachesPage', () => {
 		);
 	});
 
+	it('uses the shared controls, card selection, and stable bulk slot', async () => {
+		const { container } = renderPage();
+		await screen.findByText('Интервью', { selector: 'strong' });
+
+		const controls = screen.getByRole('region', { name: 'Управление подходами' });
+		const bulkSlot = container.querySelector('.knowledge-page__bulk-slot') as HTMLElement;
+		const list = container.querySelector('.knowledge-page__list') as HTMLElement;
+		expect(controls.compareDocumentPosition(bulkSlot) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(bulkSlot.compareDocumentPosition(list) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+		expect(screen.queryByRole('region', { name: 'Действия с выбранными подходами' })).not.toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать Интервью' }));
+
+		const interviewCard = screen.getByText('Интервью', { selector: 'strong' }).closest('article') as HTMLElement;
+		const bulkBar = screen.getByRole('region', { name: 'Действия с выбранными подходами' });
+		expect(interviewCard).toHaveClass('knowledge-card--selected');
+		expect(within(bulkBar).getByText('Выбрано: 1')).toBeInTheDocument();
+		expect(within(bulkBar).getByRole('button', { name: 'Выбрать все 2' })).toBeEnabled();
+
+		fireEvent.click(within(bulkBar).getByRole('button', { name: 'Выбрать все 2' }));
+		expect(screen.getByRole('checkbox', { name: 'Выбрать Интервью' })).toBeChecked();
+		expect(screen.getByRole('checkbox', { name: 'Выбрать Шоу' })).toBeChecked();
+		expect(within(bulkBar).getByRole('button', { name: 'Выбрать все 2' })).toBeDisabled();
+
+		fireEvent.click(within(bulkBar).getByRole('button', { name: 'Снять выбор' }));
+		expect(screen.queryByRole('region', { name: 'Действия с выбранными подходами' })).not.toBeInTheDocument();
+		expect(bulkSlot).toBeInTheDocument();
+	});
+
+	it('bulk deletes selected approaches after confirmation', async () => {
+		renderPage();
+		await screen.findByText('Интервью', { selector: 'strong' });
+
+		fireEvent.click(screen.getByRole('checkbox', { name: 'Выбрать Интервью' }));
+		fireEvent.click(screen.getByRole('button', { name: 'Удалить 1' }));
+		fireEvent.click(screen.getByRole('button', { name: 'Удалить' }));
+
+		await waitFor(() => expect(api.deleteApproach).toHaveBeenCalledWith('approach-1'));
+		await waitFor(() => {
+			expect(screen.queryByRole('region', { name: 'Действия с выбранными подходами' })).not.toBeInTheDocument();
+		});
+	});
+
 	it('sorts rated approaches and keeps unrated approaches last', async () => {
 		renderPage();
 		await screen.findByText('Интервью', { selector: 'strong' });
 
-		fireEvent.click(screen.getByRole('button', { name: 'Сортировка подходов' }));
-		fireEvent.click(screen.getByRole('option', { name: 'Сначала высокий рейтинг' }));
+		fireEvent.click(screen.getByRole('button', { name: 'Сортировка' }));
+		fireEvent.click(screen.getByRole('button', { name: 'Рейтинг: высокий' }));
 
 		const titles = screen.getAllByRole('article').map((card) => card.querySelector('strong')?.textContent);
 		expect(titles).toEqual(['Шоу', 'Интервью']);

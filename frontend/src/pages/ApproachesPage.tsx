@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
 import { useNavigate } from 'react-router-dom';
-import { BurgerIcon, ListIcon, MoveIcon } from '../components/icons/AppIcons';
+import { BurgerIcon, ListIcon, MoveIcon, SearchIcon } from '../components/icons/AppIcons';
+import { BulkSelectionBar } from '../components/BulkSelectionBar/BulkSelectionBar';
 import { Checkbox } from '../components/ui/Checkbox/Checkbox';
 import { CustomSelect } from '../components/ui/CustomSelect/CustomSelect';
 import { ModalDialog } from '../components/ui/ModalDialog/ModalDialog';
@@ -17,6 +18,7 @@ import { Button } from '../components/ui/Button/Button';
 
 type ApproachCardMenuState = { itemId: string; top: number; left: number };
 type ApproachSortMode = 'name_asc' | 'rating_desc' | 'rating_asc';
+type ApproachRatingFilter = 'all' | '5' | '4' | '3' | 'unrated';
 
 export function ApproachesPage() {
 	const navigate = useNavigate();
@@ -30,7 +32,15 @@ export function ApproachesPage() {
 	const { showToast } = useToast();
 	const [cardMenu, setCardMenu] = useState<ApproachCardMenuState | null>(null);
 	const [deleteItemId, setDeleteItemId] = useState<string | null>(null);
+	const [activeDropdown, setActiveDropdown] = useState<'filters' | 'sort' | null>(null);
+	const [selectedItemIds, setSelectedItemIds] = useState<Set<string>>(() => new Set());
+	const [bulkDeleteOpen, setBulkDeleteOpen] = useState(false);
+	const [bulkDeleting, setBulkDeleting] = useState(false);
+	const [search, setSearch] = useState('');
+	const [activeFilter, setActiveFilter] = useState('all');
+	const [ratingFilter, setRatingFilter] = useState<ApproachRatingFilter>('all');
 	const [sort, setSort] = useState<ApproachSortMode>('name_asc');
+	const dropdownRef = useRef<HTMLElement>(null);
 	const cardMenuRef = useRef<HTMLDivElement>(null);
 	const cardCursorIndicatorRef = useRef<HTMLDivElement>(null);
 	const cardCursorPositionRef = useRef<{ clientX: number; clientY: number } | null>(null);
@@ -38,14 +48,29 @@ export function ApproachesPage() {
 	const cardMenuItem = cardMenu ? items.find((item) => item.id === cardMenu.itemId) : null;
 	const deleteItem = deleteItemId ? items.find((item) => item.id === deleteItemId) : null;
 	const displayedItems = useMemo(() => {
-		if (sort === 'name_asc') return items;
-		return [...items].sort((left, right) => {
+		const normalizedSearch = search.trim().toLocaleLowerCase('ru');
+		const filteredItems = items.filter((item) => {
+			if (normalizedSearch && !`${item.name} ${item.description}`.toLocaleLowerCase('ru').includes(normalizedSearch)) {
+				return false;
+			}
+			if (activeFilter !== 'all' && item.isActive !== (activeFilter === 'active')) return false;
+			if (ratingFilter === 'unrated') return item.rating == null;
+			if (ratingFilter !== 'all' && (item.rating == null || item.rating < Number(ratingFilter))) return false;
+			return true;
+		});
+		if (sort === 'name_asc') return filteredItems;
+		return [...filteredItems].sort((left, right) => {
 			if (left.rating == null) return right.rating == null ? 0 : 1;
 			if (right.rating == null) return -1;
 			const difference = sort === 'rating_desc' ? right.rating - left.rating : left.rating - right.rating;
 			return difference || left.name.localeCompare(right.name, 'ru');
 		});
-	}, [items, sort]);
+	}, [activeFilter, items, ratingFilter, search, sort]);
+	const selectedItems = useMemo(
+		() => displayedItems.filter((item) => selectedItemIds.has(item.id)),
+		[displayedItems, selectedItemIds],
+	);
+	const activeFiltersCount = Number(activeFilter !== 'all') + Number(ratingFilter !== 'all');
 
 	useEffect(() => {
 		void load().catch((error: unknown) => {
@@ -53,6 +78,22 @@ export function ApproachesPage() {
 			showToast(error instanceof Error ? error.message : 'Не удалось загрузить подходы', 'error');
 		});
 	}, [load, showToast]);
+
+	useEffect(() => {
+		if (!activeDropdown) return;
+		function handleClickOutside(event: MouseEvent) {
+			if (dropdownRef.current && !dropdownRef.current.contains(event.target as Node)) setActiveDropdown(null);
+		}
+		function handleEscape(event: KeyboardEvent) {
+			if (event.key === 'Escape') setActiveDropdown(null);
+		}
+		document.addEventListener('mousedown', handleClickOutside);
+		document.addEventListener('keydown', handleEscape);
+		return () => {
+			document.removeEventListener('mousedown', handleClickOutside);
+			document.removeEventListener('keydown', handleEscape);
+		};
+	}, [activeDropdown]);
 
 	useEffect(() => {
 		if (!cardMenu) return;
@@ -153,6 +194,39 @@ export function ApproachesPage() {
 		}
 	}
 
+	function toggleSelectedItem(itemId: string, selected: boolean) {
+		setSelectedItemIds((current) => {
+			const next = new Set(current);
+			if (selected) next.add(itemId);
+			else next.delete(itemId);
+			return next;
+		});
+	}
+
+	function resetSelection() {
+		setSelectedItemIds(new Set());
+	}
+
+	async function removeSelectedApproaches() {
+		if (selectedItems.length === 0 || bulkDeleting) return;
+		setBulkDeleting(true);
+		const results = await Promise.allSettled(selectedItems.map((item) => remove(item.id)));
+		const succeededIds = new Set<string>();
+		results.forEach((result, index) => {
+			if (result.status === 'fulfilled') succeededIds.add(selectedItems[index].id);
+		});
+		setSelectedItemIds((current) => new Set([...current].filter((id) => !succeededIds.has(id))));
+		const failedCount = results.length - succeededIds.size;
+		showToast(
+			failedCount > 0
+				? `Обработано подходов: ${succeededIds.size}. Не удалось удалить: ${failedCount}`
+				: `Обработано подходов: ${succeededIds.size}`,
+			failedCount > 0 ? 'error' : 'success',
+		);
+		setBulkDeleting(false);
+		setBulkDeleteOpen(false);
+	}		
+
 	return (
 		<main className="approaches-page knowledge-page">
 			<header>
@@ -172,27 +246,135 @@ export function ApproachesPage() {
 					Создать подход
 				</Button>
 			</header>
-			<div className="approaches-page__controls">
-				<label>
-					Сортировка
-					<CustomSelect
-						value={sort}
-						onChange={(value) => setSort(value as ApproachSortMode)}
-						ariaLabel="Сортировка подходов"
-						options={[
-							{ value: 'name_asc', label: 'По названию' },
-							{ value: 'rating_desc', label: 'Сначала высокий рейтинг' },
-							{ value: 'rating_asc', label: 'Сначала низкий рейтинг' },
-						]}
-					/>
-				</label>
-			</div>
-			<section className="approaches-page__list">
-				{loading && <p>Загрузка…</p>}
-				{!loading && items.length === 0 && <p>Подходов пока нет</p>}
-				{displayedItems.map((item) => (
+			<section className="knowledge-page__controls" aria-label="Управление подходами" ref={dropdownRef}>
+				<div className="knowledge-page__search-row">
+					<div className="knowledge-page__search">
+						<SearchIcon className="knowledge-page__search-icon" />
+						<input
+							className="knowledge-page__search-input"
+							value={search}
+							onChange={(event) => {
+								setSearch(event.target.value);
+								resetSelection();
+							}}
+							placeholder="Поиск по названию и описанию"
+							aria-label="Поиск по подходам"
+						/>
+					</div>
+					<Button
+						variant="outline"
+						tone="neutral"
+						size="medium"
+						aria-expanded={activeDropdown === 'filters'}
+						onClick={() => setActiveDropdown(activeDropdown === 'filters' ? null : 'filters')}
+					>
+						Фильтры
+						{activeFiltersCount > 0 && <span className="button__count">{activeFiltersCount}</span>}
+					</Button>
+					<Button
+						variant="outline"
+						tone="neutral"
+						size="medium"
+						aria-expanded={activeDropdown === 'sort'}
+						onClick={() => setActiveDropdown(activeDropdown === 'sort' ? null : 'sort')}
+					>
+						Сортировка
+					</Button>
+				</div>
+				{activeDropdown === 'filters' && (
+					<div className="knowledge-page__dropdown knowledge-page__dropdown--filters">
+						<div className="knowledge-page__dropdown-grid">
+							<label>
+								Рейтинг
+								<CustomSelect
+									value={ratingFilter}
+									onChange={(value) => {
+										setRatingFilter(value as ApproachRatingFilter);
+										resetSelection();
+									}}
+									ariaLabel="Рейтинг подходов"
+									options={[
+										{ value: 'all', label: 'Все рейтинги' },
+										{ value: '5', label: '5 из 5' },
+										{ value: '4', label: '4 и выше' },
+										{ value: '3', label: '3 и выше' },
+										{ value: 'unrated', label: 'Без рейтинга' },
+									]}
+								/>
+							</label>
+							<label>
+								Состояние
+								<CustomSelect
+									value={activeFilter}
+									onChange={(value) => {
+										setActiveFilter(value);
+										resetSelection();
+									}}
+									ariaLabel="Состояние подходов"
+									options={[
+										{ value: 'all', label: 'Все состояния' },
+										{ value: 'active', label: 'Активные' },
+										{ value: 'inactive', label: 'Неактивные' },
+									]}
+								/>
+							</label>
+						</div>
+						<div className="knowledge-page__dropdown-actions">
+							<button
+								className="knowledge-page__reset-small"
+								type="button"
+								disabled={activeFiltersCount === 0}
+								onClick={() => {
+									setRatingFilter('all');
+									setActiveFilter('all');
+									resetSelection();
+								}}
+							>
+								Сбросить
+							</button>
+						</div>
+					</div>
+				)}
+				{activeDropdown === 'sort' && (
+					<div className="knowledge-page__dropdown knowledge-page__dropdown--sort">
+						{[
+							{ value: 'name_asc' as const, label: 'По названию' },
+							{ value: 'rating_desc' as const, label: 'Рейтинг: высокий' },
+							{ value: 'rating_asc' as const, label: 'Рейтинг: низкий' },
+						].map((option) => (
+							<button
+								key={option.value}
+								className={`knowledge-page__sort-option ${sort === option.value ? 'active' : ''}`}
+								type="button"
+								onClick={() => {
+									setSort(option.value);
+									setActiveDropdown(null);
+									resetSelection();
+								}}
+							>
+								{option.label}
+							</button>
+						))}
+					</div>
+				)}
+			</section>
+			<BulkSelectionBar
+				selectedCount={selectedItems.length}
+				totalCount={displayedItems.length}
+				onSelectAll={() => setSelectedItemIds(new Set(displayedItems.map((item) => item.id)))}
+				onClear={resetSelection}
+				onDelete={() => setBulkDeleteOpen(true)}
+				deleteLabel={`Удалить ${selectedItems.length}`}
+				ariaLabel="Действия с выбранными подходами"
+			/>
+			<section className="knowledge-page__list">
+				{loading && <p className="knowledge-page__empty">Загрузка…</p>}
+				{!loading && displayedItems.length === 0 && (
+					<p className="knowledge-page__empty">{items.length === 0 ? 'Подходов пока нет' : 'Подходы не найдены'}</p>
+				)}
+				{!loading && displayedItems.map((item) => (
 					<article
-						className={`knowledge-card approach-card ${!item.isActive ? 'knowledge-card--inactive' : ''}`}
+						className={`knowledge-card approach-card ${selectedItemIds.has(item.id) ? 'knowledge-card--selected' : ''} ${!item.isActive ? 'knowledge-card--inactive' : ''}`}
 						key={item.id}
 						onMouseEnter={(event) => updateCardCursorIndicator(event.target, event.clientX, event.clientY)}
 						onMouseMove={(event) => updateCardCursorIndicator(event.target, event.clientX, event.clientY)}
@@ -204,6 +386,14 @@ export function ApproachesPage() {
 							openCardMenu(item.id, event.clientX, event.clientY);
 						}}
 					>
+						<div className="knowledge-card__select-column">
+							<Checkbox
+								checked={selectedItemIds.has(item.id)}
+								onChange={(checked) => toggleSelectedItem(item.id, checked)}
+								label={`Выбрать ${item.name}`}
+								className="knowledge-card__select"
+							/>
+						</div>
 						<div className="knowledge-card__content">
 							<div className="knowledge-card__head">
 								<div>
@@ -274,6 +464,20 @@ export function ApproachesPage() {
 					onConfirm={() => void deleteApproach()}
 				>
 					<p>Если подход используется, он будет деактивирован и связи материалов сохранятся</p>
+				</ModalDialog>
+			)}
+			{bulkDeleteOpen && (
+				<ModalDialog
+					title="Удалить выбранные подходы?"
+					confirmLabel={bulkDeleting ? 'Удаление…' : 'Удалить'}
+					confirmDisabled={bulkDeleting}
+					danger
+					onClose={() => setBulkDeleteOpen(false)}
+					onConfirm={() => void removeSelectedApproaches()}
+				>
+					<p>
+						Подходы без связанных материалов будут удалены. Остальные будут деактивированы: {selectedItems.length}
+					</p>
 				</ModalDialog>
 			)}
 		</main>

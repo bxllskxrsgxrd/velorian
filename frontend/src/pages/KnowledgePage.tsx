@@ -10,6 +10,7 @@ import { Checkbox } from '../components/ui/Checkbox/Checkbox';
 import { CustomSelect } from '../components/ui/CustomSelect/CustomSelect';
 import { DropZone } from '../components/ui/DropZone/DropZone';
 import { KnowledgeCardMetadata } from '../components/KnowledgeCardMetadata/KnowledgeCardMetadata';
+import { BulkSelectionBar } from '../components/BulkSelectionBar/BulkSelectionBar';
 import { KnowledgeFilterFields } from '../components/KnowledgeFilterFields/KnowledgeFilterFields';
 import type { AuthUser, KnowledgeApproach, KnowledgeFilters, KnowledgeItem } from '../types/chat';
 import { reportError } from '../utils/reportError';
@@ -17,7 +18,7 @@ import { useKnowledgeStore } from '../stores/knowledgeStore';
 import { useUiStore } from '../stores/uiStore';
 import { useApproachesStore } from '../stores/approachesStore';
 import './_knowledgePage.scss';
-import { BurgerIcon, CrossIcon, DocumentIcon, ListIcon, MoveIcon, SearchIcon, TrashIcon } from '../components/icons/AppIcons';
+import { BurgerIcon, CrossIcon, DocumentIcon, ListIcon, MoveIcon, SearchIcon } from '../components/icons/AppIcons';
 import { Button } from '../components/ui/Button/Button';
 
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor/MarkdownEditor'));
@@ -913,36 +914,13 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 						</div>
 					)}
 				</section>
-				<div className="knowledge-page__bulk-slot">
-					{selectedItems.length > 0 && (
-						<div className="knowledge-page__bulk-bar" role="region" aria-label="Действия с выбранными элементами">
-							<strong>Выбрано: {selectedItems.length}</strong>
-							<Button
-								variant="outline"
-								tone="neutral"
-								size="small"
-								disabled={selectedItems.length === items.length}
-								onClick={() => setSelectedItemIds(new Set(items.map((item) => item.id)))}
-							>
-								Выбрать все {items.length}
-							</Button>
-
-							<Button variant="outline" tone="neutral" size="small" onClick={() => setSelectedItemIds(new Set())}>
-								Снять выбор
-							</Button>
-
-							<Button
-								variant="outline"
-								tone="danger"
-								size="small"
-								icon={<TrashIcon />}
-								onClick={() => setBulkDeleteOpen(true)}
-							>
-								В корзину {selectedItems.length}
-							</Button>
-						</div>
-					)}
-				</div>
+				<BulkSelectionBar
+					selectedCount={selectedItems.length}
+					totalCount={items.length}
+					onSelectAll={() => setSelectedItemIds(new Set(items.map((item) => item.id)))}
+					onClear={() => setSelectedItemIds(new Set())}
+					onDelete={() => setBulkDeleteOpen(true)}
+				/>
 				<section className="knowledge-page__list">
 					{loading && <p className="knowledge-page__empty">Загрузка…</p>}
 					{!loading && items.length === 0 && <p className="knowledge-page__empty">Сохранённых данных пока нет</p>}

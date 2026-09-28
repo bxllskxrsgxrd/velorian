@@ -22,30 +22,7 @@
 	background: transparent !important;
 }
 
-.approaches-page__list {
-	max-width: 1100px;
-	margin: 0 auto;
-	display: grid;
-	gap: 12px;
-}
-
-.approaches-page__controls {
-	display: flex;
-	justify-content: flex-end;
-	max-width: 1100px;
-	margin: 0 auto 12px;
-}
-
-.approaches-page__controls label {
-	display: grid;
-	gap: 6px;
-	width: min(100%, 280px);
-	color: var(--color-text-secondary);
-	font-size: 12px;
-}
-
 .approach-card {
-	grid-template-columns: minmax(0, 1fr);
 	cursor: default;
 }
 

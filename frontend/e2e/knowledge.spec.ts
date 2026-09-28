@@ -32,7 +32,17 @@ test('shows unified approach cards with editable rating and inactive state', asy
 
 	await expect(interviewCard).toContainText('Связанных материалов: 3');
 	await expect(interviewCard.locator('.rating__star')).toHaveCount(5);
+	await expect(interviewCard.locator(':scope > .knowledge-card__select-column')).toHaveCount(1);
 	await expect(showCard.locator('.rating__star--active')).toHaveCount(5);
+
+	await interviewCard.locator('label.knowledge-card__select').click();
+	const bulkBar = page.getByRole('region', { name: 'Действия с выбранными подходами' });
+	await expect(interviewCard).toHaveClass(/knowledge-card--selected/);
+	await expect(bulkBar).toContainText('Выбрано: 1');
+	await bulkBar.getByRole('button', { name: 'Снять выбор' }).click();
+	await expect(bulkBar).not.toBeVisible();
+	await expect(page.locator('.knowledge-page__bulk-slot')).toHaveCount(1);
+
 	await showCard.getByText('Подход активен').click();
 	await expect(showCard).toHaveClass(/knowledge-card--inactive/);
 
@@ -41,7 +51,8 @@ test('shows unified approach cards with editable rating and inactive state', asy
 	await expect(ratingFour).toHaveAttribute('aria-pressed', 'true');
 	await expect(interviewCard.getByRole('checkbox', { name: 'Подход активен' })).toBeChecked();
 
-	await selectCustomOption(page, page.getByRole('button', { name: 'Сортировка подходов' }), 'Сначала высокий рейтинг');
+	await page.getByRole('button', { name: 'Сортировка' }).click();
+	await page.getByRole('button', { name: 'Рейтинг: высокий' }).click();
 	await expect(page.locator('article.knowledge-card').first()).toContainText('Шоу');
 });
 
