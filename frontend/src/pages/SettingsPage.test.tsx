@@ -3,7 +3,7 @@ import { createMemoryRouter, RouterProvider } from 'react-router-dom';
 import { describe, expect, it } from 'vitest';
 import { SettingsPage } from './SettingsPage';
 
-const user = { id: 'user', email: 'user@example.com' };
+const user = { id: 'user', email: 'user@example.com', login: 'user' };
 
 function renderSettings(initialEntries: Array<string | { pathname: string; state?: unknown }>) {
 	const router = createMemoryRouter([

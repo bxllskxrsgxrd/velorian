@@ -35,9 +35,10 @@ def client():
 
 @pytest.fixture
 def authenticated_client(client):
+	identity = f"user-{os.urandom(5).hex()}"
 	response = client.post(
 		"/api/auth/register",
-		json={"email": f"user-{os.urandom(5).hex()}@example.com", "password": "strong-password"},
+		json={"login": identity, "email": f"{identity}@example.com", "password": "strong-password"},
 	)
 	assert response.status_code == 200
 	client.headers.update({"X-CSRF-Token": response.json()["csrfToken"]})

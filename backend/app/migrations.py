@@ -149,6 +149,32 @@ def _add_knowledge_approach_ratings(connection: Connection) -> None:
 	))
 
 
+def _add_user_logins(connection: Connection) -> None:
+	columns = {column["name"] for column in inspect(connection).get_columns("users")}
+	if "login" not in columns:
+		connection.execute(text("ALTER TABLE users ADD COLUMN login VARCHAR(80)"))
+	rows = connection.execute(text("SELECT id, email, login FROM users ORDER BY created_at, id")).mappings()
+	used = {row["login"] for row in rows if row["login"]}
+	rows = connection.execute(text("SELECT id, email, login FROM users ORDER BY created_at, id")).mappings()
+	for row in rows:
+		if row["login"]:
+			continue
+		base = (row["email"].partition("@")[0].strip().lower() or f"user-{row['id'][:8]}")[:80]
+		candidate = base
+		index = 2
+		while candidate in used:
+			suffix = f"-{index}"
+			candidate = f"{base[:80 - len(suffix)]}{suffix}"
+			index += 1
+		connection.execute(text("UPDATE users SET login = :login WHERE id = :user_id"), {
+			"login": candidate, "user_id": row["id"],
+		})
+		used.add(candidate)
+	connection.execute(text("CREATE UNIQUE INDEX IF NOT EXISTS ix_users_login ON users (login)"))
+	if connection.dialect.name == "postgresql":
+		connection.execute(text("ALTER TABLE users ALTER COLUMN login SET NOT NULL"))
+
+
 MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260825_01_ratings_and_knowledge", _create_ratings_and_knowledge),
 	("20260825_02_storage_keys", _add_storage_keys),
@@ -161,6 +187,7 @@ MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260911_01_knowledge_current_files", _add_knowledge_current_files),
 	("20260916_01_expand_knowledge_approaches", _expand_knowledge_approaches),
 	("20260928_01_knowledge_approach_ratings", _add_knowledge_approach_ratings),
+	("20260928_02_user_logins", _add_user_logins),
 )
 
 

@@ -17,19 +17,97 @@
 	background: var(--color-bg-surface);
 	box-shadow: var(--shadow-surface);
 
-	h1 { margin: 0; font-size: 30px; }
-	p { margin: 0 0 8px; color: var(--color-text-secondary); }
-	label { display: flex; flex-direction: column; gap: 7px; color: var(--color-text-secondary); font-size: 14px; }
+	h1 {
+		margin: 0;
+		font-size: 30px;
+	}
+	p {
+		margin: 0 0 8px;
+		color: var(--color-text-secondary);
+	}
+	label {
+		display: flex;
+		flex-direction: column;
+		gap: 7px;
+		color: var(--color-text-secondary);
+		font-size: 14px;
+	}
 	input {
-		width: 100%; padding: 12px 14px; border: 1px solid var(--color-border); border-radius: var(--radius-medium);
-		color: var(--color-text-primary); background: var(--color-bg-elevated); outline: none;
+		width: 100%;
+		padding: 12px 14px;
+		border: 1px solid var(--color-border);
+		border-radius: var(--radius-medium);
+		color: var(--color-text-primary);
+		background: var(--color-bg-elevated);
+		outline: none;
 		@include ui-transition;
-		&:focus { border-color: var(--color-accent); box-shadow: var(--focus-ring); }
+		&:focus {
+			border-color: var(--color-accent);
+			box-shadow: var(--focus-ring);
+		}
+		&[aria-invalid='true'] {
+			border-color: var(--color-error);
+		}
+	}
+	&__field {
+		display: flex;
+		flex-direction: column;
+		gap: 7px;
+	}
+	&__password-field {
+		position: relative;
+	}
+	&__password-field input {
+		padding-right: 44px;
+	}
+	&__password-toggle {
+		position: absolute;
+		top: 50%;
+		right: 10px;
+		display: grid;
+		place-items: center;
+		padding: 4px;
+		border: 0;
+		color: var(--color-text-secondary);
+		background: transparent;
+		cursor: pointer;
+		transform: translateY(-50%);
+		&:focus-visible {
+			border-radius: var(--radius-small);
+			outline: none;
+			box-shadow: var(--focus-ring);
+		}
+	}
+	&__field-error {
+		color: var(--color-error);
+		font-size: 13px;
 	}
 
-	&__eyebrow { color: var(--color-accent); font-weight: 700; letter-spacing: 0.18em; }
-	&__error { padding: 10px 12px; border-radius: var(--radius-small); color: var(--color-error); background: color-mix(in srgb, var(--color-error) 10%, transparent); }
-	&__submit, &__switch { border: 0; cursor: pointer; }
-	&__submit { padding: 12px; border-radius: var(--radius-medium); color: var(--color-on-accent); background: var(--color-accent); font-weight: 700; }
-	&__switch { color: var(--color-text-secondary); background: transparent; }
+	&__eyebrow {
+		color: var(--color-accent);
+		font-weight: 700;
+		letter-spacing: 0.18em;
+	}
+	&__error {
+		padding: 10px 12px;
+		border-radius: var(--radius-small);
+		color: var(--color-error);
+		background: color-mix(in srgb, var(--color-error) 10%, transparent);
+	}
+	&__submit,
+	&__switch {
+		border: 0;
+		cursor: pointer;
+	}
+	&__submit {
+		padding: 12px;
+		border-radius: var(--radius-medium);
+		color: var(--color-on-accent);
+		background: var(--color-accent);
+		font-weight: 700;
+	}
+	&__switch {
+		color: var(--color-text-secondary);
+		background: transparent;
+	}
 }

@@ -56,10 +56,11 @@ def test_auth_session_and_structured_error(client):
 
 	registered = client.post(
 		"/api/auth/register",
-		json={"email": "first@example.com", "password": "strong-password"},
+		json={"login": "first-user", "email": "first@example.com", "password": "strong-password"},
 	)
 	assert registered.status_code == 200
 	assert registered.json()["user"]["email"] == "first@example.com"
+	assert registered.json()["user"]["login"] == "first-user"
 	client.headers.update({"X-CSRF-Token": registered.json()["csrfToken"]})
 	assert client.get("/api/auth/me").status_code == 200
 
@@ -69,12 +70,31 @@ def test_auth_session_and_structured_error(client):
 	client.headers.update({"X-CSRF-Token": csrf})
 	login = client.post(
 		"/api/auth/login",
-		json={"email": "first@example.com", "password": "strong-password"},
+		json={"identifier": "first@example.com", "password": "strong-password"},
 	)
 	assert login.status_code == 200
 	client.headers.update({"X-CSRF-Token": login.json()["csrfToken"]})
+	client.post("/api/auth/logout")
+	csrf = client.get("/api/auth/csrf").json()["csrfToken"]
+	client.headers.update({"X-CSRF-Token": csrf})
+	login_by_name = client.post("/api/auth/login", json={"identifier": "FIRST-USER", "password": "strong-password"})
+	assert login_by_name.status_code == 200
+	client.headers.update({"X-CSRF-Token": login_by_name.json()["csrfToken"]})
 
-	validation = client.post("/api/auth/login", json={"email": "a", "password": "x"})
+	duplicate_login = client.post("/api/auth/register", json={
+		"login": "first-user", "email": "different@example.com", "password": "strong-password",
+	})
+	assert duplicate_login.status_code == 409
+	assert duplicate_login.json()["error"]["code"] == "LOGIN_EXISTS"
+	assert duplicate_login.json()["error"]["details"] == {"field": "login"}
+	duplicate_email = client.post("/api/auth/register", json={
+		"login": "different-user", "email": "first@example.com", "password": "strong-password",
+	})
+	assert duplicate_email.status_code == 409
+	assert duplicate_email.json()["error"]["code"] == "EMAIL_EXISTS"
+	assert duplicate_email.json()["error"]["details"] == {"field": "email"}
+
+	validation = client.post("/api/auth/login", json={"identifier": "a", "password": "x"})
 	assert validation.status_code == 422
 	assert validation.json()["error"]["code"] == "VALIDATION_ERROR"
 
@@ -524,7 +544,7 @@ def test_rating_upsert_delete_and_no_duplicates(authenticated_client, monkeypatc
 def test_cannot_rate_another_users_message(client, monkeypatch):
 	import app.main as main_module
 	monkeypatch.setattr(main_module, "client", FakeGroq())
-	first = client.post("/api/auth/register", json={"email": "rating-owner@example.com", "password": "strong-password"})
+	first = client.post("/api/auth/register", json={"login": "rating-owner", "email": "rating-owner@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": first.json()["csrfToken"]})
 	conversation_id = client.post("/api/conversations", json={"title": "Чужой"}).json()["conversation"]["id"]
 	client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Ответ"})
@@ -532,7 +552,7 @@ def test_cannot_rate_another_users_message(client, monkeypatch):
 	client.post("/api/auth/logout")
 	csrf = client.get("/api/auth/csrf").json()["csrfToken"]
 	client.headers.update({"X-CSRF-Token": csrf})
-	second = client.post("/api/auth/register", json={"email": "rating-other@example.com", "password": "strong-password"})
+	second = client.post("/api/auth/register", json={"login": "rating-other", "email": "rating-other@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": second.json()["csrfToken"]})
 	response = client.put(f"/api/messages/{message_id}/rating", json={"score": 5})
 	assert response.status_code == 404
@@ -541,7 +561,7 @@ def test_cannot_rate_another_users_message(client, monkeypatch):
 def test_knowledge_manual_file_rated_message_and_ownership(client, monkeypatch):
 	import app.main as main_module
 	monkeypatch.setattr(main_module, "client", FakeGroq())
-	first = client.post("/api/auth/register", json={"email": "knowledge-owner@example.com", "password": "strong-password"})
+	first = client.post("/api/auth/register", json={"login": "knowledge-owner", "email": "knowledge-owner@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": first.json()["csrfToken"]})
 	manual = client.post("/api/knowledge", json={"title": "Тестовый материал", "content": "Проверенный текст"})
 	assert manual.status_code == 200
@@ -569,7 +589,7 @@ def test_knowledge_manual_file_rated_message_and_ownership(client, monkeypatch):
 	client.post("/api/auth/logout")
 	csrf = client.get("/api/auth/csrf").json()["csrfToken"]
 	client.headers.update({"X-CSRF-Token": csrf})
-	second = client.post("/api/auth/register", json={"email": "knowledge-other@example.com", "password": "strong-password"})
+	second = client.post("/api/auth/register", json={"login": "knowledge-other", "email": "knowledge-other@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": second.json()["csrfToken"]})
 	assert client.get(f"/api/knowledge/{manual_id}").status_code == 404
 	assert client.patch(f"/api/knowledge/{manual_id}", json={"title": "Взлом"}).status_code == 404
@@ -797,17 +817,17 @@ def test_knowledge_file_delete_failure_preserves_database_item(authenticated_cli
 def test_knowledge_search_is_opt_in_and_owner_scoped(client, monkeypatch):
 	import app.main as main_module
 
-	owner = client.post("/api/auth/register", json={"email": "retrieval-owner@example.com", "password": "strong-password"})
+	owner = client.post("/api/auth/register", json={"login": "retrieval-owner", "email": "retrieval-owner@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": owner.json()["csrfToken"]})
 	client.post("/api/knowledge", json={"title": "Альфа", "content": "Собственный секрет альфа", "rating": 5})
 	client.post("/api/auth/logout")
 	client.headers.update({"X-CSRF-Token": client.get("/api/auth/csrf").json()["csrfToken"]})
-	other = client.post("/api/auth/register", json={"email": "retrieval-other@example.com", "password": "strong-password"})
+	other = client.post("/api/auth/register", json={"login": "retrieval-other", "email": "retrieval-other@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": other.json()["csrfToken"]})
 	client.post("/api/knowledge", json={"title": "Чужое", "content": "Чужой секрет альфа", "rating": 5})
 	client.post("/api/auth/logout")
 	client.headers.update({"X-CSRF-Token": client.get("/api/auth/csrf").json()["csrfToken"]})
-	login = client.post("/api/auth/login", json={"email": "retrieval-owner@example.com", "password": "strong-password"})
+	login = client.post("/api/auth/login", json={"identifier": "retrieval-owner@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": login.json()["csrfToken"]})
 
 	completions = RecordingCompletions()
@@ -864,12 +884,12 @@ def test_knowledge_list_intent_browses_metadata_without_toggle(authenticated_cli
 def test_knowledge_list_intent_is_owner_scoped(client, monkeypatch):
 	import app.main as main_module
 
-	owner = client.post("/api/auth/register", json={"email": "list-owner@example.com", "password": "strong-password"})
+	owner = client.post("/api/auth/register", json={"login": "list-owner", "email": "list-owner@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": owner.json()["csrfToken"]})
 	client.post("/api/knowledge", json={"title": "Owner Material", "content": "owner-only knowledge"})
 	client.post("/api/auth/logout")
 	client.headers.update({"X-CSRF-Token": client.get("/api/auth/csrf").json()["csrfToken"]})
-	other = client.post("/api/auth/register", json={"email": "list-other@example.com", "password": "strong-password"})
+	other = client.post("/api/auth/register", json={"login": "list-other", "email": "list-other@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": other.json()["csrfToken"]})
 
 	completions = RecordingCompletions()
@@ -1005,7 +1025,7 @@ def test_knowledge_approach_crud_filter_delete_and_user_isolation(authenticated_
 	assert preserved.json()["item"]["approach"]["isActive"] is False
 
 	second = authenticated_client.post("/api/auth/register", json={
-		"email": "approach-isolation@example.com", "password": "strong-password",
+		"login": "approach-isolation", "email": "approach-isolation@example.com", "password": "strong-password",
 	})
 	assert second.status_code == 200
 	authenticated_client.headers.update({"X-CSRF-Token": second.json()["csrfToken"]})
@@ -1374,7 +1394,7 @@ def test_csrf_rejects_missing_invalid_and_rotated_tokens(client):
 	client.headers.update({"X-CSRF-Token": "invalid"})
 	assert client.post("/api/conversations", json={"title": "Плохой токен"}).status_code == 403
 	client.headers.update({"X-CSRF-Token": valid})
-	registered = client.post("/api/auth/register", json={"email": "csrf@example.com", "password": "strong-password"})
+	registered = client.post("/api/auth/register", json={"login": "csrf-user", "email": "csrf@example.com", "password": "strong-password"})
 	assert registered.status_code == 200
 	rotated = registered.json()["csrfToken"]
 	assert rotated != valid

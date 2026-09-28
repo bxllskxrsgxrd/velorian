@@ -20,9 +20,10 @@ from groq import APIConnectionError, APIStatusError, APITimeoutError, AsyncGroq,
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from pydantic import BaseModel, Field
 from sqlalchemy import desc, or_, select, text
+from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session, selectinload
 
-from .auth import COOKIE_NAME, create_session_token, get_current_user, hash_password, normalize_email, verify_password
+from .auth import COOKIE_NAME, create_session_token, get_current_user, hash_password, normalize_email, normalize_login, verify_password
 from .approaches import router as approaches_router
 from .config import settings
 from .csrf import CSRF_COOKIE_NAME, issue_csrf_token, verify_csrf
@@ -58,8 +59,14 @@ AI_CONTEXT_RETRIES_TOTAL = Counter("velorian_ai_context_retries_total", "AI requ
 VISION_REQUESTS_TOTAL = Counter("velorian_vision_requests_total", "Vision preprocessing requests", ["status"])
 
 
-class AuthPayload(BaseModel):
+class RegisterPayload(BaseModel):
+	login: str = Field(min_length=3, max_length=80, pattern=r"^[^\s@]+$")
 	email: str = Field(min_length=3, max_length=320)
+	password: str = Field(min_length=8, max_length=128)
+
+
+class LoginPayload(BaseModel):
+	identifier: str = Field(min_length=3, max_length=320)
 	password: str = Field(min_length=8, max_length=128)
 
 
@@ -783,40 +790,57 @@ def _set_session_cookie(response: Response, user_id: str) -> None:
 	)
 
 
+def _auth_user_payload(user: User) -> dict[str, str]:
+	return {"id": user.id, "email": user.email, "login": user.login}
+
+
 @app.get(f"{settings.api_prefix}/auth/csrf", tags=["auth"])
 def csrf_token(request: Request, response: Response):
 	return {"csrfToken": issue_csrf_token(request, response)}
 
 
 @app.post(f"{settings.api_prefix}/auth/register", tags=["auth"])
-def register(payload: AuthPayload, request: Request, response: Response, db: Session = Depends(get_db)):
+def register(payload: RegisterPayload, request: Request, response: Response, db: Session = Depends(get_db)):
 	rate_limiter.check(f"auth:{request.client.host if request.client else 'unknown'}")
 	if not settings.allow_registration:
 		raise AppError(403, "REGISTRATION_DISABLED", "Регистрация отключена")
 	email = normalize_email(payload.email)
+	login = normalize_login(payload.login)
 	if "@" not in email:
 		raise AppError(422, "INVALID_EMAIL", "Введите корректный email")
-	if db.scalar(select(User).where(User.email == email)):
-		raise AppError(409, "EMAIL_EXISTS", "Пользователь с таким email уже существует")
-	user = User(email=email, password_hash=hash_password(payload.password))
+	if db.scalar(select(User.id).where(User.login == login)):
+		raise AppError(409, "LOGIN_EXISTS", "Пользователь с таким логином уже существует", {"field": "login"})
+	if db.scalar(select(User.id).where(User.email == email)):
+		raise AppError(409, "EMAIL_EXISTS", "Пользователь с таким email уже существует", {"field": "email"})
+	user = User(login=login, email=email, password_hash=hash_password(payload.password))
 	db.add(user)
-	db.flush()
-	ensure_default_approaches(db, user.id)
-	db.commit()
+	try:
+		db.flush()
+		ensure_default_approaches(db, user.id)
+		db.commit()
+	except IntegrityError as error:
+		db.rollback()
+		if db.scalar(select(User.id).where(User.login == login)):
+			raise AppError(409, "LOGIN_EXISTS", "Пользователь с таким логином уже существует", {"field": "login"}) from error
+		raise AppError(409, "EMAIL_EXISTS", "Пользователь с таким email уже существует", {"field": "email"}) from error
 	_set_session_cookie(response, user.id)
 	csrf = issue_csrf_token(request, response, rotate=True)
-	return {"user": {"id": user.id, "email": user.email}, "csrfToken": csrf}
+	return {"user": _auth_user_payload(user), "csrfToken": csrf}
 
 
 @app.post(f"{settings.api_prefix}/auth/login", tags=["auth"])
-def login(payload: AuthPayload, request: Request, response: Response, db: Session = Depends(get_db)):
+def login(payload: LoginPayload, request: Request, response: Response, db: Session = Depends(get_db)):
 	rate_limiter.check(f"auth:{request.client.host if request.client else 'unknown'}")
-	user = db.scalar(select(User).where(User.email == normalize_email(payload.email)))
+	identifier = payload.identifier.strip()
+	user = db.scalar(select(User).where(or_(
+		User.email == normalize_email(identifier),
+		User.login == normalize_login(identifier),
+	)))
 	if user is None or not verify_password(payload.password, user.password_hash):
-		raise AppError(401, "INVALID_CREDENTIALS", "Неверный email или пароль")
+		raise AppError(401, "INVALID_CREDENTIALS", "Неверный email, логин или пароль")
 	_set_session_cookie(response, user.id)
 	csrf = issue_csrf_token(request, response, rotate=True)
-	return {"user": {"id": user.id, "email": user.email}, "csrfToken": csrf}
+	return {"user": _auth_user_payload(user), "csrfToken": csrf}
 
 
 @app.post(f"{settings.api_prefix}/auth/logout", tags=["auth"])
@@ -828,7 +852,7 @@ def logout(response: Response):
 
 @app.get(f"{settings.api_prefix}/auth/me", tags=["auth"])
 def me(user: User = Depends(get_current_user)):
-	return {"user": {"id": user.id, "email": user.email}}
+	return {"user": _auth_user_payload(user)}
 
 
 @app.get(f"{settings.api_prefix}/conversations", tags=["conversations"])

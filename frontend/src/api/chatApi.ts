@@ -76,10 +76,15 @@ export async function getRuntimeConfig(): Promise<{ attachmentLimits: Attachment
 	return requestJson<{ attachmentLimits: AttachmentLimits }>('/config');
 }
 
-export async function authenticate(mode: 'login' | 'register', email: string, password: string): Promise<AuthUser> {
+export type AuthCredentials =
+	| { mode: 'login'; identifier: string; password: string }
+	| { mode: 'register'; login: string; email: string; password: string };
+
+export async function authenticate(credentials: AuthCredentials): Promise<AuthUser> {
+	const { mode, ...body } = credentials;
 	const payload = await requestJson<{ user: AuthUser; csrfToken: string }>(`/auth/${mode}`, {
 			method: 'POST',
-			body: JSON.stringify({ email, password }),
+			body: JSON.stringify(body),
 		});
 	setCsrfToken(payload.csrfToken);
 	return payload.user;

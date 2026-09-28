@@ -135,7 +135,7 @@ function renderKnowledge(initialEntry: string | { pathname: string; state: unkno
 				path: '/',
 				element: <TestShell />,
 				children: [
-					{ path: 'knowledge', element: <KnowledgePage user={{ id: 'user', email: 'user@example.com' }} /> },
+					{ path: 'knowledge', element: <KnowledgePage user={{ id: 'user', email: 'user@example.com', login: 'user' }} /> },
 					{ path: 'knowledge/new', element: <KnowledgeEditorPage /> },
 					{ path: 'knowledge/:knowledgeId', element: <KnowledgeEditorPage /> },
 					{ path: 'chat/:chatId', element: <div>Чат</div> },

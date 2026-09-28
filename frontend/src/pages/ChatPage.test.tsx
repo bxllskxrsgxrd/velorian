@@ -58,7 +58,7 @@ function renderChatPage(initialEntry = `/chat/${conversation.id}`) {
 		<MemoryRouter initialEntries={[initialEntry]}>
 			<ToastProvider>
 				<Routes>
-					<Route element={<AppLayout user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn()} />}>
+					<Route element={<AppLayout user={{ id: 'user', email: 'user@example.com', login: 'user' }} onLogout={vi.fn()} />}>
 						<Route path="/chat/:chatId" element={<ChatPage />} />
 						<Route path="/knowledge/new" element={<KnowledgeSourceProbe />} />
 					</Route>

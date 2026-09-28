@@ -120,6 +120,7 @@ export type Conversation = ConversationSummary & {
 export type AuthUser = {
 	id: string;
 	email: string;
+	login: string;
 };
 
 export type KnowledgeItem = {
