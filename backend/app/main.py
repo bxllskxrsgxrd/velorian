@@ -209,6 +209,74 @@ def _normalize_chat_history(messages: list[dict[str, str]]) -> list[dict[str, st
 	return normalized
 
 
+def _message_parent_ids(messages: list[Message]) -> dict[str, str | None]:
+	parent_ids: dict[str, str | None] = {}
+	group_parent_ids: dict[str, str | None] = {}
+	previous_assistant_id: str | None = None
+	for message in messages:
+		if message.role == "user":
+			group_id = message.branch_group_id or message.id
+			if message.reply_to_id is not None:
+				parent_id = message.reply_to_id
+			elif group_id in group_parent_ids:
+				parent_id = group_parent_ids[group_id]
+			else:
+				parent_id = previous_assistant_id
+			group_parent_ids.setdefault(group_id, parent_id)
+			parent_ids[message.id] = parent_id
+		else:
+			parent_ids[message.id] = message.reply_to_id
+			previous_assistant_id = message.id
+	return parent_ids
+
+
+def _active_branch_messages(messages: list[Message]) -> list[Message]:
+	messages_by_id = {message.id: message for message in messages}
+	parent_ids = _message_parent_ids(messages)
+	visibility: dict[str, bool] = {}
+
+	def is_visible(message_id: str, visiting: set[str] | None = None) -> bool:
+		if message_id in visibility:
+			return visibility[message_id]
+		message = messages_by_id.get(message_id)
+		if message is None:
+			return False
+		if message.role == "user" and not message.is_active:
+			visibility[message_id] = False
+			return False
+		visiting = visiting or set()
+		if message_id in visiting:
+			return False
+		parent_id = parent_ids.get(message_id)
+		if parent_id is None:
+			visibility[message_id] = True
+			return True
+		visiting.add(message_id)
+		result = is_visible(parent_id, visiting)
+		visiting.remove(message_id)
+		visibility[message_id] = result
+		return result
+
+	return [message for message in messages if is_visible(message.id)]
+
+
+def _message_path(messages: list[Message], message_id: str) -> list[Message]:
+	messages_by_id = {message.id: message for message in messages}
+	parent_ids = _message_parent_ids(messages)
+	path: list[Message] = []
+	seen: set[str] = set()
+	current_id: str | None = message_id
+	while current_id is not None and current_id not in seen:
+		seen.add(current_id)
+		message = messages_by_id.get(current_id)
+		if message is None:
+			break
+		path.append(message)
+		current_id = parent_ids.get(current_id)
+	path.reverse()
+	return path
+
+
 def _compact_ai_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
 	system_messages = [message for message in messages if message.get("role") == "system"]
 	last_user = next((message for message in reversed(messages) if message.get("role") == "user"), None)
@@ -1030,22 +1098,10 @@ def _build_ai_messages(
 ) -> tuple[list[dict[str, str]], KnowledgeRetrievalResult | None]:
 	history = list(db.scalars(
 		select(Message)
-		.where(
-			Message.conversation_id == conversation_id,
-			Message.status == "done",
-			Message.created_at <= current_message.created_at,
-		)
-		.order_by(desc(Message.created_at))
-		.limit(60)
+		.where(Message.conversation_id == conversation_id)
+		.order_by(Message.created_at, Message.id)
 	))
-	history.reverse()
-	active_user_ids = {message.id for message in history if message.role == "user" and message.is_active}
-	history = [
-		message
-		for message in history
-		if (message.role == "user" and message.is_active)
-		or (message.role == "assistant" and (message.reply_to_id is None or message.reply_to_id in active_user_ids))
-	]
+	history = [message for message in _message_path(history, current_message.id) if message.status == "done"]
 	messages: list[dict[str, str]] = [{
 		"role": "system",
 		"content": (
@@ -1073,7 +1129,11 @@ def _build_ai_messages(
 	selected = _normalize_chat_history(selected)
 	messages.extend(selected)
 
-	chunks = retrieve_chunks(db, conversation_id, prompt)
+	path_message_ids = [message.id for message in history]
+	attachment_ids = set(db.scalars(
+		select(Attachment.id).where(Attachment.message_id.in_(path_message_ids))
+	)) if path_message_ids else set()
+	chunks = retrieve_chunks(db, conversation_id, prompt, attachment_ids=attachment_ids)
 	if chunks:
 		fragments: list[str] = []
 		for chunk in chunks:
@@ -1165,6 +1225,17 @@ async def stream_chat(
 		})
 	if retry_message_id and edit_message_id:
 		raise AppError(422, "INVALID_MESSAGE_ACTION", "Нельзя одновременно повторить и изменить сообщение")
+	branch_history = list(db.scalars(
+		select(Message)
+		.where(Message.conversation_id == conversation.id)
+		.order_by(Message.created_at, Message.id)
+	))
+	parent_ids = _message_parent_ids(branch_history)
+	active_branch = _active_branch_messages(branch_history)
+	active_parent_id = next(
+		(message.id for message in reversed(active_branch) if message.role == "assistant"),
+		None,
+	)
 	if edit_message_id:
 		if not prompt and automatic_paste is None:
 			raise AppError(422, "EMPTY_MESSAGE", "Введите изменённый текст сообщения")
@@ -1193,6 +1264,7 @@ async def stream_chat(
 			content=prompt,
 			status="done",
 			branch_group_id=branch_group_id,
+			reply_to_id=parent_ids.get(source_user_message.id),
 			is_active=True,
 			search_mode=search_mode,
 		)
@@ -1213,7 +1285,14 @@ async def stream_chat(
 		if source_user_message.search_mode != "none":
 			search_mode = source_user_message.search_mode
 			web_search = search_mode == "web"
-		user_message = Message(conversation_id=conversation.id, role="user", content=prompt, status="done", search_mode=search_mode)
+		user_message = Message(
+			conversation_id=conversation.id,
+			role="user",
+			content=prompt,
+			status="done",
+			reply_to_id=active_parent_id,
+			search_mode=search_mode,
+		)
 		db.add(user_message)
 		db.flush()
 		user_message.branch_group_id = user_message.id
@@ -1223,7 +1302,14 @@ async def stream_chat(
 			raise AppError(422, "EMPTY_MESSAGE", "Введите сообщение или прикрепите файл")
 		if estimate_tokens(prompt) > settings.max_input_tokens // 2:
 			raise AppError(413, "MESSAGE_TOO_LARGE", "Сообщение слишком большое")
-		user_message = Message(conversation_id=conversation.id, role="user", content=prompt, status="done", search_mode=search_mode)
+		user_message = Message(
+			conversation_id=conversation.id,
+			role="user",
+			content=prompt,
+			status="done",
+			reply_to_id=active_parent_id,
+			search_mode=search_mode,
+		)
 		db.add(user_message)
 		db.flush()
 		user_message.branch_group_id = user_message.id

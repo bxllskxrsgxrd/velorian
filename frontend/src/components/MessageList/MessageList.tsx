@@ -2,6 +2,7 @@ import type { ChatAttachment, ChatMessage } from '../../types/chat';
 import { MessageBubble } from '../MessageBubble/MessageBubble';
 import './_messageList.scss';
 import { useChatStore } from '../../stores/chatStore';
+import { chatBranchGroupId, getActiveBranchMessages } from '../../utils/chatBranches';
 
 type MessageListProps = {
 	conversationId?: string | null;
@@ -17,42 +18,21 @@ type MessageListProps = {
 	onCreateFile?: (message: ChatMessage) => Promise<void>;
 };
 
-type BranchInfo = { variants: ChatMessage[]; active: ChatMessage };
+type BranchInfo = { variants: ChatMessage[] };
 const EMPTY_MESSAGES: ChatMessage[] = [];
-
-function branchGroupId(message: ChatMessage) {
-	return message.branchGroupId || message.id;
-}
 
 function buildDisplay(messages: ChatMessage[]) {
 	const groups = new Map<string, ChatMessage[]>();
 	for (const message of messages) {
 		if (message.role !== 'user') continue;
-		const groupId = branchGroupId(message);
+		const groupId = chatBranchGroupId(message);
 		groups.set(groupId, [...(groups.get(groupId) ?? []), message]);
 	}
 	const branches = new Map<string, BranchInfo>();
 	for (const [groupId, variants] of groups) {
-		branches.set(groupId, { variants, active: variants.find((message) => message.isActive !== false) ?? variants.at(-1)! });
+		branches.set(groupId, { variants });
 	}
-
-	const replyMap = new Map<string, ChatMessage[]>();
-	for (const message of messages) {
-		if (message.role === 'assistant' && message.replyToId) replyMap.set(message.replyToId, [...(replyMap.get(message.replyToId) ?? []), message]);
-	}
-	const displayed: ChatMessage[] = [];
-	const renderedGroups = new Set<string>();
-	for (const message of messages) {
-		if (message.role === 'user') {
-			const groupId = branchGroupId(message);
-			if (renderedGroups.has(groupId)) continue;
-			renderedGroups.add(groupId);
-			const active = branches.get(groupId)!.active;
-			displayed.push(active, ...(replyMap.get(active.id) ?? []));
-		} else if (!message.replyToId) {
-			displayed.push(message);
-		}
-	}
+	const displayed = getActiveBranchMessages(messages);
 	return { displayed, branches };
 }
 
@@ -75,7 +55,7 @@ export function MessageList({ conversationId, onOpenAttachment, onRetry, onEdit,
 		<div className="message-list">
 			{displayed.map((message) => {
 				const retryMessageId = retryMessageIds.get(message.id);
-				const branchInfo = message.role === 'user' ? branches.get(branchGroupId(message)) : undefined;
+				const branchInfo = message.role === 'user' ? branches.get(chatBranchGroupId(message)) : undefined;
 				const branchIndex = branchInfo?.variants.findIndex((variant) => variant.id === message.id) ?? -1;
 				return (
 					<MessageBubble

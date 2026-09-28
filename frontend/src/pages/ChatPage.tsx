@@ -29,6 +29,7 @@ import type {
 	SearchMode,
 } from '../types/chat';
 import { attachmentToPreviewFile, createChatAttachment, fileToPreviewFile } from '../utils/files';
+import { getActiveBranchLeafAssistantId, getMessageParentId } from '../utils/chatBranches';
 import { reportError } from '../utils/reportError';
 import './_chatPage.scss';
 import { useToast } from '../hooks/useToast';
@@ -233,6 +234,9 @@ export function ChatPage() {
 		const editSourceMessage = editMessageId
 			? sourceMessages.find((message) => message.id === editMessageId && message.role === CHAT_ROLES.USER)
 			: undefined;
+		const parentMessageId = editSourceMessage
+			? getMessageParentId(sourceMessages, editSourceMessage.id)
+			: getActiveBranchLeafAssistantId(sourceMessages);
 		const tempUserId = crypto.randomUUID();
 		const tempAttachments = currentFiles.map(createChatAttachment);
 		tempAttachments.forEach((attachment) => attachmentUrlsRef.current.add(attachment.url));
@@ -268,6 +272,7 @@ export function ChatPage() {
 			attachments: editSourceMessage?.attachments ?? retrySourceMessage?.attachments ?? tempAttachments,
 			status: CHAT_MESSAGE_STATUSES.DONE,
 			branchGroupId: editSourceMessage ? editSourceMessage.branchGroupId || editSourceMessage.id : tempUserId,
+			replyToId: parentMessageId,
 			isActive: true,
 		};
 		const optimistic: ChatMessage[] = [optimisticUser];

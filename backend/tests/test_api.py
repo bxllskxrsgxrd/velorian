@@ -314,30 +314,51 @@ def test_retry_creates_a_new_user_message(authenticated_client, monkeypatch):
 def test_edit_creates_branch_and_can_switch_versions(authenticated_client, monkeypatch):
 	import app.main as main_module
 
-	monkeypatch.setattr(main_module, "client", FakeGroq())
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Ветки"}).json()["conversation"]["id"]
-	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Первая версия"})
-	original = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"][0]
+	for prompt in ("A", "B1"):
+		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
+	messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
+	original = next(message for message in messages if message["content"] == "B1")
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "C"},
+		files={"files": ("old-branch.txt", b"OLD BRANCH ATTACHMENT", "text/plain")},
+	)
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "D"})
 
 	edited = authenticated_client.post(
 		f"/api/conversations/{conversation_id}/stream",
-		data={"prompt": "Изменённая версия", "edit_message_id": original["id"]},
+		data={"prompt": "B2", "edit_message_id": original["id"]},
 	)
 	assert '"type": "done"' in edited.text
+	assert [message["content"] for message in completions.calls[-1]["messages"] if message["role"] == "user"] == ["A", "B2"]
+	assert "OLD BRANCH ATTACHMENT" not in completions.calls[-1]["messages"][-1]["content"]
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "E"})
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "F"})
+	assert [message["content"] for message in completions.calls[-1]["messages"] if message["role"] == "user"] == ["A", "B2", "E", "F"]
+
 	messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
-	user_versions = [message for message in messages if message["role"] == "user"]
-	assert len(user_versions) == 2
+	user_versions = [message for message in messages if message["content"] in {"B1", "B2"}]
 	assert user_versions[0]["branchGroupId"] == user_versions[1]["branchGroupId"]
 	assert [message["isActive"] for message in user_versions] == [False, True]
+	assert user_versions[0]["replyToId"] == user_versions[1]["replyToId"]
+	assert {message["content"] for message in messages if message["role"] == "user"} == {"A", "B1", "C", "D", "B2", "E", "F"}
 
 	activated = authenticated_client.patch(f"/api/messages/{original['id']}/activate")
 	assert activated.status_code == 200
-	user_versions = [
-		message
-		for message in authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
-		if message["role"] == "user"
-	]
+	user_versions = [message for message in authenticated_client.get(
+		f"/api/conversations/{conversation_id}"
+	).json()["conversation"]["messages"] if message["content"] in {"B1", "B2"}]
 	assert [message["isActive"] for message in user_versions] == [True, False]
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "G"})
+	assert [
+		message["content"].split("\n\n<document_context>", 1)[0]
+		for message in completions.calls[-1]["messages"] if message["role"] == "user"
+	] == [
+		"A", "B1", "C", "D", "G",
+	]
 
 
 def test_generated_file_is_attached_and_downloadable(authenticated_client, monkeypatch):

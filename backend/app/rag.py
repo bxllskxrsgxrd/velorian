@@ -40,15 +40,19 @@ def _terms(text: str) -> list[str]:
 	return [term.lower() for term in TOKEN_PATTERN.findall(text) if len(term) > 1]
 
 
-def retrieve_chunks(db: Session, conversation_id: str, query: str, limit: int = 6) -> list[DocumentChunk]:
-	chunks = list(
-		db.scalars(
-			select(DocumentChunk)
-			.where(DocumentChunk.conversation_id == conversation_id)
-			.order_by(DocumentChunk.id.desc())
-			.limit(600)
-		)
-	)
+def retrieve_chunks(
+	db: Session,
+	conversation_id: str,
+	query: str,
+	limit: int = 6,
+	attachment_ids: set[str] | None = None,
+) -> list[DocumentChunk]:
+	if attachment_ids is not None and not attachment_ids:
+		return []
+	statement = select(DocumentChunk).where(DocumentChunk.conversation_id == conversation_id)
+	if attachment_ids is not None:
+		statement = statement.where(DocumentChunk.attachment_id.in_(attachment_ids))
+	chunks = list(db.scalars(statement.order_by(DocumentChunk.id.desc()).limit(600)))
 	if not chunks:
 		return []
 
