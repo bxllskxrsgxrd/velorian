@@ -2,7 +2,8 @@ import { create } from 'zustand';
 import type { AuthUser } from '../types/chat';
 
 type AuthMode = 'login' | 'register';
-export type AuthFieldErrors = Partial<Record<'login' | 'email' | 'confirmPassword', string>>;
+export type AuthField = 'identifier' | 'login' | 'email' | 'password' | 'confirmPassword';
+export type AuthFieldErrors = Partial<Record<AuthField, string>>;
 
 type AuthStore = {
 	user: AuthUser | null;

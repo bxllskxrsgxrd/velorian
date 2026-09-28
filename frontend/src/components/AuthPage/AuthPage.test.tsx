@@ -67,6 +67,45 @@ describe('AuthPage', () => {
 		expect(api.authenticate).not.toHaveBeenCalled();
 	});
 
+	it('shows every registration validation error next to its field without a general error', () => {
+		render(<AuthPage onAuthenticated={vi.fn()} />);
+		fireEvent.click(screen.getByRole('button', { name: 'Нет аккаунта? Создать' }));
+		fireEvent.change(screen.getByRole('textbox', { name: 'Логин' }), { target: { value: 'poet@example.com' } });
+		fireEvent.change(screen.getByRole('textbox', { name: 'Email' }), { target: { value: 'invalid-email' } });
+		fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'short' } });
+		fireEvent.change(screen.getByLabelText('Подтвердите пароль'), { target: { value: 'different' } });
+		fireEvent.click(screen.getByRole('button', { name: 'Зарегистрироваться' }));
+
+		expect(screen.getByText('Логин не должен содержать пробелы или символ @')).toHaveClass('auth-card__field-error');
+		expect(screen.getByText('Введите корректный email')).toHaveClass('auth-card__field-error');
+		expect(screen.getByText('Пароль должен содержать от 8 до 128 символов')).toHaveClass('auth-card__field-error');
+		expect(screen.getByText('Пароли не совпадают')).toHaveClass('auth-card__field-error');
+		expect(screen.getByRole('textbox', { name: 'Логин' })).toHaveAttribute('aria-invalid', 'true');
+		expect(screen.getByRole('textbox', { name: 'Email' })).toHaveAttribute('aria-invalid', 'true');
+		expect(screen.getByLabelText('Пароль')).toHaveAttribute('aria-invalid', 'true');
+		expect(screen.getByLabelText('Подтвердите пароль')).toHaveAttribute('aria-invalid', 'true');
+		expect(document.querySelector('.auth-card__error')).not.toBeInTheDocument();
+		expect(api.authenticate).not.toHaveBeenCalled();
+	});
+
+	it('binds backend validation details to the corresponding field', async () => {
+		api.authenticate.mockRejectedValue(new ApiError(
+			'VALIDATION_ERROR', 422, undefined, undefined, undefined,
+			{ fieldErrors: { login: 'Введите корректный логин без пробелов и символа @' } },
+		));
+		render(<AuthPage onAuthenticated={vi.fn()} />);
+		fireEvent.click(screen.getByRole('button', { name: 'Нет аккаунта? Создать' }));
+		fireEvent.change(screen.getByRole('textbox', { name: 'Логин' }), { target: { value: 'poet' } });
+		fireEvent.change(screen.getByRole('textbox', { name: 'Email' }), { target: { value: 'poet@example.com' } });
+		fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'strong-password' } });
+		fireEvent.change(screen.getByLabelText('Подтвердите пароль'), { target: { value: 'strong-password' } });
+		fireEvent.click(screen.getByRole('button', { name: 'Зарегистрироваться' }));
+
+		expect(await screen.findByText('Введите корректный логин без пробелов и символа @')).toHaveClass('auth-card__field-error');
+		expect(screen.getByRole('textbox', { name: 'Логин' })).toHaveAttribute('aria-invalid', 'true');
+		expect(document.querySelector('.auth-card__error')).not.toBeInTheDocument();
+	});
+
 	it.each([
 		['LOGIN_EXISTS', 'Логин', 'Пользователь с таким логином уже существует'],
 		['EMAIL_EXISTS', 'Email', 'Пользователь с таким email уже существует'],

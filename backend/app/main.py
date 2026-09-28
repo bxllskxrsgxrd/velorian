@@ -713,10 +713,27 @@ async def app_error_handler(request: Request, error: AppError):
 
 
 @app.exception_handler(RequestValidationError)
-async def validation_error_handler(request: Request, _error: RequestValidationError):
-	safe_errors = [{"location": item.get("loc"), "type": item.get("type")} for item in _error.errors()]
+async def validation_error_handler(request: Request, error: RequestValidationError):
+	safe_errors = [{"location": item.get("loc"), "type": item.get("type")} for item in error.errors()]
 	logger.warning("Validation error: request_id=%s errors=%s", _request_id(request), safe_errors)
-	return JSONResponse(status_code=422, content=_error_payload("VALIDATION_ERROR", "Проверьте корректность переданных данных", _request_id(request)))
+	details = None
+	if request.url.path in {f"{settings.api_prefix}/auth/register", f"{settings.api_prefix}/auth/login"}:
+		messages = {
+			"identifier": "Введите корректный email или логин",
+			"login": "Введите корректный логин без пробелов и символа @",
+			"email": "Введите корректный email",
+			"password": "Пароль должен содержать от 8 до 128 символов",
+		}
+		field_errors = {
+			field: messages[field]
+			for item in error.errors()
+			if (field := str(item.get("loc", ("",))[-1])) in messages
+		}
+		if field_errors:
+			details = {"fieldErrors": field_errors}
+	return JSONResponse(status_code=422, content=_error_payload(
+		"VALIDATION_ERROR", "Проверьте корректность переданных данных", _request_id(request), details,
+	))
 
 
 @app.exception_handler(HTTPException)
@@ -807,7 +824,7 @@ def register(payload: RegisterPayload, request: Request, response: Response, db:
 	email = normalize_email(payload.email)
 	login = normalize_login(payload.login)
 	if "@" not in email:
-		raise AppError(422, "INVALID_EMAIL", "Введите корректный email")
+		raise AppError(422, "INVALID_EMAIL", "Введите корректный email", {"field": "email"})
 	if db.scalar(select(User.id).where(User.login == login)):
 		raise AppError(409, "LOGIN_EXISTS", "Пользователь с таким логином уже существует", {"field": "login"})
 	if db.scalar(select(User.id).where(User.email == email)):

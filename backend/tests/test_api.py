@@ -97,6 +97,17 @@ def test_auth_session_and_structured_error(client):
 	validation = client.post("/api/auth/login", json={"identifier": "a", "password": "x"})
 	assert validation.status_code == 422
 	assert validation.json()["error"]["code"] == "VALIDATION_ERROR"
+	assert validation.json()["error"]["details"]["fieldErrors"] == {
+		"identifier": "Введите корректный email или логин",
+		"password": "Пароль должен содержать от 8 до 128 символов",
+	}
+	invalid_login = client.post("/api/auth/register", json={
+		"login": "name@example.com", "email": "valid@example.com", "password": "strong-password",
+	})
+	assert invalid_login.status_code == 422
+	assert invalid_login.json()["error"]["details"]["fieldErrors"] == {
+		"login": "Введите корректный логин без пробелов и символа @",
+	}
 
 
 def test_conversation_crud(authenticated_client):

@@ -4,7 +4,7 @@ import { authenticate } from '../../api/chatApi';
 import { ApiError } from '../../api/httpClient';
 import type { AuthUser } from '../../types/chat';
 import { reportError } from '../../utils/reportError';
-import { useAuthStore } from '../../stores/authStore';
+import { useAuthStore, type AuthField, type AuthFieldErrors } from '../../stores/authStore';
 import { EyeIcon, EyeOffIcon } from '../icons/AppIcons';
 import './_authPage.scss';
 import { Button } from '../ui/Button/Button';
@@ -26,6 +26,54 @@ type PasswordFieldProps = {
 	error?: string;
 };
 
+const AUTH_FIELDS = new Set<AuthField>(['identifier', 'login', 'email', 'password', 'confirmPassword']);
+
+function validateForm(mode: 'login' | 'register', values: {
+	identifier: string;
+	login: string;
+	email: string;
+	password: string;
+	confirmPassword: string;
+}): AuthFieldErrors {
+	const errors: AuthFieldErrors = {};
+	if (mode === 'login') {
+		const identifier = values.identifier.trim();
+		if (!identifier) errors.identifier = 'Введите email или логин';
+		else if (identifier.length < 3 || identifier.length > 320) errors.identifier = 'Email или логин должен содержать от 3 до 320 символов';
+	} else {
+		const login = values.login.trim();
+		const email = values.email.trim();
+		if (!login) errors.login = 'Введите логин';
+		else if (login.length < 3 || login.length > 80) errors.login = 'Логин должен содержать от 3 до 80 символов';
+		else if (/\s|@/.test(login)) errors.login = 'Логин не должен содержать пробелы или символ @';
+		if (!email) errors.email = 'Введите email';
+		else if (email.length > 320 || !/^[^\s@]+@[^\s@]+$/.test(email)) errors.email = 'Введите корректный email';
+		if (!values.confirmPassword) errors.confirmPassword = 'Подтвердите пароль';
+		else if (values.password !== values.confirmPassword) errors.confirmPassword = 'Пароли не совпадают';
+	}
+	if (!values.password) errors.password = 'Введите пароль';
+	else if (values.password.length < 8 || values.password.length > 128) errors.password = 'Пароль должен содержать от 8 до 128 символов';
+	return errors;
+}
+
+function backendFieldErrors(error: ApiError): AuthFieldErrors {
+	if (error.code === 'LOGIN_EXISTS') return { login: 'Пользователь с таким логином уже существует' };
+	if (error.code === 'EMAIL_EXISTS') return { email: 'Пользователь с таким email уже существует' };
+	if (error.code === 'INVALID_EMAIL') return { email: 'Введите корректный email' };
+	const errors: AuthFieldErrors = {};
+	const detailsErrors = error.details?.fieldErrors;
+	if (detailsErrors && typeof detailsErrors === 'object') {
+		for (const [field, message] of Object.entries(detailsErrors)) {
+			if (AUTH_FIELDS.has(field as AuthField) && typeof message === 'string') errors[field as AuthField] = message;
+		}
+	}
+	const field = error.details?.field;
+	if (typeof field === 'string' && AUTH_FIELDS.has(field as AuthField) && !errors[field as AuthField]) {
+		errors[field as AuthField] = error.developerMessage ?? error.message;
+	}
+	return errors;
+}
+
 function PasswordField({ label, value, onChange, autoComplete, error }: PasswordFieldProps) {
 	const store = useMemo(
 		() =>
@@ -46,6 +94,7 @@ function PasswordField({ label, value, onChange, autoComplete, error }: Password
 						type={visible ? 'text' : 'password'}
 						autoComplete={autoComplete}
 						minLength={8}
+						maxLength={128}
 						required
 						value={value}
 						onChange={(event) => onChange(event.target.value)}
@@ -86,13 +135,19 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
 	const setFieldErrors = useAuthStore((state) => state.setFieldErrors);
 	const setLoading = useAuthStore((state) => state.setSubmitting);
 	const toggleMode = useAuthStore((state) => state.toggleMode);
+	function clearFieldErrors(...fields: AuthField[]) {
+		if (!fields.some((field) => fieldErrors[field])) return;
+		const next = { ...fieldErrors };
+		fields.forEach((field) => delete next[field]);
+		setFieldErrors(next);
+	}
 
 	async function handleSubmit(event: FormEvent) {
 		event.preventDefault();
 		setError('');
-		setFieldErrors({});
-		if (mode === 'register' && password !== confirmPassword) {
-			setFieldErrors({ confirmPassword: 'Пароли не совпадают' });
+		const validationErrors = validateForm(mode, { identifier, login, email, password, confirmPassword });
+		setFieldErrors(validationErrors);
+		if (Object.keys(validationErrors).length > 0) {
 			return;
 		}
 		setLoading(true);
@@ -101,10 +156,9 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
 				await authenticate(mode === 'login' ? { mode, identifier, password } : { mode, login, email, password }),
 			);
 		} catch (requestError) {
-			if (requestError instanceof ApiError && requestError.code === 'LOGIN_EXISTS') {
-				setFieldErrors({ login: 'Пользователь с таким логином уже существует' });
-			} else if (requestError instanceof ApiError && requestError.code === 'EMAIL_EXISTS') {
-				setFieldErrors({ email: 'Пользователь с таким email уже существует' });
+			const responseFieldErrors = requestError instanceof ApiError ? backendFieldErrors(requestError) : {};
+			if (Object.keys(responseFieldErrors).length > 0) {
+				setFieldErrors(responseFieldErrors);
 			} else {
 				reportError('Ошибка авторизации', requestError, { mode });
 				setError(requestError instanceof Error ? requestError.message : 'Не удалось войти');
@@ -116,22 +170,30 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
 
 	return (
 		<main className="auth-page">
-			<form className="auth-card" onSubmit={handleSubmit}>
+			<form className="auth-card" onSubmit={handleSubmit} noValidate>
 				<div className="auth-card__eyebrow">VELORIAN</div>
 				<h1>{mode === 'login' ? 'С возвращением' : 'Создать аккаунт'}</h1>
 				<p>Диалоги и документы будут храниться в вашем локальном пространстве</p>
 
 				{mode === 'login' ? (
-					<label>
-						<span>Email или логин</span>
-						<input
-							type="text"
-							autoComplete="username"
-							required
-							value={identifier}
-							onChange={(event) => setIdentifier(event.target.value)}
-						/>
-					</label>
+					<div className="auth-card__field">
+						<label>
+							<span>Email или логин</span>
+							<input
+								type="text"
+								autoComplete="username"
+								required
+								maxLength={320}
+								value={identifier}
+								aria-invalid={Boolean(fieldErrors.identifier)}
+								onChange={(event) => {
+									setIdentifier(event.target.value);
+									clearFieldErrors('identifier');
+								}}
+							/>
+						</label>
+						{fieldErrors.identifier && <span className="auth-card__field-error">{fieldErrors.identifier}</span>}
+					</div>
 				) : (
 					<>
 						<div className="auth-card__field">
@@ -141,10 +203,14 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
 									type="text"
 									autoComplete="username"
 									minLength={3}
+									maxLength={80}
 									required
 									value={login}
 									aria-invalid={Boolean(fieldErrors.login)}
-									onChange={(event) => setLogin(event.target.value)}
+									onChange={(event) => {
+										setLogin(event.target.value);
+										clearFieldErrors('login');
+									}}
 								/>
 							</label>
 							{fieldErrors.login && <span className="auth-card__field-error">{fieldErrors.login}</span>}
@@ -156,9 +222,13 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
 									type="email"
 									autoComplete="email"
 									required
+									maxLength={320}
 									value={email}
 									aria-invalid={Boolean(fieldErrors.email)}
-									onChange={(event) => setEmail(event.target.value)}
+									onChange={(event) => {
+										setEmail(event.target.value);
+										clearFieldErrors('email');
+									}}
 								/>
 							</label>
 							{fieldErrors.email && <span className="auth-card__field-error">{fieldErrors.email}</span>}
@@ -168,14 +238,21 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
 				<PasswordField
 					label="Пароль"
 					value={password}
-					onChange={setPassword}
+					onChange={(value) => {
+						setPassword(value);
+						clearFieldErrors('password', 'confirmPassword');
+					}}
 					autoComplete={mode === 'login' ? 'current-password' : 'new-password'}
+					error={fieldErrors.password}
 				/>
 				{mode === 'register' && (
 					<PasswordField
 						label="Подтвердите пароль"
 						value={confirmPassword}
-						onChange={setConfirmPassword}
+						onChange={(value) => {
+							setConfirmPassword(value);
+							clearFieldErrors('confirmPassword');
+						}}
 						autoComplete="new-password"
 						error={fieldErrors.confirmPassword}
 					/>
