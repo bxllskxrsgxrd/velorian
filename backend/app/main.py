@@ -37,7 +37,7 @@ from .knowledge import (
 	router as knowledge_router,
 )
 from .knowledge_retrieval import KnowledgeRetrievalResult, log_knowledge_retrieval, resolve_knowledge_query
-from .markdown_files import markdown_file_name, markdown_title, unique_markdown_file_name
+from .markdown_files import markdown_file_name, split_markdown_title, unique_markdown_file_name
 from .models import Attachment, Conversation, DocumentChunk, KnowledgeItem, Message, User, utc_now
 from .rag import chunk_text, estimate_tokens, retrieve_chunks
 from .rate_limit import rate_limiter
@@ -605,7 +605,8 @@ async def create_message_markdown_file(
 		raise AppError(409, "MESSAGE_NOT_READY", "Ответ ещё не готов")
 	if not message.content.strip():
 		raise AppError(422, "EMPTY_ASSISTANT_RESPONSE", "Пустой ответ нельзя превратить в файл")
-	data = message.content.encode("utf-8")
+	extracted_title, content = split_markdown_title(message.content)
+	data = content.encode("utf-8")
 	if len(data) > settings.max_file_size:
 		raise AppError(413, "FILE_SIZE_LIMIT_EXCEEDED", "Ответ превышает допустимый размер файла", {
 			"actualSize": len(data), "maximumSize": settings.max_file_size,
@@ -618,7 +619,7 @@ async def create_message_markdown_file(
 	if existing_generated is not None:
 		return {"attachment": _attachment_payload(existing_generated), "created": False}
 
-	requested_title = payload.name or markdown_title(message.content)
+	requested_title = payload.name or extracted_title
 	owned_names = set(db.scalars(
 		select(Attachment.name)
 		.join(Conversation, Conversation.id == Attachment.conversation_id)
@@ -639,7 +640,7 @@ async def create_message_markdown_file(
 			size=len(data),
 			storage_path="",
 			storage_key=storage_key,
-			extracted_text=message.content,
+			extracted_text=content,
 			extraction_status="generated_markdown",
 		)
 		db.add(attachment)

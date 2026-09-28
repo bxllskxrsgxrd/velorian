@@ -1117,10 +1117,10 @@ def test_dynamic_approach_resolver_scopes_context_and_distinguishes_empty(authen
 	assert "Status: approach_empty" in completions.calls[-1]["messages"][-1]["content"]
 
 
-def test_assistant_response_markdown_file_is_exact_idempotent_and_downloadable(authenticated_client, monkeypatch):
+def test_assistant_response_markdown_file_removes_title_and_is_idempotent_and_downloadable(authenticated_client, monkeypatch):
 	import app.main as main_module
 
-	markdown = "## Тихий вечер\n\n**Жирный текст**\n\n- пункт\n\n| A | B |\n|---|---|\n| 1 | 2 |"
+	markdown = "1. **Ласковый след**\n\nТихий шёпот утра,\nИ хвост, как клятва, виляя,"
 	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(markdown)))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Markdown"}).json()["conversation"]["id"]
 	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Напиши материал"})
@@ -1130,10 +1130,10 @@ def test_assistant_response_markdown_file_is_exact_idempotent_and_downloadable(a
 	assert created.status_code == 200
 	attachment = created.json()["attachment"]
 	assert created.json()["created"] is True
-	assert attachment["name"] == "Тихий вечер.md"
+	assert attachment["name"] == "Ласковый след.md"
 	assert attachment["type"] == "text/markdown"
 	assert attachment["generated"] is True
-	assert authenticated_client.get(attachment["downloadUrl"]).content.decode() == markdown
+	assert authenticated_client.get(attachment["downloadUrl"]).content.decode() == "Тихий шёпот утра,\nИ хвост, как клятва, виляя,"
 
 	duplicate = authenticated_client.post(f"/api/messages/{message['id']}/markdown-file", json={})
 	assert duplicate.status_code == 200
@@ -1141,10 +1141,27 @@ def test_assistant_response_markdown_file_is_exact_idempotent_and_downloadable(a
 	assert duplicate.json()["attachment"]["id"] == attachment["id"]
 
 
+def test_rated_assistant_response_knowledge_removes_bold_title(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	markdown = "**Poem**\n\nSoftly falls the evening light,\nAnd old winds whisper in the shade."
+	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(markdown)))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Poem"}).json()["conversation"]["id"]
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Write a poem"})
+	message = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"][-1]
+	assert message["content"] == markdown
+	authenticated_client.put(f"/api/messages/{message['id']}/rating", json={"score": 5})
+
+	item = authenticated_client.post(f"/api/knowledge/messages/{message['id']}").json()["items"][0]
+	assert item["title"] == "Poem"
+	assert item["content"] == "Softly falls the evening light,\nAnd old winds whisper in the shade."
+
+
 def test_message_editor_knowledge_link_lifecycle_and_file_reuse(authenticated_client, monkeypatch):
 	import app.main as main_module
 
 	markdown = "## Связанный материал\n\nТочное содержимое файла."
+	body = "Точное содержимое файла."
 	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(markdown)))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Связь"}).json()["conversation"]["id"]
 	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Создай материал"})
@@ -1152,8 +1169,8 @@ def test_message_editor_knowledge_link_lifecycle_and_file_reuse(authenticated_cl
 	attachment = authenticated_client.post(f"/api/messages/{message['id']}/markdown-file", json={}).json()["attachment"]
 
 	created = authenticated_client.post("/api/knowledge", json={
-		"title": attachment["name"],
-		"content": markdown,
+		"title": "Связанный материал",
+		"content": body,
 		"rating": None,
 		"source_message_id": message["id"],
 		"source_file_id": attachment["id"],
@@ -1163,8 +1180,10 @@ def test_message_editor_knowledge_link_lifecycle_and_file_reuse(authenticated_cl
 	assert item["sourceType"] == "assistant_file"
 	assert item["sourceMessageId"] == message["id"]
 	assert item["sourceFileId"] == attachment["id"]
+	assert item["title"] == "Связанный материал"
 	assert item["rating"] is None
-	assert authenticated_client.get(item["originalDownloadUrl"]).content.decode() == markdown
+	assert item["content"] == body
+	assert authenticated_client.get(item["originalDownloadUrl"]).content.decode() == body
 	assert authenticated_client.get(f"/api/knowledge/messages/{message['id']}/link").json()["item"] == {
 		"id": item["id"], "deletedAt": None, "rating": None,
 	}
@@ -1191,7 +1210,7 @@ def test_message_editor_knowledge_link_lifecycle_and_file_reuse(authenticated_cl
 	conversation = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]
 	assert conversation["messages"][-1]["knowledgeItem"] is None
 	assert conversation["messages"][-1]["attachments"][0]["id"] == attachment["id"]
-	assert authenticated_client.get(attachment["downloadUrl"]).content.decode() == markdown
+	assert authenticated_client.get(attachment["downloadUrl"]).content.decode() == body
 
 
 def test_message_editor_text_source_preserves_selected_or_absent_rating(authenticated_client, monkeypatch):
@@ -1224,6 +1243,7 @@ def test_generated_markdown_file_to_knowledge_filters_and_retrieval(authenticate
 	import app.main as main_module
 
 	markdown = "## Материал 1\n\nНейтральный тестовый текст с **Markdown**."
+	body = "Нейтральный тестовый текст с **Markdown**."
 	completions = RecordingCompletions()
 	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(markdown)))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Фильтры"}).json()["conversation"]["id"]
@@ -1239,11 +1259,12 @@ def test_generated_markdown_file_to_knowledge_filters_and_retrieval(authenticate
 	item = saved.json()["item"]
 	assert saved.json()["created"] is True
 	assert item["sourceType"] == "assistant_file"
-	assert item["content"] == markdown
+	assert item["title"] == "Материал 1"
+	assert item["content"] == body
 	assert item["mimeType"] == "text/markdown"
 	assert item["fileName"] == "Материал 1.md"
 	assert item["filters"] == filters
-	assert authenticated_client.get(item["downloadUrl"]).content.decode() == markdown
+	assert authenticated_client.get(item["downloadUrl"]).content.decode() == body
 	filtered = authenticated_client.get("/api/knowledge", params={"source_type": "uploaded_file"})
 	assert [entry["id"] for entry in filtered.json()["items"]] == [item["id"]]
 
@@ -1331,12 +1352,18 @@ def test_knowledge_filters_optional_update_clear_and_legacy_record(authenticated
 
 
 def test_markdown_file_name_sanitizes_cross_platform_characters():
-	from app.markdown_files import markdown_file_name, unique_markdown_file_name
+	from app.markdown_files import markdown_file_name, split_markdown_title, unique_markdown_file_name
 
 	name = markdown_file_name('Тихий / вечер\\: ?* "тест"')
 	assert name.endswith(".md")
 	assert not any(character in name for character in '<>:"/\\|?*')
 	assert unique_markdown_file_name("article", {"article.md", "ARTICLE-2.MD"}) == "article-3.md"
+	assert split_markdown_title("**Poem**\n\nSoftly falls\nunchanged") == ("Poem", "Softly falls\nunchanged")
+	assert split_markdown_title("1. **Ласковый след**\n\nТихий шёпот утра") == ("Ласковый след", "Тихий шёпот утра")
+	plain = "Softly falls\nunchanged"
+	assert split_markdown_title(plain) == ("Softly falls", plain)
+	ordered_item = "1. Обычный пункт\n2. Следующий пункт"
+	assert split_markdown_title(ordered_item)[1] == ordered_item
 
 
 def test_csrf_rejects_missing_invalid_and_rotated_tokens(client):

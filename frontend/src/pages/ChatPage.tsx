@@ -31,6 +31,7 @@ import type {
 import { attachmentToPreviewFile, createChatAttachment, fileToPreviewFile } from '../utils/files';
 import { getActiveBranchLeafAssistantId, getMessageParentId } from '../utils/chatBranches';
 import { reportError } from '../utils/reportError';
+import { splitAssistantResponse } from '../utils/assistantResponse';
 import './_chatPage.scss';
 import { useToast } from '../hooks/useToast';
 import { getUserFacingError } from '../errors/userErrorMessages';
@@ -42,10 +43,6 @@ import { useFilesStore } from '../stores/filesStore';
 import { useUiStore } from '../stores/uiStore';
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
-
-function knowledgeTitle(content: string) {
-	return content.split('\n').map((line) => line.trim().replace(/^#+\s*/, '')).find(Boolean)?.slice(0, 255) || 'Ответ ассистента';
-}
 
 export function ChatPage() {
 	const { showToast } = useToast();
@@ -565,12 +562,16 @@ export function ChatPage() {
 				openExistingKnowledge(message.id, existing);
 				return;
 			}
+			const response = splitAssistantResponse(message.content);
+			const attachmentTitle = attachment
+				? (response.content !== message.content ? response.title : attachment.name.replace(/\.md$/i, ''))
+				: null;
 			const source: KnowledgeCreateSource = {
 				type: attachment ? 'assistant_file' : 'assistant_message',
 				messageId: message.id,
 				fileId: attachment?.id,
-				title: attachment?.name ?? knowledgeTitle(message.content),
-				content: message.content,
+				title: attachmentTitle ?? response.title,
+				content: response.content,
 				rating: message.rating?.score ?? null,
 				fileName: attachment?.name,
 				mimeType: attachment?.type,
@@ -603,7 +604,8 @@ export function ChatPage() {
 		if (!activeConversationId) return;
 		const conversationId = activeConversationId;
 		try {
-			const { attachment, created } = await createMessageMarkdownFile(message.id);
+			const { title } = splitAssistantResponse(message.content);
+			const { attachment, created } = await createMessageMarkdownFile(message.id, title);
 			setConversationMessages(conversationId, (current) =>
 				current.map((entry) =>
 					entry.id === message.id

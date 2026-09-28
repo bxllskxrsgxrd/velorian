@@ -221,9 +221,9 @@ export async function saveMessageToKnowledge(messageId: string): Promise<Knowled
 	return (await requestJson<{ items: KnowledgeItem[] }>(`/knowledge/messages/${messageId}`, { method: 'POST' })).items.map(normalizeKnowledgeItem);
 }
 
-export async function createMessageMarkdownFile(messageId: string): Promise<{ attachment: ChatAttachment; created: boolean }> {
+export async function createMessageMarkdownFile(messageId: string, name?: string): Promise<{ attachment: ChatAttachment; created: boolean }> {
 	const result = await requestJson<{ attachment: Omit<ChatAttachment, 'isImage'>; created: boolean }>(`/messages/${messageId}/markdown-file`, {
-		method: 'POST', body: JSON.stringify({}),
+		method: 'POST', body: JSON.stringify({ name }),
 	});
 	return { ...result, attachment: normalizeAttachment(result.attachment) };
 }

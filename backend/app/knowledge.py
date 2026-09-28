@@ -22,7 +22,7 @@ from .database import get_db
 from .errors import AppError
 from .file_processing import extract_text, validate_file_name
 from .knowledge_retrieval import KnowledgeRetrievalResult, KnowledgeSearchOptions, knowledge_retrieval_service
-from .markdown_files import markdown_file_name, markdown_title
+from .markdown_files import markdown_file_name, split_markdown_title
 from .models import Attachment, Conversation, KnowledgeApproach, KnowledgeItem, Message, MessageRating, User, utc_now
 from .storage import build_storage_key, get_file_storage
 
@@ -555,14 +555,30 @@ async def save_attachment_to_knowledge(
 	if not attachment.extracted_text.strip():
 		raise AppError(422, "EMPTY_KNOWLEDGE_FILE", "Пустой файл нельзя добавить в базу знаний")
 	approach = optional_owned_approach(db, payload.approach_id, user.id)
-	title = (payload.title or Path(attachment.name).stem).strip()[:255]
+	is_generated_markdown = attachment.extraction_status == "generated_markdown"
+	content = attachment.extracted_text
+	semantic_title: str | None = None
+	if is_generated_markdown:
+		source_message = db.get(Message, attachment.message_id) if attachment.message_id else None
+		if source_message is not None:
+			source_title, source_body = split_markdown_title(source_message.content)
+			if source_body != source_message.content:
+				semantic_title = source_title
+		file_title, file_body = split_markdown_title(content)
+		if file_body != content:
+			semantic_title = semantic_title or file_title
+			content = file_body
+	title = (payload.title or semantic_title or Path(attachment.name).stem).strip()
+	if is_generated_markdown and title.lower().endswith(".md"):
+		title = title[:-3].rstrip()
+	title = title[:255]
 	item = KnowledgeItem(
 		user_id=user.id,
 		source_type="assistant_file" if attachment.extraction_status.startswith("generated") else "uploaded_file",
 		source_message_id=attachment.message_id,
 		source_file_id=attachment.id,
 		title=title or "Сохранённый файл",
-		content=attachment.extracted_text,
+		content=content,
 		mime_type="text/markdown" if attachment.name.lower().endswith(".md") else attachment.content_type,
 		original_filename=attachment.name,
 		is_active=payload.is_active,
@@ -603,20 +619,22 @@ async def save_rated_message(message_id: str, user: User = Depends(get_current_u
 	if rating is None or rating.score < settings.knowledge_rating_threshold:
 		raise AppError(422, "RATING_TOO_LOW", f"Для сохранения нужна оценка не ниже {settings.knowledge_rating_threshold}")
 	items: list[KnowledgeItem] = []
+	message_title, message_content = split_markdown_title(message.content, "Сохранённый ответ")
 	message_item = db.scalar(select(KnowledgeItem).where(KnowledgeItem.user_id == user.id, KnowledgeItem.source_message_id == message.id))
 	if message_item is None:
 		message_item = KnowledgeItem(
 			user_id=user.id,
 			source_type="rated_content",
 			source_message_id=message.id,
-			title=markdown_title(message.content, "Сохранённый ответ")[:255],
-			content=message.content,
+			title=message_title[:255],
+			content=message_content,
 			mime_type="text/markdown",
 			rating=rating.score,
 		)
 		db.add(message_item)
 	else:
-		message_item.content = message.content
+		message_item.title = message_title[:255]
+		message_item.content = message_content
 		message_item.rating = rating.score
 		message_item.is_active = True
 		message_item.deleted_at = None

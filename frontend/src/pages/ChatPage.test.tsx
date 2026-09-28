@@ -4,13 +4,14 @@ import { ChatPage } from './ChatPage';
 import { ToastProvider } from '../components/Toast/ToastProvider';
 import { ApiError } from '../api/httpClient';
 import type { StreamEvent } from '../api/chatApi';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { useChatStore } from '../stores/chatStore';
 import { usePromptStore } from '../stores/promptStore';
 import { useFilesStore } from '../stores/filesStore';
 import { useConversationsStore } from '../stores/conversationsStore';
 import { useMessageUiStore } from '../stores/messageUiStore';
 import { AppLayout } from '../components/AppLayout/AppLayout';
+import type { KnowledgeCreateSource } from '../types/chat';
 
 const api = vi.hoisted(() => ({
 	createConversation: vi.fn(),
@@ -45,6 +46,12 @@ const conversation = {
 	updatedAt: '2026-08-21T00:00:00Z',
 };
 
+function KnowledgeSourceProbe() {
+	const location = useLocation();
+	const source = (location.state as { knowledgeSource?: KnowledgeCreateSource } | null)?.knowledgeSource;
+	return <pre data-testid="knowledge-source">{JSON.stringify(source)}</pre>;
+}
+
 function renderChatPage(initialEntry = `/chat/${conversation.id}`) {
 	return render(
 		<MemoryRouter initialEntries={[initialEntry]}>
@@ -52,6 +59,7 @@ function renderChatPage(initialEntry = `/chat/${conversation.id}`) {
 				<Routes>
 					<Route element={<AppLayout user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn()} />}>
 						<Route path="/chat/:chatId" element={<ChatPage />} />
+						<Route path="/knowledge/new" element={<KnowledgeSourceProbe />} />
 					</Route>
 				</Routes>
 			</ToastProvider>
@@ -160,6 +168,55 @@ describe('ChatPage retry', () => {
 		expect(alert).not.toBeNull();
 		expect(alert?.closest('.message')).toHaveClass('message--error');
 		expect(container.querySelector('.message__content--pending')).not.toBeInTheDocument();
+	});
+});
+
+describe('ChatPage assistant title extraction', () => {
+	const content = '1. **Ласковый след**\n\nТихий шёпот утра,\nИ хвост, как клятва, виляя,';
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		api.listConversations.mockResolvedValue([conversation]);
+		api.getMessageKnowledgeLink.mockResolvedValue(null);
+	});
+
+	it('uses the semantic response title when creating a Markdown file', async () => {
+		api.getConversation.mockResolvedValue({
+			...conversation,
+			messages: [{ id: 'assistant-title', role: 'assistant', content, status: 'done', attachments: [] }],
+		});
+		api.createMessageMarkdownFile.mockResolvedValue({
+			created: true,
+			attachment: {
+				id: 'generated-file', name: 'Ласковый след.md', size: 42, type: 'text/markdown',
+				url: '/file', isImage: false, generated: true,
+			},
+		});
+		renderChatPage();
+
+		fireEvent.click(await screen.findByRole('button', { name: 'Создать файл' }));
+		await waitFor(() => expect(api.createMessageMarkdownFile).toHaveBeenCalledWith('assistant-title', 'Ласковый след'));
+	});
+
+	it('uses the source response title and body when adding its generated file', async () => {
+		api.getConversation.mockResolvedValue({
+			...conversation,
+			messages: [{
+				id: 'assistant-title', role: 'assistant', content, status: 'done',
+				attachments: [{
+					id: 'generated-file', name: '1-2.md', size: 42, type: 'text/markdown',
+					url: '/file', isImage: false, generated: true,
+				}],
+			}],
+		});
+		renderChatPage();
+
+		fireEvent.click(await screen.findByRole('button', { name: 'Добавить в базу' }));
+		fireEvent.click(screen.getByRole('option', { name: /Файл «1-2.md»/ }));
+		const source = JSON.parse((await screen.findByTestId('knowledge-source')).textContent ?? '{}') as KnowledgeCreateSource;
+		expect(source.title).toBe('Ласковый след');
+		expect(source.content).toBe('Тихий шёпот утра,\nИ хвост, как клятва, виляя,');
+		expect(source.fileName).toBe('1-2.md');
 	});
 });
 
