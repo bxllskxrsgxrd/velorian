@@ -27,22 +27,43 @@ describe('AuthPage', () => {
 		expect(password).toHaveAttribute('type', 'text');
 		fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
 
-		await waitFor(() => expect(api.authenticate).toHaveBeenCalledWith({
-			mode: 'login', identifier: 'poet', password: 'strong-password',
-		}));
+		await waitFor(() =>
+			expect(api.authenticate).toHaveBeenCalledWith({
+				mode: 'login',
+				identifier: 'poet',
+				password: 'strong-password',
+			}),
+		);
 		expect(onAuthenticated).toHaveBeenCalledOnce();
 	});
 
 	it('requires matching password confirmation before registration', () => {
 		render(<AuthPage onAuthenticated={vi.fn()} />);
+
 		fireEvent.click(screen.getByRole('button', { name: 'Нет аккаунта? Создать' }));
-		fireEvent.change(screen.getByRole('textbox', { name: 'Логин' }), { target: { value: 'poet' } });
-		fireEvent.change(screen.getByRole('textbox', { name: 'Email' }), { target: { value: 'poet@example.com' } });
-		fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'strong-password' } });
-		fireEvent.change(screen.getByLabelText('Подтвердите пароль'), { target: { value: 'different-password' } });
+
+		fireEvent.change(screen.getByRole('textbox', { name: 'Логин' }), {
+			target: { value: 'poet' },
+		});
+
+		fireEvent.change(screen.getByRole('textbox', { name: 'Email' }), {
+			target: { value: 'poet@example.com' },
+		});
+
+		fireEvent.change(screen.getByLabelText('Пароль'), {
+			target: { value: 'strong-password' },
+		});
+
+		const confirmPassword = screen.getByLabelText('Подтвердите пароль');
+
+		fireEvent.change(confirmPassword, {
+			target: { value: 'different-password' },
+		});
+
 		fireEvent.click(screen.getByRole('button', { name: 'Зарегистрироваться' }));
 
-		expect(screen.getByRole('alert')).toHaveTextContent('Пароли не совпадают');
+		expect(screen.getByText('Пароли не совпадают')).toBeInTheDocument();
+		expect(confirmPassword).toHaveAttribute('aria-invalid', 'true');
 		expect(api.authenticate).not.toHaveBeenCalled();
 	});
 
