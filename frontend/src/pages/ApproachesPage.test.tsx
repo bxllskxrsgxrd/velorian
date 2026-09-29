@@ -156,4 +156,16 @@ describe('ApproachesPage', () => {
 		const titles = screen.getAllByRole('article').map((card) => card.querySelector('strong')?.textContent);
 		expect(titles).toEqual(['Шоу', 'Интервью']);
 	});
+
+	it('replaces name sorting with the shared activity sorting options', async () => {
+		renderPage();
+		await screen.findByText('Интервью', { selector: 'strong' });
+
+		fireEvent.click(screen.getByRole('button', { name: 'Сортировка' }));
+		expect(screen.queryByRole('button', { name: 'По названию' })).not.toBeInTheDocument();
+		fireEvent.click(screen.getByRole('button', { name: 'Сначала неактивные' }));
+
+		const titles = screen.getAllByRole('article').map((card) => card.querySelector('strong')?.textContent);
+		expect(titles).toEqual(['Шоу', 'Интервью']);
+	});
 });

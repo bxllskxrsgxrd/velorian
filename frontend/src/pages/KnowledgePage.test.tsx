@@ -629,6 +629,18 @@ describe('KnowledgePage', () => {
 		expect(reset).toBeDisabled();
 	});
 
+	it('sorts knowledge items by activity from the search controls', async () => {
+		renderKnowledge();
+
+		fireEvent.click(screen.getByRole('button', { name: 'Сортировка' }));
+		fireEvent.click(screen.getByRole('button', { name: 'Сначала активные' }));
+
+		expect(screen.getByLabelText('Текущий URL')).toHaveTextContent('/knowledge?sort=activity_desc');
+		await waitFor(() => {
+			expect(api.listKnowledge).toHaveBeenLastCalledWith(expect.objectContaining({ sort: 'activity_desc' }));
+		});
+	});
+
 	it('shows the stored rating in edit mode and saves the changed rating', async () => {
 		const stored = {
 			...item,

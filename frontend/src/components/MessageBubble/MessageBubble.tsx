@@ -1,9 +1,9 @@
-import { lazy, memo, Suspense } from 'react';
+import { lazy, memo, Suspense, useEffect, useRef, useState } from 'react';
 import { CHAT_MESSAGE_STATUSES } from '../../constants/chatMessageStatuses';
 import { CHAT_ROLES } from '../../constants/chatRoles';
 import type { ChatAttachment, ChatMessage } from '../../types/chat';
 import { SubmitLoadingIcon } from '../icons/SubmitLoadingIcon/SubmitLoadingIcon';
-import { CheckIcon, DocumentCheckIcon, DocumentIcon, EditIcon, TextIcon, UndoIcon } from '../icons/AppIcons';
+import { CheckIcon, CopyIcon, DocumentCheckIcon, DocumentIcon, EditIcon, TextIcon, UndoIcon } from '../icons/AppIcons';
 import { CustomSelect } from '../ui/CustomSelect/CustomSelect';
 import './_messageBubble.scss';
 import { MessageAttachment } from './MessageAttachment';
@@ -15,6 +15,19 @@ import { useMessageUiStore } from '../../stores/messageUiStore';
 import { Button } from '../ui/Button/Button';
 
 const AssistantMessageContent = lazy(() => import('./AssistantMessageContent'));
+
+async function copyToClipboard(value: string) {
+	if (navigator.clipboard?.writeText) return navigator.clipboard.writeText(value);
+	const textarea = document.createElement('textarea');
+	textarea.value = value;
+	textarea.style.position = 'fixed';
+	textarea.style.opacity = '0';
+	document.body.append(textarea);
+	textarea.select();
+	const copied = document.execCommand('copy');
+	textarea.remove();
+	if (!copied) throw new Error('Clipboard API is unavailable');
+}
 
 type MessageBubbleProps = {
 	message: ChatMessage;
@@ -49,7 +62,27 @@ function MessageBubbleComponent({
 	const finishEditing = useMessageUiStore((state) => state.finishEditing);
 	const setDraft = useMessageUiStore((state) => state.setDraft);
 	const setFileState = useMessageUiStore((state) => state.setFileState);
+	const [copied, setCopied] = useState(false);
+	const copyTimerRef = useRef<number | null>(null);
 	const isUser = message.role === CHAT_ROLES.USER;
+
+	useEffect(
+		() => () => {
+			if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+		},
+		[],
+	);
+
+	async function handleCopy() {
+		try {
+			await copyToClipboard(message.content);
+			setCopied(true);
+			if (copyTimerRef.current !== null) window.clearTimeout(copyTimerRef.current);
+			copyTimerRef.current = window.setTimeout(() => setCopied(false), 1800);
+		} catch {
+			setCopied(false);
+		}
+	}
 
 	const isPending = !isUser && message.status === CHAT_MESSAGE_STATUSES.PENDING && !message.content;
 	const isStreaming = !isUser && message.status === CHAT_MESSAGE_STATUSES.STREAMING;
@@ -321,7 +354,7 @@ function MessageBubbleComponent({
 					))}
 				</div>
 			)}
-			{isUser && !isEditing && (onEdit || (branch && branch.total > 1)) && (
+			{isUser && !isEditing && (hasText || onEdit || (branch && branch.total > 1)) && (
 				<div className="message__user-actions">
 					{branch && branch.total > 1 && (
 						<div className="message__branches">
@@ -340,6 +373,16 @@ function MessageBubbleComponent({
 								›
 							</button>
 						</div>
+					)}
+					{hasText && (
+						<button
+							type="button"
+							onClick={() => void handleCopy()}
+							aria-label={copied ? 'Скопировано' : 'Копировать сообщение'}
+							title={copied ? 'Скопировано' : 'Копировать сообщение'}
+						>
+							{copied ? <CheckIcon size={15} /> : <CopyIcon size={15} />}
+						</button>
 					)}
 					{onEdit && (
 						<button

@@ -799,6 +799,27 @@ def test_knowledge_rating_filters_sort_and_pagination(authenticated_client):
 		assert authenticated_client.patch(f"/api/knowledge/{second.json()['item']['id']}", json={"rating": invalid_rating}).status_code == 422
 
 
+def test_knowledge_activity_sort_and_pagination(authenticated_client):
+	for title in ("Активный 1", "Неактивный", "Активный 2"):
+		response = authenticated_client.post("/api/knowledge", json={"title": title, "content": title})
+		assert response.status_code == 200
+		if title == "Неактивный":
+			inactive_id = response.json()["item"]["id"]
+
+	assert authenticated_client.patch(f"/api/knowledge/{inactive_id}", json={"is_active": False}).status_code == 200
+	active_first = authenticated_client.get("/api/knowledge?sort=activity_desc").json()["items"]
+	inactive_first = authenticated_client.get("/api/knowledge?sort=activity_asc").json()["items"]
+	assert [item["isActive"] for item in active_first] == [True, True, False]
+	assert [item["isActive"] for item in inactive_first] == [False, True, True]
+
+	page_one = authenticated_client.get("/api/knowledge?sort=activity_desc&limit=2").json()
+	page_two = authenticated_client.get(
+		f"/api/knowledge?sort=activity_desc&limit=2&cursor={page_one['pageInfo']['nextCursor']}"
+	).json()
+	assert [item["isActive"] for item in page_one["items"]] == [True, True]
+	assert [item["isActive"] for item in page_two["items"]] == [False]
+
+
 def test_knowledge_search_handles_unicode_multiple_terms_and_literals(authenticated_client):
 	a = authenticated_client.post("/api/knowledge", json={"title": "Ёлочный ОФФЕР", "content": "Проверенный русский Текст"}).json()["item"]
 	authenticated_client.post("/api/knowledge", json={"title": "English Hooks", "content": "Curiosity angle"})

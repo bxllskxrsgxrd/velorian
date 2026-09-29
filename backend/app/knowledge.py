@@ -269,7 +269,7 @@ def list_knowledge_items(
 	is_active: bool | None = None,
 	min_rating: int | None = Query(default=None, ge=1, le=5),
 	unrated: bool = False,
-	sort: Literal["date_desc", "date_asc", "rating_desc", "rating_asc"] = "date_desc",
+	sort: Literal["date_desc", "date_asc", "rating_desc", "rating_asc", "activity_desc", "activity_asc"] = "date_desc",
 	limit: int = Query(default=20, ge=1, le=100),
 	cursor: str | None = Query(default=None, max_length=512),
 	user: User = Depends(get_current_user),
@@ -304,6 +304,8 @@ def list_knowledge_items(
 		"date_asc": (asc(KnowledgeItem.updated_at), asc(KnowledgeItem.id)),
 		"rating_desc": (desc(KnowledgeItem.rating).nullslast(), desc(KnowledgeItem.updated_at), desc(KnowledgeItem.id)),
 		"rating_asc": (asc(KnowledgeItem.rating).nullslast(), desc(KnowledgeItem.updated_at), desc(KnowledgeItem.id)),
+		"activity_desc": (desc(KnowledgeItem.is_active), desc(KnowledgeItem.updated_at), desc(KnowledgeItem.id)),
+		"activity_asc": (asc(KnowledgeItem.is_active), desc(KnowledgeItem.updated_at), desc(KnowledgeItem.id)),
 	}[sort]
 	if cursor:
 		try:
@@ -313,6 +315,9 @@ def list_knowledge_items(
 			cursor_updated = datetime.fromisoformat(decoded["updated"])
 			cursor_id = str(decoded["id"])
 			cursor_rating = decoded.get("rating")
+			cursor_is_active = decoded.get("isActive")
+			if sort.startswith("activity_") and not isinstance(cursor_is_active, bool):
+				raise ValueError
 		except (ValueError, TypeError, KeyError, json.JSONDecodeError, UnicodeDecodeError, binascii.Error):
 			raise AppError(422, "INVALID_CURSOR", "Некорректный курсор страницы")
 		date_desc_after = or_(KnowledgeItem.updated_at < cursor_updated, and_(KnowledgeItem.updated_at == cursor_updated, KnowledgeItem.id < cursor_id))
@@ -321,6 +326,18 @@ def list_knowledge_items(
 			statement = statement.where(date_desc_after)
 		elif sort == "date_asc":
 			statement = statement.where(date_asc_after)
+		elif sort == "activity_desc":
+			statement = statement.where(
+				or_(KnowledgeItem.is_active.is_(False), and_(KnowledgeItem.is_active.is_(True), date_desc_after))
+				if cursor_is_active
+				else and_(KnowledgeItem.is_active.is_(False), date_desc_after)
+			)
+		elif sort == "activity_asc":
+			statement = statement.where(
+				or_(KnowledgeItem.is_active.is_(True), and_(KnowledgeItem.is_active.is_(False), date_desc_after))
+				if not cursor_is_active
+				else and_(KnowledgeItem.is_active.is_(True), date_desc_after)
+			)
 		elif cursor_rating is None:
 			statement = statement.where(KnowledgeItem.rating.is_(None), date_desc_after)
 		else:
@@ -331,7 +348,7 @@ def list_knowledge_items(
 	items = items[:limit]
 	if has_more:
 		last = items[-1]
-		cursor_payload = json.dumps({"sort": sort, "updated": last.updated_at.isoformat(), "id": last.id, "rating": last.rating}, separators=(",", ":"))
+		cursor_payload = json.dumps({"sort": sort, "updated": last.updated_at.isoformat(), "id": last.id, "rating": last.rating, "isActive": last.is_active}, separators=(",", ":"))
 		next_cursor = base64.urlsafe_b64encode(cursor_payload.encode()).decode().rstrip("=")
 	else:
 		next_cursor = None

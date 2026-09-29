@@ -24,7 +24,7 @@ import { Button } from '../components/ui/Button/Button';
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor/MarkdownEditor'));
 
 type RatingFilter = 'all' | '5' | '4' | '3' | 'unrated';
-type SortMode = 'date_desc' | 'date_asc' | 'rating_desc' | 'rating_asc';
+type SortMode = 'date_desc' | 'date_asc' | 'rating_desc' | 'rating_asc' | 'activity_desc' | 'activity_asc';
 type FilePreviewState = { status: 'idle' | 'loading' | 'ready' | 'error'; content: string };
 type KnowledgeCardMenuState = { itemId: string; top: number; left: number };
 
@@ -898,6 +898,8 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 								{ label: 'Сначала старые', value: 'date_asc' },
 								{ label: 'Рейтинг: высокий', value: 'rating_desc' },
 								{ label: 'Рейтинг: низкий', value: 'rating_asc' },
+								{ label: 'Сначала активные', value: 'activity_desc' },
+								{ label: 'Сначала неактивные', value: 'activity_asc' },
 							].map((item) => (
 								<button
 									key={item.value}

@@ -17,7 +17,7 @@ import './_approaches.scss';
 import { Button } from '../components/ui/Button/Button';
 
 type ApproachCardMenuState = { itemId: string; top: number; left: number };
-type ApproachSortMode = 'name_asc' | 'rating_desc' | 'rating_asc';
+type ApproachSortMode = 'rating_desc' | 'rating_asc' | 'activity_desc' | 'activity_asc';
 type ApproachRatingFilter = 'all' | '5' | '4' | '3' | 'unrated';
 
 export function ApproachesPage() {
@@ -39,7 +39,7 @@ export function ApproachesPage() {
 	const [search, setSearch] = useState('');
 	const [activeFilter, setActiveFilter] = useState('all');
 	const [ratingFilter, setRatingFilter] = useState<ApproachRatingFilter>('all');
-	const [sort, setSort] = useState<ApproachSortMode>('name_asc');
+	const [sort, setSort] = useState<ApproachSortMode>('activity_desc');
 	const dropdownRef = useRef<HTMLElement>(null);
 	const cardMenuRef = useRef<HTMLDivElement>(null);
 	const cardCursorIndicatorRef = useRef<HTMLDivElement>(null);
@@ -58,8 +58,14 @@ export function ApproachesPage() {
 			if (ratingFilter !== 'all' && (item.rating == null || item.rating < Number(ratingFilter))) return false;
 			return true;
 		});
-		if (sort === 'name_asc') return filteredItems;
 		return [...filteredItems].sort((left, right) => {
+			if (sort === 'activity_desc' || sort === 'activity_asc') {
+				const activityDifference =
+					sort === 'activity_desc'
+						? Number(right.isActive) - Number(left.isActive)
+						: Number(left.isActive) - Number(right.isActive);
+				return activityDifference || Date.parse(right.updatedAt) - Date.parse(left.updatedAt);
+			}
 			if (left.rating == null) return right.rating == null ? 0 : 1;
 			if (right.rating == null) return -1;
 			const difference = sort === 'rating_desc' ? right.rating - left.rating : left.rating - right.rating;
@@ -338,9 +344,10 @@ export function ApproachesPage() {
 				{activeDropdown === 'sort' && (
 					<div className="knowledge-page__dropdown knowledge-page__dropdown--sort">
 						{[
-							{ value: 'name_asc' as const, label: 'По названию' },
 							{ value: 'rating_desc' as const, label: 'Рейтинг: высокий' },
 							{ value: 'rating_asc' as const, label: 'Рейтинг: низкий' },
+							{ value: 'activity_desc' as const, label: 'Сначала активные' },
+							{ value: 'activity_asc' as const, label: 'Сначала неактивные' },
 						].map((option) => (
 							<button
 								key={option.value}
