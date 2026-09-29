@@ -48,6 +48,7 @@ from .storage import build_storage_key, get_file_storage
 
 
 logger = logging.getLogger("velorian")
+ai_usage_logger = logging.getLogger("uvicorn.error")
 client = AsyncGroq(api_key=settings.groq_api_key, timeout=90.0) if settings.groq_api_key else None
 TRASH_RETENTION = timedelta(days=30)
 TRASH_CLEANUP_INTERVAL_SECONDS = 60
@@ -90,12 +91,16 @@ def _normalize_ai_usage(value) -> dict[str, int] | None:
 	}
 
 
-def _log_ai_usage(value) -> None:
+def _log_ai_usage(value, *, purpose: str, provider: str, model: str) -> None:
 	usage = _normalize_ai_usage(value)
 	if usage is None:
+		ai_usage_logger.warning("AI usage unavailable purpose=%s provider=%s model=%s", purpose, provider, model)
 		return
-	logger.info(
-		"AI usage: input_tokens=%s cached_tokens=%s output_tokens=%s",
+	ai_usage_logger.info(
+		"AI usage purpose=%s provider=%s model=%s input_tokens=%s cached_tokens=%s output_tokens=%s",
+		purpose,
+		provider,
+		model,
 		usage["input_tokens"],
 		usage["cached_tokens"],
 		usage["output_tokens"],
@@ -476,7 +481,7 @@ async def _generate_chat_title(first_message: str, fallback_source: str) -> str:
 		completion = await client.chat.completions.create(
 			**completion_options,
 		)
-		_log_ai_usage(completion)
+		_log_ai_usage(completion, purpose="title", provider="groq", model=settings.groq_model)
 		content = completion.choices[0].message.content if completion.choices else ""
 		title = _normalize_generated_title(content) if isinstance(content, str) else None
 		if title:
@@ -1183,7 +1188,7 @@ async def _extract_file(file_name: str, content_type: str, content: bytes) -> Ex
 			max_completion_tokens=1400,
 			stream=False,
 		)
-		_log_ai_usage(completion)
+		_log_ai_usage(completion, purpose="vision", provider="groq", model=settings.groq_vision_model)
 		vision_text = completion.choices[0].message.content if completion.choices else ""
 		if not isinstance(vision_text, str) or not vision_text.strip():
 			VISION_REQUESTS_TOTAL.labels("empty").inc()
@@ -1363,7 +1368,7 @@ async def _stream_ai_deltas(messages: list[dict[str, str]], user_id: str, web_se
 		delta = chunk.choices[0].delta.content if chunk.choices else None
 		if delta:
 			yield delta
-	_log_ai_usage(usage)
+	_log_ai_usage(usage, purpose="chat", provider="groq", model=settings.groq_model)
 
 
 @app.post(f"{settings.api_prefix}/conversations/{{conversation_id}}/stream", tags=["chat"])
