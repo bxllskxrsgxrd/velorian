@@ -1,4 +1,5 @@
 import asyncio
+import inspect
 import json
 import logging
 import mimetypes
@@ -57,6 +58,48 @@ AI_REQUESTS_TOTAL = Counter("velorian_ai_requests_total", "AI requests", ["statu
 AI_DURATION = Histogram("velorian_ai_request_duration_seconds", "AI request duration")
 AI_CONTEXT_RETRIES_TOTAL = Counter("velorian_ai_context_retries_total", "AI requests retried with compact context", ["status"])
 VISION_REQUESTS_TOTAL = Counter("velorian_vision_requests_total", "Vision preprocessing requests", ["status"])
+
+
+def _usage_value(value, field: str):
+	if isinstance(value, dict):
+		return value.get(field)
+	return getattr(value, field, None)
+
+
+def _supports_stream_options(create) -> bool:
+	try:
+		return "stream_options" in inspect.signature(create).parameters
+	except (TypeError, ValueError):
+		return False
+
+
+def _normalize_ai_usage(value) -> dict[str, int] | None:
+	usage = _usage_value(value, "usage")
+	if usage is None:
+		usage = _usage_value(_usage_value(value, "x_groq"), "usage")
+	usage_fields = ("input_tokens", "prompt_tokens", "output_tokens", "completion_tokens")
+	if usage is None and any(_usage_value(value, field) is not None for field in usage_fields):
+		usage = value
+	if usage is None:
+		return None
+	details = _usage_value(usage, "input_tokens_details") or _usage_value(usage, "prompt_tokens_details")
+	return {
+		"input_tokens": _usage_value(usage, "input_tokens") or _usage_value(usage, "prompt_tokens") or 0,
+		"cached_tokens": _usage_value(details, "cached_tokens") or _usage_value(usage, "cached_tokens") or 0,
+		"output_tokens": _usage_value(usage, "output_tokens") or _usage_value(usage, "completion_tokens") or 0,
+	}
+
+
+def _log_ai_usage(value) -> None:
+	usage = _normalize_ai_usage(value)
+	if usage is None:
+		return
+	logger.info(
+		"AI usage: input_tokens=%s cached_tokens=%s output_tokens=%s",
+		usage["input_tokens"],
+		usage["cached_tokens"],
+		usage["output_tokens"],
+	)
 
 
 class RegisterPayload(BaseModel):
@@ -433,6 +476,7 @@ async def _generate_chat_title(first_message: str, fallback_source: str) -> str:
 		completion = await client.chat.completions.create(
 			**completion_options,
 		)
+		_log_ai_usage(completion)
 		content = completion.choices[0].message.content if completion.choices else ""
 		title = _normalize_generated_title(content) if isinstance(content, str) else None
 		if title:
@@ -1139,6 +1183,7 @@ async def _extract_file(file_name: str, content_type: str, content: bytes) -> Ex
 			max_completion_tokens=1400,
 			stream=False,
 		)
+		_log_ai_usage(completion)
 		vision_text = completion.choices[0].message.content if completion.choices else ""
 		if not isinstance(vision_text, str) or not vision_text.strip():
 			VISION_REQUESTS_TOTAL.labels("empty").inc()
@@ -1307,11 +1352,18 @@ async def _stream_ai_deltas(messages: list[dict[str, str]], user_id: str, web_se
 	}
 	if web_search:
 		kwargs["tools"] = [{"type": "browser_search"}]
+	if _supports_stream_options(client.chat.completions.create):
+		kwargs["stream_options"] = {"include_usage": True}
 	stream = await client.chat.completions.create(**kwargs)
+	usage = None
 	async for chunk in stream:
+		chunk_usage = _normalize_ai_usage(chunk)
+		if chunk_usage is not None:
+			usage = chunk_usage
 		delta = chunk.choices[0].delta.content if chunk.choices else None
 		if delta:
 			yield delta
+	_log_ai_usage(usage)
 
 
 @app.post(f"{settings.api_prefix}/conversations/{{conversation_id}}/stream", tags=["chat"])
