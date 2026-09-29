@@ -314,6 +314,30 @@ LANGUAGE_EXTENSIONS = {
 	"xml": ".xml", "yaml": ".yaml", "yml": ".yml",
 }
 
+CHAT_TITLE_PROMPT = """Create a short sidebar-style title for the user's first message.
+
+Reduce the request to the shortest natural label that still identifies its core topic or issue. Do not retell the situation.
+
+Examples:
+"при hover request-map раскрывается вправо вместо влево" -> "Раскрытие request-map"
+"фильтр Источник не показывает оценённые ответы и файлы" -> "Ошибка фильтра Источник"
+"нужно сделать вход по email или логину через одно поле" -> "Вход по email или логину"
+"e2e тест авторизации падает после изменения поля входа" -> "Ошибка E2E теста авторизации"
+
+Use the user's language. Return only the title."""
+CHAT_TITLE_INPUT_LIMIT = 12_000
+GENERIC_CHAT_TITLES = {
+	"new chat",
+	"question",
+	"user question",
+	"help with a problem",
+	"need to fix",
+	"новый чат",
+	"вопрос",
+	"вопрос пользователя",
+	"помощь с проблемой",
+}
+
 
 def _clean_title(source: str) -> str:
 	title = re.sub(r"[`#*_~>\[\]{}]", " ", source)
@@ -355,6 +379,68 @@ def _clean_title(source: str) -> str:
 	if title:
 		title = title[0].upper() + title[1:]
 	return title or "Новый чат"
+
+
+def _normalize_generated_title(source: str) -> str | None:
+	title = re.sub(r"\s+", " ", source).strip()
+	if not title:
+		return None
+	title = re.sub(r"^#{1,6}\s*", "", title).strip()
+	for wrapper in ("**", "__", "`", "*", "_"):
+		if title.startswith(wrapper) and title.endswith(wrapper) and len(title) > len(wrapper) * 2:
+			title = title[len(wrapper):-len(wrapper)].strip()
+			break
+	for opening, closing in (("\"", "\""), ("'", "'"), ("«", "»"), ("“", "”"), ("„", "”"), ("‟", "”")):
+		if title.startswith(opening) and title.endswith(closing) and len(title) > 2:
+			title = title[1:-1].strip()
+			break
+	title = re.sub(r"^(?:chat\s+title|title|название|заголовок)\s*:\s*", "", title, flags=re.IGNORECASE)
+	title = re.sub(r"[\"«»“”„‟]", "", title)
+	title = re.sub(r"\s+", " ", title).strip(" .!?")
+	words = title.split()
+	if len(words) < 2:
+		return None
+	if title.casefold() in GENERIC_CHAT_TITLES:
+		return None
+	if len(title) > 160:
+		return None
+	return title
+
+
+def _chat_title_input(first_message: str) -> str:
+	if len(first_message) <= CHAT_TITLE_INPUT_LIMIT:
+		return first_message
+	half = CHAT_TITLE_INPUT_LIMIT // 2
+	return f"{first_message[:half]}\n…\n{first_message[-half:]}"
+
+
+async def _generate_chat_title(first_message: str, fallback_source: str) -> str:
+	if client is None or not first_message.strip():
+		return _clean_title(fallback_source)
+	try:
+		completion_options = {
+			"model": settings.groq_model,
+			"messages": [
+				{"role": "system", "content": CHAT_TITLE_PROMPT},
+				{"role": "user", "content": _chat_title_input(first_message)},
+			],
+			"stream": False,
+			"max_completion_tokens": 128,
+			"temperature": 0.2,
+		}
+		if settings.groq_model.startswith("openai/gpt-oss-"):
+			completion_options.update(reasoning_effort="low", include_reasoning=False)
+		completion = await client.chat.completions.create(
+			**completion_options,
+		)
+		content = completion.choices[0].message.content if completion.choices else ""
+		title = _normalize_generated_title(content) if isinstance(content, str) else None
+		if title:
+			return title
+		logger.warning("Semantic chat title generation returned unusable content; using fallback")
+	except Exception as error:
+		logger.warning("Semantic chat title generation failed; using fallback: error_type=%s", type(error).__name__)
+	return _clean_title(fallback_source)
 
 
 def _sanitize_markdown_headings(content: str) -> str:
@@ -1417,8 +1503,9 @@ async def stream_chat(
 			for position, content_chunk in enumerate(chunk_text(extracted.text)):
 				db.add(DocumentChunk(conversation_id=conversation.id, attachment_id=attachment.id, position=position, content=content_chunk))
 
-		if conversation.title == "Новый чат":
-			conversation.title = _clean_title(title_source or prompt or files[0].filename or "Новый чат")
+		if conversation.title == "Новый чат" and not any(message.role == "user" for message in branch_history):
+			fallback_source = title_source or prompt or files[0].filename or "Новый чат"
+			conversation.title = await _generate_chat_title(title_source, fallback_source)
 		conversation.updated_at = utc_now()
 		db.commit()
 		user_message = db.scalar(select(Message).options(selectinload(Message.attachments), selectinload(Message.ratings)).where(Message.id == user_message.id))

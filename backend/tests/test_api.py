@@ -7,6 +7,8 @@ from groq import APIStatusError
 
 class FakeCompletions:
 	async def create(self, **kwargs):
+		if not kwargs.get("stream", False):
+			return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=""))])
 		async def chunks():
 			for content in ("Привет", ", мир!"):
 				yield SimpleNamespace(
@@ -25,7 +27,8 @@ class RecordingCompletions(FakeCompletions):
 		self.calls: list[dict] = []
 
 	async def create(self, **kwargs):
-		self.calls.append(kwargs)
+		if kwargs.get("stream", False):
+			self.calls.append(kwargs)
 		return await super().create(**kwargs)
 
 
@@ -34,6 +37,8 @@ class FixedCompletions:
 		self.content = content
 
 	async def create(self, **kwargs):
+		if not kwargs.get("stream", False):
+			return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=""))])
 		async def chunks():
 			yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=self.content))])
 		return chunks()
@@ -41,6 +46,8 @@ class FixedCompletions:
 
 class ContextRejectingCompletions(RecordingCompletions):
 	async def create(self, **kwargs):
+		if not kwargs.get("stream", False):
+			return await FakeCompletions.create(self, **kwargs)
 		self.calls.append(kwargs)
 		if len(kwargs["messages"]) > 2:
 			request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
@@ -440,6 +447,51 @@ def test_automatic_title_is_short_and_has_no_emoji(authenticated_client, monkeyp
 	title = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["title"]
 	assert title == "Архитектура большого современного приложения"
 	assert len(title) <= 48
+
+
+def test_automatic_title_uses_semantic_summary_of_first_message(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	class SemanticTitleCompletions(FakeCompletions):
+		def __init__(self):
+			self.title_call = None
+
+		async def create(self, **kwargs):
+			if not kwargs.get("stream", False):
+				self.title_call = kwargs
+				return SimpleNamespace(choices=[SimpleNamespace(
+					message=SimpleNamespace(content='Заголовок: "Перевод промпта на английский."'),
+				)])
+			return await super().create(**kwargs)
+
+	completions = SemanticTitleCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Новый чат"}).json()["conversation"]["id"]
+	first_message = "переведи промпт на английский, не меняя формулировок и ничего не добавляя от себя"
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": first_message},
+	)
+
+	title = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["title"]
+	assert title == "Перевод промпта на английский"
+	assert completions.title_call["messages"][1] == {"role": "user", "content": first_message}
+	assert completions.title_call["max_completion_tokens"] == 32
+	assert completions.title_call["reasoning_effort"] == "low"
+	assert completions.title_call["include_reasoning"] is False
+	title_prompt = completions.title_call["messages"][0]["content"]
+	assert "short topic label" in title_prompt
+	assert "not a summary or sentence" in title_prompt
+	assert "compact noun phrase" in title_prompt
+	assert '"filter Source does not show rated items" -> "Ошибка фильтра Источник"' in title_prompt
+	assert "3–7" not in title_prompt
+
+
+def test_semantic_title_is_not_truncated_after_generation():
+	from app.main import _normalize_generated_title
+
+	title = "Login by email or login through one form"
+	assert _normalize_generated_title(title) == title
 
 
 def test_automatic_title_summarizes_code_request():
