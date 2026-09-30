@@ -391,7 +391,7 @@ LANGUAGE_EXTENSIONS = {
 	"xml": ".xml", "yaml": ".yaml", "yml": ".yml",
 }
 
-CHAT_TITLE_PROMPT = """Create a short sidebar-style title for the user's first message.
+TITLE_PROMPT = """Create a short sidebar-style title for the user's first message.
 
 Name the message's main topic or communicative intent. Do not repeat, quote, or briefly paraphrase the user's wording; produce a compact abstract label instead.
 
@@ -409,8 +409,8 @@ Examples:
 "e2e тест авторизации падает после изменения поля входа" -> "Ошибка E2E теста авторизации"
 
 Use the user's language. Return only the title."""
-CHAT_TITLE_PROMPT_VERSION = "title:v3"
-CHAT_TITLE_INPUT_LIMIT = 12_000
+TITLE_PROMPT_VERSION = "title:v3"
+TITLE_INPUT_LIMIT = 12_000
 GENERIC_CHAT_TITLES = {
 	"new chat",
 	"question",
@@ -489,11 +489,18 @@ def _normalize_generated_title(source: str) -> str | None:
 	return title
 
 
-def _chat_title_input(first_message: str) -> str:
-	if len(first_message) <= CHAT_TITLE_INPUT_LIMIT:
+def _title_input(first_message: str) -> str:
+	if len(first_message) <= TITLE_INPUT_LIMIT:
 		return first_message
-	half = CHAT_TITLE_INPUT_LIMIT // 2
+	half = TITLE_INPUT_LIMIT // 2
 	return f"{first_message[:half]}\n…\n{first_message[-half:]}"
+
+
+def _title_messages(first_message: str) -> list[dict[str, str]]:
+	return [
+		{"role": "system", "content": TITLE_PROMPT},
+		{"role": "user", "content": _title_input(first_message)},
+	]
 
 
 async def _generate_chat_title(first_message: str, fallback_source: str) -> str:
@@ -504,10 +511,7 @@ async def _generate_chat_title(first_message: str, fallback_source: str) -> str:
 		reasoning_effort: str | None = None
 		completion_options = {
 			"model": settings.groq_model,
-			"messages": [
-				{"role": "system", "content": CHAT_TITLE_PROMPT},
-				{"role": "user", "content": _chat_title_input(first_message)},
-			],
+			"messages": _title_messages(first_message),
 			"stream": False,
 			"max_completion_tokens": 128,
 			"temperature": 0.2,
@@ -533,7 +537,7 @@ async def _generate_chat_title(first_message: str, fallback_source: str) -> str:
 				task_type=task_type,
 				provider="groq",
 				model=settings.groq_model,
-				prompt_version=CHAT_TITLE_PROMPT_VERSION,
+				prompt_version=TITLE_PROMPT_VERSION,
 				reasoning_effort=reasoning_effort,
 				status=status,
 				latency_ms=(time.perf_counter() - started) * 1000,
