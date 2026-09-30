@@ -492,6 +492,7 @@ async def _generate_chat_title(first_message: str, fallback_source: str) -> str:
 		)
 		_log_ai_usage(completion, purpose="title", task_type=task_type, provider="groq", model=settings.groq_model)
 		content = completion.choices[0].message.content if completion.choices else ""
+		ai_usage_logger.info("Semantic chat title raw=%r", content)
 		title = _normalize_generated_title(content) if isinstance(content, str) else None
 		if title:
 			return title
