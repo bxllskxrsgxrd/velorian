@@ -50,6 +50,7 @@ from .storage import build_storage_key, get_file_storage
 logger = logging.getLogger("velorian")
 ai_usage_logger = logging.getLogger("uvicorn.error")
 client = AsyncGroq(api_key=settings.groq_api_key, timeout=90.0) if settings.groq_api_key else None
+AITaskType = Literal["chat", "title", "summary", "memory", "knowledge", "file_generation"]
 TRASH_RETENTION = timedelta(days=30)
 TRASH_CLEANUP_INTERVAL_SECONDS = 60
 
@@ -91,14 +92,21 @@ def _normalize_ai_usage(value) -> dict[str, int] | None:
 	}
 
 
-def _log_ai_usage(value, *, purpose: str, provider: str, model: str) -> None:
+def _log_ai_usage(value, *, purpose: str, task_type: AITaskType, provider: str, model: str) -> None:
 	usage = _normalize_ai_usage(value)
 	if usage is None:
-		ai_usage_logger.warning("AI usage unavailable purpose=%s provider=%s model=%s", purpose, provider, model)
+		ai_usage_logger.warning(
+			"AI usage unavailable purpose=%s task_type=%s provider=%s model=%s",
+			purpose,
+			task_type,
+			provider,
+			model,
+		)
 		return
 	ai_usage_logger.info(
-		"AI usage purpose=%s provider=%s model=%s input_tokens=%s cached_tokens=%s output_tokens=%s",
+		"AI usage purpose=%s task_type=%s provider=%s model=%s input_tokens=%s cached_tokens=%s output_tokens=%s",
 		purpose,
+		task_type,
 		provider,
 		model,
 		usage["input_tokens"],
@@ -466,6 +474,7 @@ async def _generate_chat_title(first_message: str, fallback_source: str) -> str:
 	if client is None or not first_message.strip():
 		return _clean_title(fallback_source)
 	try:
+		task_type: AITaskType = "title"
 		completion_options = {
 			"model": settings.groq_model,
 			"messages": [
@@ -481,7 +490,7 @@ async def _generate_chat_title(first_message: str, fallback_source: str) -> str:
 		completion = await client.chat.completions.create(
 			**completion_options,
 		)
-		_log_ai_usage(completion, purpose="title", provider="groq", model=settings.groq_model)
+		_log_ai_usage(completion, purpose="title", task_type=task_type, provider="groq", model=settings.groq_model)
 		content = completion.choices[0].message.content if completion.choices else ""
 		title = _normalize_generated_title(content) if isinstance(content, str) else None
 		if title:
@@ -1175,6 +1184,7 @@ async def _extract_file(file_name: str, content_type: str, content: bytes) -> Ex
 		return local_result
 
 	try:
+		task_type: AITaskType = "knowledge"
 		data_url = await asyncio.to_thread(image_to_data_url, content)
 		completion = await client.chat.completions.create(
 			model=settings.groq_vision_model,
@@ -1188,7 +1198,7 @@ async def _extract_file(file_name: str, content_type: str, content: bytes) -> Ex
 			max_completion_tokens=1400,
 			stream=False,
 		)
-		_log_ai_usage(completion, purpose="vision", provider="groq", model=settings.groq_vision_model)
+		_log_ai_usage(completion, purpose="vision", task_type=task_type, provider="groq", model=settings.groq_vision_model)
 		vision_text = completion.choices[0].message.content if completion.choices else ""
 		if not isinstance(vision_text, str) or not vision_text.strip():
 			VISION_REQUESTS_TOTAL.labels("empty").inc()
@@ -1273,7 +1283,7 @@ def _build_ai_messages(
 	prompt: str,
 	current_message: Message,
 	knowledge_search: bool = False,
-) -> tuple[list[dict[str, str]], KnowledgeRetrievalResult | None]:
+) -> tuple[list[dict[str, str]], KnowledgeRetrievalResult | None, bool]:
 	history = list(db.scalars(
 		select(Message)
 		.where(Message.conversation_id == conversation_id)
@@ -1344,10 +1354,16 @@ def _build_ai_messages(
 
 	if sum(estimate_tokens(item["content"]) for item in messages) > settings.max_input_tokens:
 		raise AppError(413, "CONTEXT_TOO_LARGE", "Контекст диалога превышает допустимый лимит")
-	return messages, knowledge_result
+	return messages, knowledge_result, bool(chunks) or use_knowledge
 
 
-async def _stream_ai_deltas(messages: list[dict[str, str]], user_id: str, web_search: bool) -> AsyncIterator[str]:
+async def _stream_ai_deltas(
+	messages: list[dict[str, str]],
+	user_id: str,
+	web_search: bool,
+	*,
+	task_type: AITaskType,
+) -> AsyncIterator[str]:
 	kwargs = {
 		"model": settings.groq_model,
 		"messages": messages,
@@ -1368,7 +1384,7 @@ async def _stream_ai_deltas(messages: list[dict[str, str]], user_id: str, web_se
 		delta = chunk.choices[0].delta.content if chunk.choices else None
 		if delta:
 			yield delta
-	_log_ai_usage(usage, purpose="chat", provider="groq", model=settings.groq_model)
+	_log_ai_usage(usage, purpose="chat", task_type=task_type, provider="groq", model=settings.groq_model)
 
 
 @app.post(f"{settings.api_prefix}/conversations/{{conversation_id}}/stream", tags=["chat"])
@@ -1578,7 +1594,7 @@ async def stream_chat(
 	conversation.updated_at = utc_now()
 	db.commit()
 
-	ai_messages, knowledge_result = _build_ai_messages(
+	ai_messages, knowledge_result, uses_knowledge_context = _build_ai_messages(
 		db,
 		conversation.id,
 		user.id,
@@ -1595,6 +1611,11 @@ async def stream_chat(
 			for item in knowledge_result.items
 		]
 		db.commit()
+	task_type: AITaskType = (
+		"file_generation" if FILE_REQUEST_PATTERN.search(prompt)
+		else "knowledge" if web_search or uses_knowledge_context
+		else "chat"
+	)
 	request_id = _request_id(request)
 	user_payload = _message_payload(user_message)
 	assistant_id = assistant_message.id
@@ -1613,7 +1634,7 @@ async def stream_chat(
 		)
 		try:
 			try:
-				async for delta in _stream_ai_deltas(ai_messages, user.id, web_search):
+				async for delta in _stream_ai_deltas(ai_messages, user.id, web_search, task_type=task_type):
 					answer_parts.append(delta)
 					yield _event("delta", content=delta)
 			except Exception as error:
@@ -1628,7 +1649,7 @@ async def stream_chat(
 				)
 				AI_CONTEXT_RETRIES_TOTAL.labels("started").inc()
 				try:
-					async for delta in _stream_ai_deltas(compact_messages, user.id, web_search):
+					async for delta in _stream_ai_deltas(compact_messages, user.id, web_search, task_type=task_type):
 						answer_parts.append(delta)
 						yield _event("delta", content=delta)
 				except Exception:
