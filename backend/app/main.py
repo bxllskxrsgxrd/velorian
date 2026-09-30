@@ -92,23 +92,37 @@ def _normalize_ai_usage(value) -> dict[str, int] | None:
 	}
 
 
-def _log_ai_usage(value, *, purpose: str, task_type: AITaskType, provider: str, model: str) -> None:
+def _log_ai_usage(
+	value,
+	*,
+	purpose: str,
+	task_type: AITaskType,
+	provider: str,
+	model: str,
+	prompt_version: str,
+	reasoning_effort: str | None,
+) -> None:
 	usage = _normalize_ai_usage(value)
+	reasoning_effort_value = reasoning_effort or "none"
 	if usage is None:
 		ai_usage_logger.warning(
-			"AI usage unavailable purpose=%s task_type=%s provider=%s model=%s",
+			"AI usage unavailable purpose=%s task_type=%s provider=%s model=%s prompt_version=%s reasoning_effort=%s",
 			purpose,
 			task_type,
 			provider,
 			model,
+			prompt_version,
+			reasoning_effort_value,
 		)
 		return
 	ai_usage_logger.info(
-		"AI usage purpose=%s task_type=%s provider=%s model=%s input_tokens=%s cached_tokens=%s output_tokens=%s",
+		"AI usage purpose=%s task_type=%s provider=%s model=%s prompt_version=%s reasoning_effort=%s input_tokens=%s cached_tokens=%s output_tokens=%s",
 		purpose,
 		task_type,
 		provider,
 		model,
+		prompt_version,
+		reasoning_effort_value,
 		usage["input_tokens"],
 		usage["cached_tokens"],
 		usage["output_tokens"],
@@ -388,6 +402,7 @@ Examples:
 "e2e тест авторизации падает после изменения поля входа" -> "Ошибка E2E теста авторизации"
 
 Use the user's language. Return only the title."""
+CHAT_TITLE_PROMPT_VERSION = "title:v3"
 CHAT_TITLE_INPUT_LIMIT = 12_000
 GENERIC_CHAT_TITLES = {
 	"new chat",
@@ -479,6 +494,7 @@ async def _generate_chat_title(first_message: str, fallback_source: str) -> str:
 		return _clean_title(fallback_source)
 	try:
 		task_type: AITaskType = "title"
+		reasoning_effort: str | None = None
 		completion_options = {
 			"model": settings.groq_model,
 			"messages": [
@@ -490,11 +506,20 @@ async def _generate_chat_title(first_message: str, fallback_source: str) -> str:
 			"temperature": 0.2,
 		}
 		if settings.groq_model.startswith("openai/gpt-oss-"):
-			completion_options.update(reasoning_effort="low", include_reasoning=False)
+			reasoning_effort = "low"
+			completion_options.update(reasoning_effort=reasoning_effort, include_reasoning=False)
 		completion = await client.chat.completions.create(
 			**completion_options,
 		)
-		_log_ai_usage(completion, purpose="title", task_type=task_type, provider="groq", model=settings.groq_model)
+		_log_ai_usage(
+			completion,
+			purpose="title",
+			task_type=task_type,
+			provider="groq",
+			model=settings.groq_model,
+			prompt_version=CHAT_TITLE_PROMPT_VERSION,
+			reasoning_effort=reasoning_effort,
+		)
 		content = completion.choices[0].message.content if completion.choices else ""
 		ai_usage_logger.info("Semantic chat title raw=%r", content)
 		title = _normalize_generated_title(content) if isinstance(content, str) else None
@@ -1190,6 +1215,7 @@ async def _extract_file(file_name: str, content_type: str, content: bytes) -> Ex
 
 	try:
 		task_type: AITaskType = "knowledge"
+		prompt_version = "vision:v1"
 		data_url = await asyncio.to_thread(image_to_data_url, content)
 		completion = await client.chat.completions.create(
 			model=settings.groq_vision_model,
@@ -1203,7 +1229,15 @@ async def _extract_file(file_name: str, content_type: str, content: bytes) -> Ex
 			max_completion_tokens=1400,
 			stream=False,
 		)
-		_log_ai_usage(completion, purpose="vision", task_type=task_type, provider="groq", model=settings.groq_vision_model)
+		_log_ai_usage(
+			completion,
+			purpose="vision",
+			task_type=task_type,
+			provider="groq",
+			model=settings.groq_vision_model,
+			prompt_version=prompt_version,
+			reasoning_effort=None,
+		)
 		vision_text = completion.choices[0].message.content if completion.choices else ""
 		if not isinstance(vision_text, str) or not vision_text.strip():
 			VISION_REQUESTS_TOTAL.labels("empty").inc()
@@ -1368,6 +1402,7 @@ async def _stream_ai_deltas(
 	web_search: bool,
 	*,
 	task_type: AITaskType,
+	prompt_version: str,
 ) -> AsyncIterator[str]:
 	kwargs = {
 		"model": settings.groq_model,
@@ -1389,7 +1424,15 @@ async def _stream_ai_deltas(
 		delta = chunk.choices[0].delta.content if chunk.choices else None
 		if delta:
 			yield delta
-	_log_ai_usage(usage, purpose="chat", task_type=task_type, provider="groq", model=settings.groq_model)
+	_log_ai_usage(
+		usage,
+		purpose="chat",
+		task_type=task_type,
+		provider="groq",
+		model=settings.groq_model,
+		prompt_version=prompt_version,
+		reasoning_effort=None,
+	)
 
 
 @app.post(f"{settings.api_prefix}/conversations/{{conversation_id}}/stream", tags=["chat"])
@@ -1616,11 +1659,15 @@ async def stream_chat(
 			for item in knowledge_result.items
 		]
 		db.commit()
-	task_type: AITaskType = (
-		"file_generation" if FILE_REQUEST_PATTERN.search(prompt)
-		else "knowledge" if web_search or uses_knowledge_context
-		else "chat"
-	)
+	if FILE_REQUEST_PATTERN.search(prompt):
+		task_type: AITaskType = "file_generation"
+		prompt_version = "file_generation:v1"
+	elif web_search or uses_knowledge_context:
+		task_type = "knowledge"
+		prompt_version = "knowledge:v1"
+	else:
+		task_type = "chat"
+		prompt_version = "chat:v1"
 	request_id = _request_id(request)
 	user_payload = _message_payload(user_message)
 	assistant_id = assistant_message.id
@@ -1639,7 +1686,13 @@ async def stream_chat(
 		)
 		try:
 			try:
-				async for delta in _stream_ai_deltas(ai_messages, user.id, web_search, task_type=task_type):
+				async for delta in _stream_ai_deltas(
+					ai_messages,
+					user.id,
+					web_search,
+					task_type=task_type,
+					prompt_version=prompt_version,
+				):
 					answer_parts.append(delta)
 					yield _event("delta", content=delta)
 			except Exception as error:
@@ -1654,7 +1707,13 @@ async def stream_chat(
 				)
 				AI_CONTEXT_RETRIES_TOTAL.labels("started").inc()
 				try:
-					async for delta in _stream_ai_deltas(compact_messages, user.id, web_search, task_type=task_type):
+					async for delta in _stream_ai_deltas(
+						compact_messages,
+						user.id,
+						web_search,
+						task_type=task_type,
+						prompt_version=prompt_version,
+					):
 						answer_parts.append(delta)
 						yield _event("delta", content=delta)
 				except Exception:
