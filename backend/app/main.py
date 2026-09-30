@@ -372,9 +372,16 @@ LANGUAGE_EXTENSIONS = {
 
 CHAT_TITLE_PROMPT = """Create a short sidebar-style title for the user's first message.
 
-Reduce the request to the shortest natural label that still identifies its core topic or issue. Do not retell the situation.
+Name the message's main topic or communicative intent. Do not repeat, quote, or briefly paraphrase the user's wording; produce a compact abstract label instead.
+
+For greetings, thanks, confirmations, and other conversational messages, name the intent rather than echoing the message.
 
 Examples:
+"хай мэн" -> "Приветствие"
+"спасибо" -> "Благодарность"
+"привет, как дела?" -> "Приветствие"
+"что умеешь?" -> "Возможности ассистента"
+"как войти по логину" -> "Вход по логину"
 "при hover request-map раскрывается вправо вместо влево" -> "Раскрытие request-map"
 "фильтр Источник не показывает оценённые ответы и файлы" -> "Ошибка фильтра Источник"
 "нужно сделать вход по email или логину через одно поле" -> "Вход по email или логину"
@@ -453,9 +460,6 @@ def _normalize_generated_title(source: str) -> str | None:
 	title = re.sub(r"^(?:chat\s+title|title|название|заголовок)\s*:\s*", "", title, flags=re.IGNORECASE)
 	title = re.sub(r"[\"«»“”„‟]", "", title)
 	title = re.sub(r"\s+", " ", title).strip(" .!?")
-	words = title.split()
-	if len(words) < 2:
-		return None
 	if title.casefold() in GENERIC_CHAT_TITLES:
 		return None
 	if len(title) > 160:
