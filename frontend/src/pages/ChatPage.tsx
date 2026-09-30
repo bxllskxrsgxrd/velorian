@@ -97,6 +97,14 @@ export function ChatPage() {
 	}, [activeConversationId]);
 
 	useEffect(() => {
+		const frameId = requestAnimationFrame(() => {
+			const textarea = chatPageRef.current?.querySelector<HTMLTextAreaElement>('textarea[aria-label="Введите запрос"]');
+			if (!textarea?.disabled) textarea.focus({ preventScroll: true });
+		});
+		return () => cancelAnimationFrame(frameId);
+	}, [routeConversationId]);
+
+	useEffect(() => {
 		if (!activeConversationId) return;
 		if (locallyCreatedConversationIdsRef.current.delete(activeConversationId)) {
 			setPageError('');

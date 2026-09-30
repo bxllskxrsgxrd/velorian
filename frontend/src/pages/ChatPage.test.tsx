@@ -235,6 +235,7 @@ describe('ChatPage lazy conversation creation', () => {
 	it('keeps /chat/new virtual and creates exactly one conversation on the first submit', async () => {
 		renderChatPage('/chat/new');
 		const prompt = await screen.findByRole('textbox', { name: /введите запрос/i });
+		await waitFor(() => expect(prompt).toHaveFocus());
 		expect(api.createConversation).not.toHaveBeenCalled();
 		expect(api.getConversation).not.toHaveBeenCalled();
 		fireEvent.change(prompt, { target: { value: 'Первый запрос' } });
@@ -247,6 +248,37 @@ describe('ChatPage lazy conversation creation', () => {
 		expect(api.streamChat).toHaveBeenCalledWith(
 			expect.objectContaining({ conversationId: 'created-on-send', prompt: 'Первый запрос' }),
 		);
+	});
+
+	it('restores prompt focus across chat routes and repeated new-chat actions', async () => {
+		const secondConversation = { ...conversation, id: 'conversation-2', title: 'Второй чат' };
+		api.listConversations.mockResolvedValue([conversation, secondConversation]);
+		api.getConversation.mockImplementation(async (id: string) => ({
+			...(id === conversation.id ? conversation : secondConversation),
+			messages: [],
+		}));
+		renderChatPage();
+		const prompt = await screen.findByRole('textbox', { name: /введите запрос/i });
+		await waitFor(() => expect(prompt).toHaveFocus());
+
+		const newChatButton = screen.getByRole('button', { name: 'Новый чат' });
+		newChatButton.focus();
+		fireEvent.click(newChatButton);
+		await waitFor(() => expect(prompt).toHaveFocus());
+
+		newChatButton.focus();
+		fireEvent.click(newChatButton);
+		await waitFor(() => expect(prompt).toHaveFocus());
+
+		const secondChatButton = await screen.findByRole('button', { name: secondConversation.title });
+		secondChatButton.focus();
+		fireEvent.click(secondChatButton);
+		await waitFor(() => expect(prompt).toHaveFocus());
+
+		const firstChatButton = screen.getByRole('button', { name: conversation.title });
+		firstChatButton.focus();
+		fireEvent.click(firstChatButton);
+		await waitFor(() => expect(prompt).toHaveFocus());
 	});
 
 	it('restores the prompt when creating the first conversation fails', async () => {

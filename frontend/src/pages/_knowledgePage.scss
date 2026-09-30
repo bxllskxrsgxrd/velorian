@@ -24,11 +24,11 @@
 		border-color: var(--color-text-secondary);
 	}
 
-	&:focus,
-	&:focus-visible {
-		border-color: var(--color-accent);
-		box-shadow: var(--focus-ring);
-	}
+	// &:focus,
+	// &:focus-visible {
+	// 	border-color: var(--color-accent);
+	// 	box-shadow: var(--focus-ring);
+	// }
 
 	&:disabled {
 		cursor: not-allowed;
@@ -109,10 +109,10 @@
 		border-color: var(--color-text-secondary);
 	}
 
-	&:focus-within {
-		border-color: var(--color-accent);
-		box-shadow: var(--focus-ring);
-	}
+	// &:focus-within {
+	// 	border-color: var(--color-accent);
+	// 	box-shadow: var(--focus-ring);
+	// }
 }
 
 .knowledge-page__search-icon {

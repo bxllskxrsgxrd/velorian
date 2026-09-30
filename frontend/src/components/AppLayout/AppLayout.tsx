@@ -61,6 +61,10 @@ export function AppLayout({ user, onLogout }: { user: AuthUser; onLogout: () => 
 		resetPrompt();
 		setSidebarOpen(false);
 		navigate('/chat/new');
+		requestAnimationFrame(() => {
+			const textarea = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Введите запрос"]');
+			if (!textarea?.disabled) textarea.focus({ preventScroll: true });
+		});
 	}
 
 	async function handleDelete(id: string) {

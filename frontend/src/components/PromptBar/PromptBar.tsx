@@ -105,8 +105,15 @@ export function PromptBar({
 		}
 	}
 
+	function handlePromptBarClick(event: React.MouseEvent<HTMLFormElement>) {
+		if (!(event.target instanceof Element)) return;
+		if (event.target.closest('textarea, .prompt-bar__actions, .prompt-bar__send, .prompt-bar__attachments, .prompt-bar__error')) return;
+		const textarea = event.currentTarget.querySelector<HTMLTextAreaElement>('textarea[aria-label="Введите запрос"]');
+		if (!textarea?.disabled) textarea.focus({ preventScroll: true });
+	}
+
 	return (
-		<form className={promptBarClassName} onSubmit={handleSubmit}>
+		<form className={promptBarClassName} onClick={handlePromptBarClick} onSubmit={handleSubmit}>
 			{files.length > 0 && (
 				<div className="prompt-bar__attachments">
 					{files.map((file, index) => (
