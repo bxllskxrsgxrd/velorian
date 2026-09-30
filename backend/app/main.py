@@ -51,6 +51,7 @@ logger = logging.getLogger("velorian")
 ai_usage_logger = logging.getLogger("uvicorn.error")
 client = AsyncGroq(api_key=settings.groq_api_key, timeout=90.0) if settings.groq_api_key else None
 AITaskType = Literal["chat", "title", "summary", "memory", "knowledge", "file_generation"]
+AIInteractionStatus = Literal["success", "error", "cancelled"]
 TRASH_RETENTION = timedelta(days=30)
 TRASH_CLEANUP_INTERVAL_SECONDS = 60
 
@@ -101,28 +102,34 @@ def _log_ai_usage(
 	model: str,
 	prompt_version: str,
 	reasoning_effort: str | None,
+	status: AIInteractionStatus,
+	latency_ms: float,
 ) -> None:
 	usage = _normalize_ai_usage(value)
 	reasoning_effort_value = reasoning_effort or "none"
 	if usage is None:
 		ai_usage_logger.warning(
-			"AI usage unavailable purpose=%s task_type=%s provider=%s model=%s prompt_version=%s reasoning_effort=%s",
+			"AI usage unavailable purpose=%s task_type=%s provider=%s model=%s prompt_version=%s reasoning_effort=%s status=%s latency_ms=%.2f",
 			purpose,
 			task_type,
 			provider,
 			model,
 			prompt_version,
 			reasoning_effort_value,
+			status,
+			latency_ms,
 		)
 		return
 	ai_usage_logger.info(
-		"AI usage purpose=%s task_type=%s provider=%s model=%s prompt_version=%s reasoning_effort=%s input_tokens=%s cached_tokens=%s output_tokens=%s",
+		"AI usage purpose=%s task_type=%s provider=%s model=%s prompt_version=%s reasoning_effort=%s status=%s latency_ms=%.2f input_tokens=%s cached_tokens=%s output_tokens=%s",
 		purpose,
 		task_type,
 		provider,
 		model,
 		prompt_version,
 		reasoning_effort_value,
+		status,
+		latency_ms,
 		usage["input_tokens"],
 		usage["cached_tokens"],
 		usage["output_tokens"],
@@ -508,18 +515,29 @@ async def _generate_chat_title(first_message: str, fallback_source: str) -> str:
 		if settings.groq_model.startswith("openai/gpt-oss-"):
 			reasoning_effort = "low"
 			completion_options.update(reasoning_effort=reasoning_effort, include_reasoning=False)
-		completion = await client.chat.completions.create(
-			**completion_options,
-		)
-		_log_ai_usage(
-			completion,
-			purpose="title",
-			task_type=task_type,
-			provider="groq",
-			model=settings.groq_model,
-			prompt_version=CHAT_TITLE_PROMPT_VERSION,
-			reasoning_effort=reasoning_effort,
-		)
+		started = time.perf_counter()
+		completion = None
+		status: AIInteractionStatus = "error"
+		try:
+			completion = await client.chat.completions.create(
+				**completion_options,
+			)
+			status = "success"
+		except asyncio.CancelledError:
+			status = "cancelled"
+			raise
+		finally:
+			_log_ai_usage(
+				completion,
+				purpose="title",
+				task_type=task_type,
+				provider="groq",
+				model=settings.groq_model,
+				prompt_version=CHAT_TITLE_PROMPT_VERSION,
+				reasoning_effort=reasoning_effort,
+				status=status,
+				latency_ms=(time.perf_counter() - started) * 1000,
+			)
 		content = completion.choices[0].message.content if completion.choices else ""
 		ai_usage_logger.info("Semantic chat title raw=%r", content)
 		title = _normalize_generated_title(content) if isinstance(content, str) else None
@@ -1217,27 +1235,38 @@ async def _extract_file(file_name: str, content_type: str, content: bytes) -> Ex
 		task_type: AITaskType = "knowledge"
 		prompt_version = "vision:v1"
 		data_url = await asyncio.to_thread(image_to_data_url, content)
-		completion = await client.chat.completions.create(
-			model=settings.groq_vision_model,
-			messages=[{
-				"role": "user",
-				"content": [
-					{"type": "text", "text": "Подробно опиши изображение на русском языке. Извлеки весь читаемый текст и важные факты, чтобы описание можно было использовать для поиска по документам."},
-					{"type": "image_url", "image_url": {"url": data_url}},
-				],
-			}],
-			max_completion_tokens=1400,
-			stream=False,
-		)
-		_log_ai_usage(
-			completion,
-			purpose="vision",
-			task_type=task_type,
-			provider="groq",
-			model=settings.groq_vision_model,
-			prompt_version=prompt_version,
-			reasoning_effort=None,
-		)
+		started = time.perf_counter()
+		completion = None
+		status: AIInteractionStatus = "error"
+		try:
+			completion = await client.chat.completions.create(
+				model=settings.groq_vision_model,
+				messages=[{
+					"role": "user",
+					"content": [
+						{"type": "text", "text": "Подробно опиши изображение на русском языке. Извлеки весь читаемый текст и важные факты, чтобы описание можно было использовать для поиска по документам."},
+						{"type": "image_url", "image_url": {"url": data_url}},
+					],
+				}],
+				max_completion_tokens=1400,
+				stream=False,
+			)
+			status = "success"
+		except asyncio.CancelledError:
+			status = "cancelled"
+			raise
+		finally:
+			_log_ai_usage(
+				completion,
+				purpose="vision",
+				task_type=task_type,
+				provider="groq",
+				model=settings.groq_vision_model,
+				prompt_version=prompt_version,
+				reasoning_effort=None,
+				status=status,
+				latency_ms=(time.perf_counter() - started) * 1000,
+			)
 		vision_text = completion.choices[0].message.content if completion.choices else ""
 		if not isinstance(vision_text, str) or not vision_text.strip():
 			VISION_REQUESTS_TOTAL.labels("empty").inc()
@@ -1415,24 +1444,34 @@ async def _stream_ai_deltas(
 		kwargs["tools"] = [{"type": "browser_search"}]
 	if _supports_stream_options(client.chat.completions.create):
 		kwargs["stream_options"] = {"include_usage": True}
-	stream = await client.chat.completions.create(**kwargs)
+	started = time.perf_counter()
 	usage = None
-	async for chunk in stream:
-		chunk_usage = _normalize_ai_usage(chunk)
-		if chunk_usage is not None:
-			usage = chunk_usage
-		delta = chunk.choices[0].delta.content if chunk.choices else None
-		if delta:
-			yield delta
-	_log_ai_usage(
-		usage,
-		purpose="chat",
-		task_type=task_type,
-		provider="groq",
-		model=settings.groq_model,
-		prompt_version=prompt_version,
-		reasoning_effort=None,
-	)
+	status: AIInteractionStatus = "error"
+	try:
+		stream = await client.chat.completions.create(**kwargs)
+		async for chunk in stream:
+			chunk_usage = _normalize_ai_usage(chunk)
+			if chunk_usage is not None:
+				usage = chunk_usage
+			delta = chunk.choices[0].delta.content if chunk.choices else None
+			if delta:
+				yield delta
+		status = "success"
+	except (asyncio.CancelledError, GeneratorExit):
+		status = "cancelled"
+		raise
+	finally:
+		_log_ai_usage(
+			usage,
+			purpose="chat",
+			task_type=task_type,
+			provider="groq",
+			model=settings.groq_model,
+			prompt_version=prompt_version,
+			reasoning_effort=None,
+			status=status,
+			latency_ms=(time.perf_counter() - started) * 1000,
+		)
 
 
 @app.post(f"{settings.api_prefix}/conversations/{{conversation_id}}/stream", tags=["chat"])
