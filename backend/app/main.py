@@ -393,23 +393,22 @@ LANGUAGE_EXTENSIONS = {
 
 TITLE_PROMPT = """Create a short sidebar-style title for the user's first message.
 
-Name the message's main topic or communicative intent. Do not repeat, quote, or briefly paraphrase the user's wording; produce a compact abstract label instead.
+Name the underlying problem, function, or communicative intent—not the wording of the request. After identifying it, remove causes, circumstances, symptoms, and consequences whenever the title remains unambiguous. Prefer a short problem or function category to a detailed description of the specific case.
 
-For greetings, thanks, confirmations, and other conversational messages, name the intent rather than echoing the message.
+Do not invent a technical cause or failure mechanism unless the user explicitly established it. Do not merely quote, retell, or briefly paraphrase the message.
+
+For greetings, thanks, confirmations, and other conversational messages, use an abstract intent label rather than echoing the message. Semantically equivalent concise titles are acceptable; do not force a specific wording.
 
 Examples:
 "хай мэн" -> "Приветствие"
 "спасибо" -> "Благодарность"
-"привет, как дела?" -> "Приветствие"
 "что умеешь?" -> "Возможности ассистента"
-"как войти по логину" -> "Вход по логину"
-"при hover request-map раскрывается вправо вместо влево" -> "Раскрытие request-map"
-"фильтр Источник не показывает оценённые ответы и файлы" -> "Ошибка фильтра Источник"
-"нужно сделать вход по email или логину через одно поле" -> "Вход по email или логину"
-"e2e тест авторизации падает после изменения поля входа" -> "Ошибка E2E теста авторизации"
+"при редактировании сообщения новая ветка почему-то получает сообщения из соседней ветки" -> "Утечка контекста между ветками"
+"после перехода на /chat/123 напрямую вместо диалога открывается пустая страница" -> "Пустая страница при открытии чата"
+"когда открываю новый чат, курсор не появляется в textarea и сначала приходится кликать мышкой" -> "Автофокус нового чата"
 
 Use the user's language. Return only the title."""
-TITLE_PROMPT_VERSION = "title:v3"
+TITLE_PROMPT_VERSION = "title:v4"
 TITLE_INPUT_LIMIT = 12_000
 GENERIC_CHAT_TITLES = {
 	"new chat",
