@@ -42,6 +42,24 @@ describe('PromptBar web search', () => {
 		await waitFor(() => expect(textarea.closest('form')).toHaveClass('prompt-bar--multiline'));
 	});
 
+	it('keeps the multiline layout until the textarea is fully cleared', async () => {
+		renderPromptBar();
+		const textarea = screen.getByRole('textbox');
+		const form = textarea.closest('form');
+
+		fireEvent.change(textarea, { target: { value: 'первая строка\nвторая строка' } });
+		await waitFor(() => expect(form).toHaveClass('prompt-bar--multiline'));
+
+		fireEvent.change(textarea, { target: { value: 'короткий текст' } });
+		expect(form).toHaveClass('prompt-bar--multiline');
+
+		fireEvent.change(textarea, { target: { value: '' } });
+		await waitFor(() => expect(form).not.toHaveClass('prompt-bar--multiline'));
+
+		fireEvent.change(textarea, { target: { value: 'новый текст' } });
+		expect(form).not.toHaveClass('prompt-bar--multiline');
+	});
+
 	it('focuses the textarea from free prompt-bar space without intercepting action buttons', () => {
 		renderPromptBar();
 		const textarea = screen.getByRole('textbox');

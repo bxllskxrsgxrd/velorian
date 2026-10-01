@@ -158,9 +158,6 @@
 	}
 
 	&__input-container {
-		--textarea-leading-inset: 40px;
-		--textarea-trailing-inset: 40px;
-
 		width: 100%;
 
 		display: grid;
@@ -231,11 +228,6 @@
 				'actions . send';
 			row-gap: 8px;
 			align-items: center;
-		}
-
-		.resizeTextarea {
-			padding-left: var(--textarea-leading-inset);
-			padding-right: var(--textarea-trailing-inset);
 		}
 	}
 
