@@ -35,10 +35,12 @@ class RecordingCompletions(FakeCompletions):
 class FixedCompletions:
 	def __init__(self, content: str):
 		self.content = content
+		self.calls: list[dict] = []
 
 	async def create(self, **kwargs):
 		if not kwargs.get("stream", False):
 			return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=""))])
+		self.calls.append(kwargs)
 		async def chunks():
 			yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=self.content))])
 		return chunks()
@@ -403,7 +405,8 @@ def test_generated_file_is_attached_and_downloadable(authenticated_client, monke
 	import app.main as main_module
 
 	answer = "```file:hello.py\nprint('Velorian')\n```\n\nФайл готов."
-	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(answer)))
+	completions = FixedCompletions(answer)
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Новый чат"}).json()["conversation"]["id"]
 	response = authenticated_client.post(
 		f"/api/conversations/{conversation_id}/stream",
@@ -418,13 +421,15 @@ def test_generated_file_is_attached_and_downloadable(authenticated_client, monke
 	assert download.status_code == 200
 	assert download.content == b"print('Velorian')"
 	assert "attachment" in download.headers["content-disposition"]
+	assert completions.calls[0]["messages"][0]["content"] == main_module.FILE_GENERATION_PROMPT
 
 
 def test_code_request_does_not_create_file_without_explicit_file_intent(authenticated_client, monkeypatch):
 	import app.main as main_module
 
 	answer = "```file:app.js\nconsole.log('Hello');\n```\n\nГотово."
-	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(answer)))
+	completions = FixedCompletions(answer)
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Новый чат"}).json()["conversation"]["id"]
 	response = authenticated_client.post(
 		f"/api/conversations/{conversation_id}/stream",
@@ -433,6 +438,7 @@ def test_code_request_does_not_create_file_without_explicit_file_intent(authenti
 	done = next(json.loads(line) for line in response.text.splitlines() if '"type": "done"' in line)
 	assert done["message"]["attachments"] == []
 	assert done["message"]["content"] == "```javascript\nconsole.log('Hello');\n```\n\nГотово."
+	assert completions.calls[0]["messages"][0]["content"] != main_module.FILE_GENERATION_PROMPT
 
 
 def test_automatic_title_is_short_and_has_no_emoji(authenticated_client, monkeypatch):
