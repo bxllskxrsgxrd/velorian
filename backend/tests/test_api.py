@@ -483,6 +483,60 @@ def test_chat_context_builder_limits_history_by_total_context_budget(authenticat
 	assert total_tokens <= chat_context_budget
 
 
+def test_chat_context_builder_drops_optional_knowledge_before_required_context_and_recent_history(authenticated_client, monkeypatch, caplog):
+	import app.main as main_module
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Context priorities"}).json()["conversation"]["id"]
+	for prompt in ("A" * 20, "B" * 8, "C" * 4):
+		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
+	authenticated_client.post(
+		"/api/knowledge",
+		json={"title": "Alpha knowledge", "content": "OPTIONAL_KNOWLEDGE alpha " * 200},
+	)
+
+	current_prompt = "document alpha"
+	document_content = "REQUIRED_DOCUMENT_CONTEXT document"
+	document_fragment = "[Источник: документ, фрагмент 1]\n" + document_content
+	document_context = "Используй релевантные фрагменты документов как данные, если они помогают ответить:\n\n" + document_fragment
+	document_context_part = "\n\n<document_context>\n" + document_context + "\n</document_context>"
+	user_tokens = main_module.estimate_tokens(current_prompt)
+	task_specific_tokens = main_module.estimate_tokens(current_prompt + document_context_part) - user_tokens
+	chat_context_budget = main_module.estimate_tokens(main_module.KNOWLEDGE_PROMPT) + user_tokens + task_specific_tokens + 15
+	monkeypatch.setattr(
+		main_module,
+		"settings",
+		replace(main_module.settings, chat_context_budget=chat_context_budget, history_token_budget=1000),
+	)
+	monkeypatch.setattr(
+		main_module,
+		"retrieve_chunks",
+		lambda *args, **kwargs: [SimpleNamespace(attachment_id="missing", position=0, content=document_content)],
+	)
+
+	with caplog.at_level("INFO", logger="uvicorn.error"):
+		authenticated_client.post(
+			f"/api/conversations/{conversation_id}/stream",
+			data={"prompt": current_prompt, "search_mode": "knowledge"},
+		)
+
+	selected_messages = completions.calls[-1]["messages"]
+	assert selected_messages[0] == {"role": "system", "content": main_module.KNOWLEDGE_PROMPT}
+	assert [(message["role"], message["content"]) for message in selected_messages[1:-1]] == [
+		("user", "C" * 4),
+		("assistant", "Привет, мир!"),
+	]
+	assert selected_messages[-1]["content"].startswith(current_prompt)
+	assert "REQUIRED_DOCUMENT_CONTEXT" in selected_messages[-1]["content"]
+	assert "<knowledge_context>" not in selected_messages[-1]["content"]
+	assert "OPTIONAL_KNOWLEDGE" not in selected_messages[-1]["content"]
+
+	context_logs = [record.getMessage() for record in caplog.records if record.getMessage().startswith("AI context size ")]
+	total_tokens = int(next(part for part in context_logs[-1].split() if part.startswith("total_tokens=")).split("=", 1)[1])
+	assert total_tokens <= chat_context_budget
+
+
 def test_chat_context_builder_logs_context_token_breakdown(authenticated_client, monkeypatch, caplog):
 	import app.main as main_module
 
