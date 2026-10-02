@@ -452,6 +452,37 @@ def test_chat_context_builder_limits_active_branch_history_by_token_budget(authe
 	assert history_tokens <= 15
 
 
+def test_chat_context_builder_limits_history_by_total_context_budget(authenticated_client, monkeypatch, caplog):
+	import app.main as main_module
+
+	current_prompt = "D" * 2
+	chat_context_budget = main_module.estimate_tokens(main_module.CHAT_PROMPT) + main_module.estimate_tokens(current_prompt) + 15
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	monkeypatch.setattr(
+		main_module,
+		"settings",
+		replace(main_module.settings, chat_context_budget=chat_context_budget, history_token_budget=1000),
+	)
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Context budget"}).json()["conversation"]["id"]
+
+	with caplog.at_level("INFO", logger="uvicorn.error"):
+		for prompt in ("A" * 20, "B" * 8, "C" * 4, current_prompt):
+			authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
+
+	selected_messages = completions.calls[-1]["messages"]
+	assert selected_messages[0] == {"role": "system", "content": main_module.CHAT_PROMPT}
+	assert [(message["role"], message["content"]) for message in selected_messages[1:]] == [
+		("user", "C" * 4),
+		("assistant", "Привет, мир!"),
+		("user", current_prompt),
+	]
+
+	context_logs = [record.getMessage() for record in caplog.records if record.getMessage().startswith("AI context size ")]
+	total_tokens = int(next(part for part in context_logs[-1].split() if part.startswith("total_tokens=")).split("=", 1)[1])
+	assert total_tokens <= chat_context_budget
+
+
 def test_chat_context_builder_logs_context_token_breakdown(authenticated_client, monkeypatch, caplog):
 	import app.main as main_module
 

@@ -1445,11 +1445,26 @@ def build_chat_context(
 			context_attached=current_user is not None,
 		)
 
-	system_tokens = estimate_tokens(messages[0]["content"])
-	history_tokens = sum(estimate_tokens(message["content"]) for message in messages[1:] if message is not current_user)
 	user_tokens = estimate_tokens(user_content)
+	system_tokens = estimate_tokens(messages[0]["content"])
 	prepared_user_tokens = estimate_tokens(current_user["content"]) if current_user is not None else 0
 	knowledge_tokens = max(0, prepared_user_tokens - user_tokens)
+	available_history_budget = max(0, settings.chat_context_budget - system_tokens - user_tokens - knowledge_tokens)
+	effective_history_budget = min(settings.history_token_budget, available_history_budget)
+	budgeted_history: list[dict[str, str]] = []
+	budgeted_history_tokens = 0
+	for message in reversed([message for message in messages[1:] if message is not current_user]):
+		cost = estimate_tokens(message["content"])
+		if budgeted_history_tokens + cost > effective_history_budget:
+			break
+		budgeted_history.append(message)
+		budgeted_history_tokens += cost
+	budgeted_history.reverse()
+	while budgeted_history and budgeted_history[0]["role"] != "user":
+		budgeted_history.pop(0)
+	if current_user is not None:
+		messages = [messages[0], *budgeted_history, current_user]
+	history_tokens = sum(estimate_tokens(message["content"]) for message in budgeted_history)
 	total_tokens = system_tokens + history_tokens + knowledge_tokens + user_tokens
 	ai_usage_logger.info(
 		"AI context size system_tokens=%s history_tokens=%s knowledge_tokens=%s user_tokens=%s total_tokens=%s",
@@ -1459,7 +1474,7 @@ def build_chat_context(
 		user_tokens,
 		total_tokens,
 	)
-	if total_tokens > settings.max_input_tokens:
+	if total_tokens > settings.chat_context_budget or total_tokens > settings.max_input_tokens:
 		raise AppError(413, "CONTEXT_TOO_LARGE", "Контекст диалога превышает допустимый лимит")
 	return messages, knowledge_result, bool(chunks) or use_knowledge
 
