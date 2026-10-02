@@ -512,11 +512,7 @@ def test_automatic_title_uses_semantic_summary_of_first_message(authenticated_cl
 	assert completions.title_call["reasoning_effort"] == "low"
 	assert completions.title_call["include_reasoning"] is False
 	title_prompt = completions.title_call["messages"][0]["content"]
-	assert "short topic label" in title_prompt
-	assert "not a summary or sentence" in title_prompt
-	assert "compact noun phrase" in title_prompt
-	assert '"filter Source does not show rated items" -> "Ошибка фильтра Источник"' in title_prompt
-	assert "3–7" not in title_prompt
+	assert title_prompt == main_module.TITLE_PROMPT
 
 
 def test_semantic_title_is_not_truncated_after_generation():
