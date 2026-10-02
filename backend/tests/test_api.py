@@ -401,6 +401,32 @@ def test_edit_creates_branch_and_can_switch_versions(authenticated_client, monke
 	]
 
 
+def test_chat_context_builder_isolates_sibling_branches(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Изоляция веток"}).json()["conversation"]["id"]
+	for prompt in ("A", "B", "C1", "D1"):
+		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
+
+	messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
+	c1 = next(message for message in messages if message["content"] == "C1")
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "C2", "edit_message_id": c1["id"]},
+	)
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "D2"})
+
+	user_path = [
+		message["content"]
+		for message in completions.calls[-1]["messages"]
+		if message["role"] == "user"
+	]
+	assert user_path == ["A", "B", "C2", "D2"]
+	assert not {"C1", "D1"}.intersection(user_path)
+
+
 def test_generated_file_is_attached_and_downloadable(authenticated_client, monkeypatch):
 	import app.main as main_module
 
