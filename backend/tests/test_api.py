@@ -433,7 +433,7 @@ def test_chat_context_builder_logs_context_token_breakdown(authenticated_client,
 	monkeypatch.setattr(main_module, "client", FakeGroq(RecordingCompletions()))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Размер контекста"}).json()["conversation"]["id"]
 
-	with caplog.at_level("INFO", logger="velorian"):
+	with caplog.at_level("INFO", logger="uvicorn.error"):
 		for prompt in ("Первый вопрос", "Второй вопрос", "Третий вопрос"):
 			authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
 		authenticated_client.post("/api/knowledge", json={"title": "Альфа", "content": "Справочный материал альфа"})
@@ -451,8 +451,13 @@ def test_chat_context_builder_logs_context_token_breakdown(authenticated_client,
 	assert token_value(context_logs[0], "history_tokens") == 0
 	assert token_value(context_logs[1], "history_tokens") > 0
 	assert token_value(context_logs[2], "history_tokens") > token_value(context_logs[1], "history_tokens")
+	assert all(token_value(log, "knowledge_tokens") == 0 for log in context_logs[:3])
 	assert token_value(context_logs[3], "knowledge_tokens") > 0
-	assert all(token_value(log, "total_tokens") > 0 for log in context_logs)
+	for log in context_logs:
+		assert token_value(log, "total_tokens") == sum(
+			token_value(log, name)
+			for name in ("system_tokens", "history_tokens", "knowledge_tokens", "user_tokens")
+		)
 
 
 def test_generated_file_is_attached_and_downloadable(authenticated_client, monkeypatch):
