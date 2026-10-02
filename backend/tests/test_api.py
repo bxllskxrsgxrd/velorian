@@ -925,6 +925,8 @@ def test_knowledge_search_is_opt_in_and_owner_scoped(client, monkeypatch):
 	conversation_id = client.post("/api/conversations", json={"title": "Поиск знаний"}).json()["conversation"]["id"]
 	client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Расскажи про альфа", "search_mode": "none"})
 	client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Расскажи про альфа", "search_mode": "knowledge"})
+	assert completions.calls[0]["messages"][0]["content"] == main_module.CHAT_PROMPT
+	assert completions.calls[1]["messages"][0]["content"] == main_module.KNOWLEDGE_PROMPT
 	assert "<knowledge_context>" not in completions.calls[0]["messages"][-1]["content"]
 	knowledge_prompt = completions.calls[1]["messages"][-1]["content"]
 	assert "Собственный секрет альфа" in knowledge_prompt
