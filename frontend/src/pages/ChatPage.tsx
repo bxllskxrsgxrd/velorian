@@ -99,8 +99,11 @@ export function ChatPage() {
 	useEffect(() => {
 		const frameId = requestAnimationFrame(() => {
 			const textarea = chatPageRef.current?.querySelector<HTMLTextAreaElement>('textarea[aria-label="Введите запрос"]');
-			if (!textarea?.disabled) textarea.focus({ preventScroll: true });
+
+			if (!textarea || textarea.disabled) return;
+			textarea.focus({ preventScroll: true });
 		});
+
 		return () => cancelAnimationFrame(frameId);
 	}, [routeConversationId]);
 
@@ -377,11 +380,11 @@ export function ChatPage() {
 						current.map((message) =>
 							message.id === tempAssistantId
 								? {
-									...message,
-									content: message.content || messageText,
-									error: undefined,
-									status: CHAT_MESSAGE_STATUSES.CANCELLED,
-								}
+										...message,
+										content: message.content || messageText,
+										error: undefined,
+										status: CHAT_MESSAGE_STATUSES.CANCELLED,
+									}
 								: message,
 						),
 					);
