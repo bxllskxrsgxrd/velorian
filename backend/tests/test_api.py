@@ -427,6 +427,34 @@ def test_chat_context_builder_isolates_sibling_branches(authenticated_client, mo
 	assert not {"C1", "D1"}.intersection(user_path)
 
 
+def test_chat_context_builder_logs_context_token_breakdown(authenticated_client, monkeypatch, caplog):
+	import app.main as main_module
+
+	monkeypatch.setattr(main_module, "client", FakeGroq(RecordingCompletions()))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Размер контекста"}).json()["conversation"]["id"]
+
+	with caplog.at_level("INFO", logger="velorian"):
+		for prompt in ("Первый вопрос", "Второй вопрос", "Третий вопрос"):
+			authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
+		authenticated_client.post("/api/knowledge", json={"title": "Альфа", "content": "Справочный материал альфа"})
+		authenticated_client.post(
+			f"/api/conversations/{conversation_id}/stream",
+			data={"prompt": "Расскажи про альфа", "search_mode": "knowledge"},
+		)
+
+	context_logs = [record.getMessage() for record in caplog.records if record.getMessage().startswith("AI context size ")]
+	assert len(context_logs) == 4
+
+	def token_value(log: str, name: str) -> int:
+		return int(next(part for part in log.split() if part.startswith(f"{name}=")).split("=", 1)[1])
+
+	assert token_value(context_logs[0], "history_tokens") == 0
+	assert token_value(context_logs[1], "history_tokens") > 0
+	assert token_value(context_logs[2], "history_tokens") > token_value(context_logs[1], "history_tokens")
+	assert token_value(context_logs[3], "knowledge_tokens") > 0
+	assert all(token_value(log, "total_tokens") > 0 for log in context_logs)
+
+
 def test_generated_file_is_attached_and_downloadable(authenticated_client, monkeypatch):
 	import app.main as main_module
 
