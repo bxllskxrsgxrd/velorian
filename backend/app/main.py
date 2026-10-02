@@ -1378,12 +1378,13 @@ def build_chat_context(
 	knowledge_search: bool = False,
 	file_generation: bool = False,
 ) -> tuple[list[dict[str, str]], KnowledgeRetrievalResult | None, bool]:
-	history = list(db.scalars(
+	conversation_messages = list(db.scalars(
 		select(Message)
 		.where(Message.conversation_id == conversation_id)
 		.order_by(Message.created_at, Message.id)
 	))
-	history = [message for message in _message_path(history, current_message.id) if message.status == "done"]
+	branch_path = _message_path(conversation_messages, current_message.id)
+	history = [message for message in branch_path if message.status == "done"]
 	knowledge_query = resolve_knowledge_query(db, user_id, prompt, explicit_search=knowledge_search)
 	use_knowledge = knowledge_search or knowledge_query.intent == "list" or knowledge_query.options.requested_approach is not None or bool(knowledge_query.options.metadata_filters)
 	system_prompt = FILE_GENERATION_PROMPT if file_generation else KNOWLEDGE_PROMPT if use_knowledge else CHAT_PROMPT
@@ -1718,7 +1719,7 @@ async def stream_chat(
 	db.commit()
 
 	file_generation = bool(FILE_REQUEST_PATTERN.search(prompt))
-	ai_messages, knowledge_result, uses_knowledge_context = _build_ai_messages(
+	ai_messages, knowledge_result, uses_knowledge_context = build_chat_context(
 		db,
 		conversation.id,
 		user.id,
