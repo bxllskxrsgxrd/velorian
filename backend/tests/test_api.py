@@ -508,7 +508,7 @@ def test_automatic_title_uses_semantic_summary_of_first_message(authenticated_cl
 	title = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["title"]
 	assert title == "Перевод промпта на английский"
 	assert completions.title_call["messages"][1] == {"role": "user", "content": first_message}
-	assert completions.title_call["max_completion_tokens"] == 32
+	assert completions.title_call["max_completion_tokens"] == 128
 	assert completions.title_call["reasoning_effort"] == "low"
 	assert completions.title_call["include_reasoning"] is False
 	title_prompt = completions.title_call["messages"][0]["content"]
