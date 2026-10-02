@@ -1394,13 +1394,19 @@ def build_chat_context(
 	}]
 	used = estimate_tokens(messages[0]["content"])
 	selected: list[dict[str, str]] = []
-	for message in reversed(history):
-		cost = estimate_tokens(message.content) + 8
-		if used + cost > settings.max_input_tokens * 0.72:
+	history_used = 0
+	for message in reversed([message for message in history if message.id != current_message.id]):
+		content = message.content or "[Сообщение содержало только файлы]"
+		cost = estimate_tokens(content)
+		if history_used + cost > settings.history_token_budget:
 			break
-		selected.append({"role": message.role, "content": message.content or "[Сообщение содержало только файлы]"})
-		used += cost
+		selected.append({"role": message.role, "content": content})
+		history_used += cost
+		used += cost + 8
 	selected.reverse()
+	current_content = current_message.content or "[Сообщение содержало только файлы]"
+	selected.append({"role": current_message.role, "content": current_content})
+	used += estimate_tokens(current_content) + 8
 	selected = _normalize_chat_history(selected)
 	messages.extend(selected)
 	current_user = next((message for message in reversed(messages) if message["role"] == "user"), None)

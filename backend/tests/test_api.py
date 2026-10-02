@@ -1,4 +1,5 @@
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import httpx
@@ -425,6 +426,30 @@ def test_chat_context_builder_isolates_sibling_branches(authenticated_client, mo
 	]
 	assert user_path == ["A", "B", "C2", "D2"]
 	assert not {"C1", "D1"}.intersection(user_path)
+
+
+def test_chat_context_builder_limits_active_branch_history_by_token_budget(authenticated_client, monkeypatch, caplog):
+	import app.main as main_module
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	monkeypatch.setattr(main_module, "settings", replace(main_module.settings, history_token_budget=15))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "History budget"}).json()["conversation"]["id"]
+
+	with caplog.at_level("INFO", logger="uvicorn.error"):
+		for prompt in ("A" * 20, "B" * 8, "C" * 4, "D" * 2):
+			authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
+
+	selected_messages = completions.calls[-1]["messages"][1:]
+	assert [(message["role"], message["content"]) for message in selected_messages] == [
+		("user", "C" * 4),
+		("assistant", "Привет, мир!"),
+		("user", "D" * 2),
+	]
+
+	context_logs = [record.getMessage() for record in caplog.records if record.getMessage().startswith("AI context size ")]
+	history_tokens = int(next(part for part in context_logs[-1].split() if part.startswith("history_tokens=")).split("=", 1)[1])
+	assert history_tokens <= 15
 
 
 def test_chat_context_builder_logs_context_token_breakdown(authenticated_client, monkeypatch, caplog):

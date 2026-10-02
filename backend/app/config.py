@@ -46,6 +46,7 @@ class Settings:
 	max_total_file_size: int = int(os.getenv("MAX_TOTAL_FILE_SIZE", str(25 * 1024 * 1024)))
 	user_message_inline_char_limit: int = int(os.getenv("USER_MESSAGE_INLINE_CHAR_LIMIT", "12000"))
 	max_input_tokens: int = int(os.getenv("MAX_INPUT_TOKENS", "100000"))
+	history_token_budget: int = int(os.getenv("HISTORY_TOKEN_BUDGET", "72000"))
 	max_output_tokens: int = int(os.getenv("MAX_OUTPUT_TOKENS", "4096"))
 	rate_limit_requests: int = int(os.getenv("RATE_LIMIT_REQUESTS", "60"))
 	rate_limit_window_seconds: int = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
