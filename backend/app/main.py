@@ -1369,7 +1369,7 @@ def _format_knowledge_context(result: KnowledgeRetrievalResult) -> str:
 	)
 
 
-def _build_ai_messages(
+def build_chat_context(
 	db: Session,
 	conversation_id: str,
 	user_id: str,
@@ -1439,6 +1439,26 @@ def _build_ai_messages(
 	if sum(estimate_tokens(item["content"]) for item in messages) > settings.max_input_tokens:
 		raise AppError(413, "CONTEXT_TOO_LARGE", "Контекст диалога превышает допустимый лимит")
 	return messages, knowledge_result, bool(chunks) or use_knowledge
+
+
+def _build_ai_messages(
+	db: Session,
+	conversation_id: str,
+	user_id: str,
+	prompt: str,
+	current_message: Message,
+	knowledge_search: bool = False,
+	file_generation: bool = False,
+) -> tuple[list[dict[str, str]], KnowledgeRetrievalResult | None, bool]:
+	return build_chat_context(
+		db,
+		conversation_id,
+		user_id,
+		prompt,
+		current_message,
+		knowledge_search=knowledge_search,
+		file_generation=file_generation,
+	)
 
 
 async def _stream_ai_deltas(
