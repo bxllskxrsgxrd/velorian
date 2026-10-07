@@ -596,7 +596,7 @@ def test_chat_context_uses_branch_summary_then_fresh_raw_history(authenticated_c
 	)
 	values = {
 		name: int(next(part for part in context_log.split() if part.startswith(f"{name}=")).split("=", 1)[1])
-		for name in ("system_tokens", "summary_tokens", "history_tokens", "knowledge_tokens", "user_tokens", "total_tokens")
+		for name in ("system_tokens", "summary_tokens", "history_tokens", "memory_tokens", "knowledge_tokens", "user_tokens", "total_tokens")
 	}
 	assert values["summary_tokens"] == main_module.estimate_tokens(context[1]["content"])
 	assert values["total_tokens"] == sum(value for name, value in values.items() if name != "total_tokens")
@@ -916,7 +916,7 @@ def test_chat_context_builder_logs_context_token_breakdown(authenticated_client,
 	for log in context_logs:
 		assert token_value(log, "total_tokens") == sum(
 			token_value(log, name)
-			for name in ("system_tokens", "summary_tokens", "history_tokens", "knowledge_tokens", "user_tokens")
+			for name in ("system_tokens", "summary_tokens", "history_tokens", "memory_tokens", "knowledge_tokens", "user_tokens")
 		)
 
 

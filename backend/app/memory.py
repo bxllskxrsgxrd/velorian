@@ -1,9 +1,11 @@
+import json
 import re
 from typing import Literal
 
 from sqlalchemy import select
 from sqlalchemy.orm import Session
 
+from .knowledge_retrieval import search_terms
 from .models import StructuredMemoryItem, utc_now
 
 
@@ -56,6 +58,14 @@ _MEMORY_SIGNAL_PATTERNS = (
 		re.IGNORECASE,
 	),
 )
+_GLOBAL_PREFERENCE_NAMES = {
+	"answer_length",
+	"format",
+	"language",
+	"response_style",
+	"tone",
+	"verbosity",
+}
 
 
 def should_extract_memory(user_message: str) -> bool:
@@ -63,6 +73,50 @@ def should_extract_memory(user_message: str) -> bool:
 	if not text or _BRANCH_LOCAL_MEMORY_PATTERN.search(text):
 		return False
 	return any(pattern.search(text) for pattern in _MEMORY_SIGNAL_PATTERNS)
+
+
+def _memory_terms_match(left: str, right: str) -> bool:
+	if left == right:
+		return True
+	shared = min(len(left), len(right)) - 1
+	return shared >= 5 and left[:shared] == right[:shared]
+
+
+def retrieve_relevant_memory(
+	db: Session,
+	user_id: str,
+	query: str,
+	*,
+	limit: int = 5,
+) -> list[StructuredMemoryItem]:
+	query_terms = search_terms(query)
+	if not query_terms or limit <= 0:
+		return []
+	items = list(db.scalars(
+		select(StructuredMemoryItem)
+		.where(StructuredMemoryItem.user_id == user_id)
+		.order_by(StructuredMemoryItem.updated_at.desc(), StructuredMemoryItem.id),
+	))
+	scored: list[tuple[float, int, StructuredMemoryItem]] = []
+	for recency_rank, item in enumerate(items):
+		name_terms = search_terms(item.name or "")
+		value_terms = search_terms(json.dumps(item.value, ensure_ascii=False, sort_keys=True))
+		score = sum(
+			3.0
+			for query_term in query_terms
+			if any(_memory_terms_match(query_term, term) for term in name_terms)
+		)
+		score += sum(
+			1.0
+			for query_term in query_terms
+			if any(_memory_terms_match(query_term, term) for term in value_terms)
+		)
+		if item.category == "preferences" and item.name in _GLOBAL_PREFERENCE_NAMES:
+			score += 0.5
+		if score > 0:
+			scored.append((score, recency_rank, item))
+	scored.sort(key=lambda match: (-match[0], match[1]))
+	return [item for _, _, item in scored[:limit]]
 
 
 def read_user_memory(db: Session, user_id: str) -> StructuredMemory:
