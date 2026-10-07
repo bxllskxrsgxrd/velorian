@@ -691,6 +691,78 @@ def test_chat_context_builder_limits_history_by_total_context_budget(authenticat
 	assert total_tokens <= chat_context_budget
 
 
+def test_pre_stream_context_error_finalizes_assistant_and_next_request_continues(authenticated_client, monkeypatch):
+	import app.main as main_module
+	from sqlalchemy import select
+
+	from app.database import SessionLocal
+	from app.errors import AppError
+	from app.models import Message
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	original_build_chat_context = main_module.build_chat_context
+	should_fail = True
+
+	def fail_first_context_build(*args, **kwargs):
+		nonlocal should_fail
+		if should_fail:
+			should_fail = False
+			raise AppError(413, "CONTEXT_TOO_LARGE", "Контекст диалога превышает допустимый лимит")
+		return original_build_chat_context(*args, **kwargs)
+
+	monkeypatch.setattr(main_module, "build_chat_context", fail_first_context_build)
+	conversation_id = authenticated_client.post(
+		"/api/conversations", json={"title": "Pre-stream lifecycle"},
+	).json()["conversation"]["id"]
+	request_id = "pre-stream-context-too-large"
+	failed = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "FIRST_USER_MESSAGE"},
+		headers={"X-Request-ID": request_id},
+	)
+
+	assert failed.status_code == 413
+	assert failed.json()["error"]["code"] == "CONTEXT_TOO_LARGE"
+	assert failed.json()["error"]["request_id"] == request_id
+	conversation = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]
+	assert [(message["role"], message["status"]) for message in conversation["messages"]] == [
+		("user", "done"),
+		("assistant", "error"),
+	]
+	failed_assistant = conversation["messages"][1]
+	assert failed_assistant["error"]["code"] == "CONTEXT_TOO_LARGE"
+	assert failed_assistant["error"]["requestId"] == request_id
+
+	succeeded = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "SECOND_USER_MESSAGE"},
+	)
+	assert succeeded.status_code == 200
+	assert '"type": "done"' in succeeded.text
+	user_context = [
+		message["content"] for message in completions.calls[-1]["messages"] if message["role"] == "user"
+	]
+	assert len(user_context) == 1
+	assert "FIRST_USER_MESSAGE" in user_context[0]
+	assert "SECOND_USER_MESSAGE" in user_context[0]
+	assert all(
+		"Контекст диалога превышает допустимый лимит" not in message["content"]
+		for message in completions.calls[-1]["messages"]
+	)
+
+	with SessionLocal() as db:
+		messages = list(db.scalars(
+			select(Message)
+			.where(Message.conversation_id == conversation_id)
+			.order_by(Message.created_at, Message.id)
+		))
+		assert not any(message.status == "streaming" for message in messages)
+		assert [message.content for message in main_module._message_path(messages, messages[-1].id) if message.role == "user"] == [
+			"FIRST_USER_MESSAGE", "SECOND_USER_MESSAGE",
+		]
+
+
 def test_chat_context_builder_drops_optional_knowledge_before_required_context_and_recent_history(authenticated_client, monkeypatch, caplog):
 	import app.main as main_module
 

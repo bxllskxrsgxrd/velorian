@@ -1958,39 +1958,68 @@ async def stream_chat(
 	db.add(assistant_message)
 	conversation.updated_at = utc_now()
 	db.commit()
-
-	file_generation = bool(FILE_REQUEST_PATTERN.search(prompt))
-	ai_messages, knowledge_result, uses_knowledge_context, excluded_history = build_chat_context(
-		db,
-		conversation.id,
-		user.id,
-		prompt,
-		user_message,
-		knowledge_search=search_mode == "knowledge",
-		file_generation=file_generation,
-	)
-	await _update_branch_summary(db, conversation.id, user_message, excluded_history)
-	if knowledge_result is not None:
-		assistant_message.knowledge_sources = [
-			{
-				"id": item.id, "title": item.title, "sourceType": item.source_type, "rating": item.rating,
-				"approach": {"id": item.approach.id, "name": item.approach.name, "slug": item.approach.slug} if item.approach else None,
-			}
-			for item in knowledge_result.items
-		]
-		db.commit()
-	if file_generation:
-		task_type: AITaskType = "file_generation"
-		prompt_version = "file_generation:v1"
-	elif web_search or uses_knowledge_context:
-		task_type = "knowledge"
-		prompt_version = "knowledge:v1"
-	else:
-		task_type = "chat"
-		prompt_version = "chat:v1"
 	request_id = _request_id(request)
-	user_payload = _message_payload(user_message)
 	assistant_id = assistant_message.id
+	try:
+		file_generation = bool(FILE_REQUEST_PATTERN.search(prompt))
+		ai_messages, knowledge_result, uses_knowledge_context, excluded_history = build_chat_context(
+			db,
+			conversation.id,
+			user.id,
+			prompt,
+			user_message,
+			knowledge_search=search_mode == "knowledge",
+			file_generation=file_generation,
+		)
+		await _update_branch_summary(db, conversation.id, user_message, excluded_history)
+		if knowledge_result is not None:
+			assistant_message.knowledge_sources = [
+				{
+					"id": item.id, "title": item.title, "sourceType": item.source_type, "rating": item.rating,
+					"approach": {"id": item.approach.id, "name": item.approach.name, "slug": item.approach.slug} if item.approach else None,
+				}
+				for item in knowledge_result.items
+			]
+			db.commit()
+		if file_generation:
+			task_type: AITaskType = "file_generation"
+			prompt_version = "file_generation:v1"
+		elif web_search or uses_knowledge_context:
+			task_type = "knowledge"
+			prompt_version = "knowledge:v1"
+		else:
+			task_type = "chat"
+			prompt_version = "chat:v1"
+		user_payload = _message_payload(user_message)
+	except asyncio.CancelledError:
+		db.rollback()
+		failed_assistant = db.get(Message, assistant_id)
+		if failed_assistant is not None:
+			failed_assistant.status = "cancelled"
+			failed_assistant.request_id = request_id
+			db.commit()
+		raise
+	except AppError as error:
+		db.rollback()
+		failed_assistant = db.get(Message, assistant_id)
+		if failed_assistant is not None:
+			failed_assistant.content = error.message
+			failed_assistant.status = "error"
+			failed_assistant.error_code = error.code
+			failed_assistant.request_id = request_id
+			db.commit()
+		raise
+	except Exception as error:
+		db.rollback()
+		code, message = _safe_ai_error(error)
+		failed_assistant = db.get(Message, assistant_id)
+		if failed_assistant is not None:
+			failed_assistant.content = message
+			failed_assistant.status = "error"
+			failed_assistant.error_code = code
+			failed_assistant.request_id = request_id
+			db.commit()
+		raise
 
 	async def generate() -> AsyncIterator[bytes]:
 		answer_parts: list[str] = []
