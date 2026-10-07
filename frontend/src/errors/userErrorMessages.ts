@@ -34,6 +34,11 @@ const ERROR_MESSAGES: Record<string, ErrorDefinition> = {
 		description: 'Добавьте длинный текст как файл и отправьте запрос снова',
 		retryable: false,
 	},
+	CONTEXT_TOO_LARGE: {
+		title: 'Контекст диалога слишком большой',
+		description: 'Контекст диалога превышает допустимый лимит',
+		retryable: false,
+	},
 	FILE_TOO_LARGE: {
 		title: 'Файл слишком большой',
 		description: 'Размер одного или нескольких файлов превышает допустимый лимит',
