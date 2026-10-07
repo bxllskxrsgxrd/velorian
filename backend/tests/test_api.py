@@ -42,6 +42,8 @@ class BranchSummaryCompletions(FakeCompletions):
 		if kwargs.get("stream", False):
 			self.stream_calls.append(kwargs)
 			return await super().create(**kwargs)
+		if "response_format" in kwargs:
+			return await super().create(**kwargs)
 		self.summary_calls.append(kwargs)
 		return SimpleNamespace(
 			choices=[SimpleNamespace(message=SimpleNamespace(content="SUMMARY_OLD_ACTIVE"))],
@@ -980,7 +982,7 @@ def test_automatic_title_uses_semantic_summary_of_first_message(authenticated_cl
 			self.title_call = None
 
 		async def create(self, **kwargs):
-			if not kwargs.get("stream", False):
+			if not kwargs.get("stream", False) and kwargs["messages"][0]["content"] == main_module.TITLE_PROMPT:
 				self.title_call = kwargs
 				return SimpleNamespace(choices=[SimpleNamespace(
 					message=SimpleNamespace(content='Заголовок: "Перевод промпта на английский."'),
