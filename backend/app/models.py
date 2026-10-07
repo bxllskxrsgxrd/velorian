@@ -43,6 +43,7 @@ class Conversation(Base):
 	user: Mapped[User] = relationship(back_populates="conversations")
 	messages: Mapped[list["Message"]] = relationship(back_populates="conversation", cascade="all, delete-orphan")
 	attachments: Mapped[list["Attachment"]] = relationship(back_populates="conversation", cascade="all, delete-orphan")
+	branch_summaries: Mapped[list["BranchSummary"]] = relationship(back_populates="conversation", cascade="all, delete-orphan")
 
 
 class Message(Base):
@@ -66,6 +67,28 @@ class Message(Base):
 	attachments: Mapped[list["Attachment"]] = relationship(back_populates="message", cascade="all, delete-orphan")
 	ratings: Mapped[list["MessageRating"]] = relationship(back_populates="message", cascade="all, delete-orphan")
 	knowledge_items: Mapped[list["KnowledgeItem"]] = relationship(back_populates="source_message")
+
+
+class BranchSummary(Base):
+	__tablename__ = "branch_summaries"
+	__table_args__ = (
+		UniqueConstraint(
+			"conversation_id",
+			"branch_anchor_message_id",
+			"summarized_through_message_id",
+			name="uq_branch_summary_scope",
+		),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+	conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+	branch_anchor_message_id: Mapped[str] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), index=True)
+	summarized_through_message_id: Mapped[str] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), index=True)
+	summary_text: Mapped[str] = mapped_column(Text)
+	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+	conversation: Mapped[Conversation] = relationship(back_populates="branch_summaries")
 
 
 class Attachment(Base):

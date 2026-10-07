@@ -175,6 +175,12 @@ def _add_user_logins(connection: Connection) -> None:
 		connection.execute(text("ALTER TABLE users ALTER COLUMN login SET NOT NULL"))
 
 
+def _create_branch_summaries(connection: Connection) -> None:
+	from .database import Base
+
+	Base.metadata.tables["branch_summaries"].create(bind=connection, checkfirst=True)
+
+
 MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260825_01_ratings_and_knowledge", _create_ratings_and_knowledge),
 	("20260825_02_storage_keys", _add_storage_keys),
@@ -188,6 +194,7 @@ MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260916_01_expand_knowledge_approaches", _expand_knowledge_approaches),
 	("20260928_01_knowledge_approach_ratings", _add_knowledge_approach_ratings),
 	("20260928_02_user_logins", _add_user_logins),
+	("20261002_01_branch_summaries", _create_branch_summaries),
 )
 
 

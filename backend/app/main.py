@@ -40,7 +40,7 @@ from .knowledge import (
 )
 from .knowledge_retrieval import KnowledgeRetrievalResult, log_knowledge_retrieval, resolve_knowledge_query
 from .markdown_files import markdown_file_name, split_markdown_title, unique_markdown_file_name
-from .models import Attachment, Conversation, DocumentChunk, KnowledgeItem, Message, User, utc_now
+from .models import Attachment, BranchSummary, Conversation, DocumentChunk, KnowledgeItem, Message, User, utc_now
 from .rag import chunk_text, estimate_tokens, retrieve_chunks
 from .rate_limit import rate_limiter
 from .ratings import router as ratings_router
@@ -359,6 +359,15 @@ def _message_path(messages: list[Message], message_id: str) -> list[Message]:
 		current_id = parent_ids.get(current_id)
 	path.reverse()
 	return path
+
+
+def _branch_summary_applies(summary: BranchSummary, branch_path: list[Message]) -> bool:
+	if not branch_path or any(message.conversation_id != summary.conversation_id for message in branch_path):
+		return False
+	path_positions = {message.id: index for index, message in enumerate(branch_path)}
+	anchor_position = path_positions.get(summary.branch_anchor_message_id)
+	through_position = path_positions.get(summary.summarized_through_message_id)
+	return anchor_position is not None and through_position is not None and anchor_position <= through_position
 
 
 def _compact_ai_messages(messages: list[dict[str, str]]) -> list[dict[str, str]]:
