@@ -181,6 +181,12 @@ def _create_branch_summaries(connection: Connection) -> None:
 	Base.metadata.tables["branch_summaries"].create(bind=connection, checkfirst=True)
 
 
+def _create_structured_memory(connection: Connection) -> None:
+	from .database import Base
+
+	Base.metadata.tables["structured_memory_items"].create(bind=connection, checkfirst=True)
+
+
 MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260825_01_ratings_and_knowledge", _create_ratings_and_knowledge),
 	("20260825_02_storage_keys", _add_storage_keys),
@@ -195,6 +201,7 @@ MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260928_01_knowledge_approach_ratings", _add_knowledge_approach_ratings),
 	("20260928_02_user_logins", _add_user_logins),
 	("20261002_01_branch_summaries", _create_branch_summaries),
+	("20261007_01_structured_memory", _create_structured_memory),
 )
 
 

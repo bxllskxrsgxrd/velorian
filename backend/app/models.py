@@ -28,6 +28,7 @@ class User(Base):
 	ratings: Mapped[list["MessageRating"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 	knowledge_items: Mapped[list["KnowledgeItem"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 	knowledge_approaches: Mapped[list["KnowledgeApproach"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+	structured_memory_items: Mapped[list["StructuredMemoryItem"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class Conversation(Base):
@@ -89,6 +90,33 @@ class BranchSummary(Base):
 	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
 
 	conversation: Mapped[Conversation] = relationship(back_populates="branch_summaries")
+
+
+class StructuredMemoryItem(Base):
+	__tablename__ = "structured_memory_items"
+	__table_args__ = (
+		UniqueConstraint("user_id", "category", "name", name="uq_structured_memory_user_category_name"),
+		CheckConstraint(
+			"category IN ('project', 'preferences', 'decisions')",
+			name="ck_structured_memory_category",
+		),
+		CheckConstraint(
+			"(category = 'decisions' AND name IS NULL) OR "
+			"(category IN ('project', 'preferences') AND name IS NOT NULL)",
+			name="ck_structured_memory_name",
+		),
+		Index("ix_structured_memory_user_category", "user_id", "category"),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+	user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+	category: Mapped[str] = mapped_column(String(16))
+	name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+	value: Mapped[object] = mapped_column(JSON)
+	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+	user: Mapped[User] = relationship(back_populates="structured_memory_items")
 
 
 class Attachment(Base):
