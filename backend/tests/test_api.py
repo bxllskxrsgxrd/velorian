@@ -543,6 +543,63 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 		))) == 2
 
 
+def test_chat_context_uses_branch_summary_then_fresh_raw_history(authenticated_client, caplog):
+	from uuid import uuid4
+
+	import app.main as main_module
+	from app.database import SessionLocal
+	from app.models import BranchSummary, Message
+
+	conversation_id = authenticated_client.post(
+		"/api/conversations", json={"title": "Summary context"},
+	).json()["conversation"]["id"]
+	user_id = authenticated_client.get("/api/auth/me").json()["user"]["id"]
+	with SessionLocal() as db:
+		a = Message(id=str(uuid4()), conversation_id=conversation_id, role="user", content="A")
+		b = Message(id=str(uuid4()), conversation_id=conversation_id, role="assistant", content="B", reply_to_id=a.id)
+		c = Message(id=str(uuid4()), conversation_id=conversation_id, role="assistant", content="C", reply_to_id=b.id)
+		d = Message(id=str(uuid4()), conversation_id=conversation_id, role="user", content="D", reply_to_id=c.id)
+		e = Message(id=str(uuid4()), conversation_id=conversation_id, role="assistant", content="E", reply_to_id=d.id)
+		f = Message(id=str(uuid4()), conversation_id=conversation_id, role="user", content="F", reply_to_id=e.id)
+		db.add_all([a, b, c, d, e, f])
+		db.flush()
+		db.add(BranchSummary(
+			conversation_id=conversation_id,
+			branch_anchor_message_id=f.id,
+			summarized_through_message_id=c.id,
+			summary_text="Summary of A B C",
+		))
+		db.commit()
+
+		with caplog.at_level("INFO", logger="uvicorn.error"):
+			context, _, _, excluded_history = main_module.build_chat_context(
+				db, conversation_id, user_id, "F", f,
+			)
+
+	assert context[0] == {"role": "system", "content": main_module.CHAT_PROMPT}
+	assert context[1] == {
+		"role": "system",
+		"content": main_module.BRANCH_SUMMARY_CONTEXT_PREFIX + "Summary of A B C",
+	}
+	assert [(message["role"], message["content"]) for message in context[2:]] == [
+		("user", "D"),
+		("assistant", "E"),
+		("user", "F"),
+	]
+	assert excluded_history == []
+
+	context_log = next(
+		record.getMessage() for record in reversed(caplog.records)
+		if record.getMessage().startswith("AI context size ")
+	)
+	values = {
+		name: int(next(part for part in context_log.split() if part.startswith(f"{name}=")).split("=", 1)[1])
+		for name in ("system_tokens", "summary_tokens", "history_tokens", "knowledge_tokens", "user_tokens", "total_tokens")
+	}
+	assert values["summary_tokens"] == main_module.estimate_tokens(context[1]["content"])
+	assert values["total_tokens"] == sum(value for name, value in values.items() if name != "total_tokens")
+
+
 def test_chat_context_builder_limits_history_by_total_context_budget(authenticated_client, monkeypatch, caplog):
 	import app.main as main_module
 
@@ -657,7 +714,7 @@ def test_chat_context_builder_logs_context_token_breakdown(authenticated_client,
 	for log in context_logs:
 		assert token_value(log, "total_tokens") == sum(
 			token_value(log, name)
-			for name in ("system_tokens", "history_tokens", "knowledge_tokens", "user_tokens")
+			for name in ("system_tokens", "summary_tokens", "history_tokens", "knowledge_tokens", "user_tokens")
 		)
 
 
