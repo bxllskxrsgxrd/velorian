@@ -80,32 +80,60 @@ def test_memory_extraction_persists_project_preference_and_unique_decision(authe
 	)
 
 
-def test_memory_extraction_uses_only_current_message_and_ignores_transient_or_branch_local_data(
+def test_memory_extraction_gate_controls_ai_calls_and_uses_only_current_message(
 	authenticated_client,
 	monkeypatch,
+	caplog,
 ):
 	import app.main as main_module
 
-	messages = ("ок", "спасибо", "давай", "branch-local RED-333", "branch-local BLUE-666")
+	skipped_messages = (
+		"ок",
+		"спасибо",
+		"давай",
+		"продолжай",
+		"понял",
+		"Как работает замыкание в Python?",
+		"Запомни branch-local RED-333",
+		"Запомни branch-local BLUE-666",
+	)
+	extracted_messages = (
+		"Мы решили использовать PostgreSQL",
+		"Всегда отвечай мне коротко",
+		"Проект теперь называется Velorian",
+	)
 	completions = MemoryExtractionCompletions()
 	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
 	conversation_id = authenticated_client.post(
 		"/api/conversations", json={"title": "Memory exclusions"},
 	).json()["conversation"]["id"]
-	for message in messages:
-		response = authenticated_client.post(
-			f"/api/conversations/{conversation_id}/stream", data={"prompt": message},
-		)
-		assert response.status_code == 200
+	with caplog.at_level("INFO", logger="uvicorn.error"):
+		for message in skipped_messages:
+			response = authenticated_client.post(
+				f"/api/conversations/{conversation_id}/stream", data={"prompt": message},
+			)
+			assert response.status_code == 200
 
-	assert len(completions.extraction_calls) == len(messages)
-	for call, current_message in zip(completions.extraction_calls, messages, strict=True):
+		assert completions.extraction_calls == []
+		assert not any("purpose=memory_extraction" in record.getMessage() for record in caplog.records)
+
+		for expected_call_count, message in enumerate(extracted_messages, start=1):
+			response = authenticated_client.post(
+				f"/api/conversations/{conversation_id}/stream", data={"prompt": message},
+			)
+			assert response.status_code == 200
+			assert len(completions.extraction_calls) == expected_call_count
+
+	assert len(completions.extraction_calls) == len(extracted_messages)
+	for call, current_message in zip(completions.extraction_calls, extracted_messages, strict=True):
 		assert call["messages"] == [
 			{"role": "system", "content": main_module.MEMORY_EXTRACTION_PROMPT},
 			{"role": "user", "content": current_message},
 		]
 		assert call["response_format"] == {"type": "json_object"}
 		assert main_module.CHAT_PROMPT not in json.dumps(call["messages"], ensure_ascii=False)
+	usage_logs = [record.getMessage() for record in caplog.records if "purpose=memory_extraction" in record.getMessage()]
+	assert len(usage_logs) == len(extracted_messages)
 
 	user_id = authenticated_client.get("/api/auth/me").json()["user"]["id"]
 	with SessionLocal() as db:

@@ -40,7 +40,13 @@ from .knowledge import (
 )
 from .knowledge_retrieval import KnowledgeRetrievalResult, log_knowledge_retrieval, resolve_knowledge_query
 from .markdown_files import markdown_file_name, split_markdown_title, unique_markdown_file_name
-from .memory import add_memory_decision, read_user_memory, upsert_preference_memory, upsert_project_memory
+from .memory import (
+	add_memory_decision,
+	read_user_memory,
+	should_extract_memory,
+	upsert_preference_memory,
+	upsert_project_memory,
+)
 from .models import Attachment, BranchSummary, Conversation, DocumentChunk, KnowledgeItem, Message, User, utc_now
 from .rag import chunk_text, estimate_tokens, retrieve_chunks
 from .rate_limit import rate_limiter
@@ -808,6 +814,8 @@ async def _extract_memory_patch(user_message: str) -> dict[str, dict[str, object
 
 
 async def _extract_and_store_memory(db: Session, user_id: str, user_message: str) -> None:
+	if not should_extract_memory(user_message):
+		return
 	patch = await _extract_memory_patch(user_message)
 	if patch is None:
 		return

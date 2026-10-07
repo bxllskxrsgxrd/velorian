@@ -1,3 +1,4 @@
+import re
 from typing import Literal
 
 from sqlalchemy import select
@@ -8,6 +9,60 @@ from .models import StructuredMemoryItem, utc_now
 
 NamedMemoryCategory = Literal["project", "preferences"]
 StructuredMemory = dict[str, dict[str, object] | list[object]]
+
+
+_BRANCH_LOCAL_MEMORY_PATTERN = re.compile(
+	r"\b(?:red|blue)(?:-[a-z0-9]+)+\b"
+	r"|\bbranch[- ]local\b"
+	r"|\b(?:кодовое слово|секрет|тестов(?:ый|ого) идентификатор)\b"
+	r"|\b(?:codeword|secret|test identifier)\b",
+	re.IGNORECASE,
+)
+_MEMORY_SIGNAL_PATTERNS = (
+	re.compile(
+		r"\b(?:запомни|помни)\b"
+		r"|\bсохрани\b.{0,80}\b(?:в память|факт|решени\w*|предпочтени\w*)\b"
+		r"|\bremember\b",
+		re.IGNORECASE,
+	),
+	re.compile(
+		r"\b(?:мы\s+)?решил(?:и|а|о)?\b"
+		r"|\bпринято\s+решение\b"
+		r"|\bвыбрали\b"
+		r"|\bбудем\s+использовать\b"
+		r"|\bwe\s+decided\b",
+		re.IGNORECASE,
+	),
+	re.compile(
+		r"\bпредпочитаю\b"
+		r"|\bвсегда\s+отвечай\b"
+		r"|\bникогда\s+(?:не\s+)?(?:отвечай|используй)\b"
+		r"|\bi\s+prefer\b"
+		r"|\balways\s+respond\b",
+		re.IGNORECASE,
+	),
+	re.compile(
+		r"\bпроект\s+(?:теперь|использует|называется|переименован|настроен)\b"
+		r"|\bв\s+проекте\s+теперь\b"
+		r"|\b(?:перевели|перенесли|переименовали|обновили)\s+проект\b"
+		r"|\bнастройк\w*\s+проекта\b"
+		r"|\bproject\s+(?:now|uses|is named)\b",
+		re.IGNORECASE,
+	),
+	re.compile(
+		r"\b(?:основн\w+\s+)?ограничени\w*\s+проекта\b"
+		r"|\bв\s+проекте\s+(?:нельзя|нужно|должны)\b"
+		r"|\bmain\s+project\s+constraint\b",
+		re.IGNORECASE,
+	),
+)
+
+
+def should_extract_memory(user_message: str) -> bool:
+	text = " ".join(user_message.split())
+	if not text or _BRANCH_LOCAL_MEMORY_PATTERN.search(text):
+		return False
+	return any(pattern.search(text) for pattern in _MEMORY_SIGNAL_PATTERNS)
 
 
 def read_user_memory(db: Session, user_id: str) -> StructuredMemory:
