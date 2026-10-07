@@ -743,9 +743,7 @@ def test_pre_stream_context_error_finalizes_assistant_and_next_request_continues
 	user_context = [
 		message["content"] for message in completions.calls[-1]["messages"] if message["role"] == "user"
 	]
-	assert len(user_context) == 1
-	assert "FIRST_USER_MESSAGE" in user_context[0]
-	assert "SECOND_USER_MESSAGE" in user_context[0]
+	assert user_context == ["SECOND_USER_MESSAGE"]
 	assert all(
 		"Контекст диалога превышает допустимый лимит" not in message["content"]
 		for message in completions.calls[-1]["messages"]
@@ -761,6 +759,76 @@ def test_pre_stream_context_error_finalizes_assistant_and_next_request_continues
 		assert [message.content for message in main_module._message_path(messages, messages[-1].id) if message.role == "user"] == [
 			"FIRST_USER_MESSAGE", "SECOND_USER_MESSAGE",
 		]
+
+
+def test_failed_turn_is_excluded_from_next_ai_history(authenticated_client, monkeypatch):
+	import app.main as main_module
+	from sqlalchemy import select
+
+	from app.database import SessionLocal
+	from app.errors import AppError
+	from app.models import Message
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post(
+		"/api/conversations", json={"title": "Failed turn history"},
+	).json()["conversation"]["id"]
+	first_prompt = "Расскажи кратко про Vue"
+	failed_prompt = "Расскажи кратко про React"
+	current_prompt = "Ответь одним словом: работает"
+	assert authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream", data={"prompt": first_prompt},
+	).status_code == 200
+
+	original_build_chat_context = main_module.build_chat_context
+	should_fail = True
+
+	def fail_next_context_build(*args, **kwargs):
+		nonlocal should_fail
+		if should_fail:
+			should_fail = False
+			raise AppError(413, "CONTEXT_TOO_LARGE", "Контекст диалога превышает допустимый лимит")
+		return original_build_chat_context(*args, **kwargs)
+
+	monkeypatch.setattr(main_module, "build_chat_context", fail_next_context_build)
+	failed = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream", data={"prompt": failed_prompt},
+	)
+	assert failed.status_code == 413
+	assert failed.json()["error"]["code"] == "CONTEXT_TOO_LARGE"
+	succeeded = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream", data={"prompt": current_prompt},
+	)
+	assert succeeded.status_code == 200
+	assert '"type": "done"' in succeeded.text
+
+	ai_messages = completions.calls[-1]["messages"]
+	assert [(message["role"], message["content"]) for message in ai_messages[1:]] == [
+		("user", first_prompt),
+		("assistant", "Привет, мир!"),
+		("user", current_prompt),
+	]
+	assert all(failed_prompt not in message["content"] for message in ai_messages)
+	assert all("Контекст диалога превышает допустимый лимит" not in message["content"] for message in ai_messages)
+
+	with SessionLocal() as db:
+		messages = list(db.scalars(
+			select(Message)
+			.where(Message.conversation_id == conversation_id)
+			.order_by(Message.created_at, Message.id)
+		))
+		branch_path = main_module._message_path(messages, messages[-1].id)
+		assert [message.content for message in branch_path if message.role == "user"] == [
+			first_prompt, failed_prompt, current_prompt,
+		]
+		failed_user = next(message for message in branch_path if message.content == failed_prompt)
+		failed_assistant = next(
+			message for message in branch_path
+			if message.role == "assistant" and message.reply_to_id == failed_user.id
+		)
+		assert failed_assistant.status == "error"
+		assert failed_assistant.error_code == "CONTEXT_TOO_LARGE"
 
 
 def test_chat_context_builder_drops_optional_knowledge_before_required_context_and_recent_history(authenticated_client, monkeypatch, caplog):

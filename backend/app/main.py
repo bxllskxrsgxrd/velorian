@@ -1540,7 +1540,19 @@ def build_chat_context(
 		.order_by(Message.created_at, Message.id)
 	))
 	branch_path = _message_path(conversation_messages, current_message.id)
-	history = [message for message in branch_path if message.status == "done"]
+	path_messages_by_id = {message.id: message for message in branch_path}
+	path_parent_ids = _message_parent_ids(branch_path)
+	successful_history_ids: set[str] = set()
+	for message in branch_path:
+		if message.role != "assistant" or message.status != "done":
+			continue
+		parent = path_messages_by_id.get(path_parent_ids.get(message.id))
+		if parent is not None and parent.role == "user" and parent.status == "done":
+			successful_history_ids.update((parent.id, message.id))
+	history = [
+		message for message in branch_path
+		if message.id == current_message.id or message.id in successful_history_ids
+	]
 	branch_summary = _latest_applicable_branch_summary(db, conversation_id, branch_path)
 	path_positions = {message.id: index for index, message in enumerate(branch_path)}
 	summarized_through_position = (
