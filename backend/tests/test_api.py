@@ -33,6 +33,22 @@ class RecordingCompletions(FakeCompletions):
 		return await super().create(**kwargs)
 
 
+class BranchSummaryCompletions(FakeCompletions):
+	def __init__(self):
+		self.stream_calls: list[dict] = []
+		self.summary_calls: list[dict] = []
+
+	async def create(self, **kwargs):
+		if kwargs.get("stream", False):
+			self.stream_calls.append(kwargs)
+			return await super().create(**kwargs)
+		self.summary_calls.append(kwargs)
+		return SimpleNamespace(
+			choices=[SimpleNamespace(message=SimpleNamespace(content="SUMMARY_OLD_ACTIVE"))],
+			usage=SimpleNamespace(prompt_tokens=20, completion_tokens=5),
+		)
+
+
 class FixedCompletions:
 	def __init__(self, content: str):
 		self.content = content
@@ -450,6 +466,81 @@ def test_chat_context_builder_limits_active_branch_history_by_token_budget(authe
 	context_logs = [record.getMessage() for record in caplog.records if record.getMessage().startswith("AI context size ")]
 	history_tokens = int(next(part for part in context_logs[-1].split() if part.startswith("history_tokens=")).split("=", 1)[1])
 	assert history_tokens <= 15
+
+
+def test_branch_summary_contains_only_evicted_active_history(authenticated_client, monkeypatch, caplog):
+	import app.main as main_module
+	from sqlalchemy import select
+
+	from app.database import SessionLocal
+	from app.models import BranchSummary, Message
+
+	completions = BranchSummaryCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post(
+		"/api/conversations", json={"title": "Branch summary budget"},
+	).json()["conversation"]["id"]
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "OLD_ACTIVE_MESSAGE_" * 3},
+	)
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "SIBLING_B1"})
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "SIBLING_C1"})
+	messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
+	sibling_b1 = next(message for message in messages if message["content"] == "SIBLING_B1")
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "ACTIVE_FRESH", "edit_message_id": sibling_b1["id"]},
+	)
+	monkeypatch.setattr(main_module, "settings", replace(main_module.settings, history_token_budget=15))
+
+	with caplog.at_level("INFO", logger="uvicorn.error"):
+		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "CURRENT"})
+
+	assert len(completions.summary_calls) == 1
+	summary_input = completions.summary_calls[0]["messages"][1]["content"]
+	assert "OLD_ACTIVE_MESSAGE_" in summary_input
+	assert "SIBLING_B1" not in summary_input
+	assert "SIBLING_C1" not in summary_input
+	assert "ACTIVE_FRESH" not in summary_input
+	assert "CURRENT" not in summary_input
+	main_context = completions.stream_calls[-1]["messages"]
+	assert [message["content"] for message in main_context if message["role"] == "user"] == [
+		"ACTIVE_FRESH", "CURRENT",
+	]
+	assert all("SUMMARY_OLD_ACTIVE" not in message["content"] for message in main_context)
+
+	with SessionLocal() as db:
+		summary = db.scalar(select(BranchSummary).where(BranchSummary.conversation_id == conversation_id))
+		assert summary is not None
+		assert summary.summary_text == "SUMMARY_OLD_ACTIVE"
+		assert db.get(Message, summary.branch_anchor_message_id).content == "CURRENT"
+		assert db.get(Message, summary.summarized_through_message_id).reply_to_id is not None
+
+	usage_logs = [record.getMessage() for record in caplog.records if "purpose=branch_summary" in record.getMessage()]
+	assert len(usage_logs) == 1
+	assert "task_type=summary" in usage_logs[0]
+	assert "prompt_version=branch_summary:v1" in usage_logs[0]
+
+	with caplog.at_level("INFO", logger="uvicorn.error"):
+		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "NEXT"})
+
+	assert len(completions.summary_calls) == 2
+	incremental_input = completions.summary_calls[1]["messages"][1]["content"]
+	assert "SUMMARY_OLD_ACTIVE" in incremental_input
+	assert "ACTIVE_FRESH" in incremental_input
+	assert "OLD_ACTIVE_MESSAGE_" not in incremental_input
+	assert "SIBLING_B1" not in incremental_input
+	assert "SIBLING_C1" not in incremental_input
+	assert "CURRENT" not in incremental_input
+	assert "NEXT" not in incremental_input
+	assert [message["content"] for message in completions.stream_calls[-1]["messages"] if message["role"] == "user"] == [
+		"CURRENT", "NEXT",
+	]
+	with SessionLocal() as db:
+		assert len(list(db.scalars(
+			select(BranchSummary).where(BranchSummary.conversation_id == conversation_id)
+		))) == 2
 
 
 def test_chat_context_builder_limits_history_by_total_context_budget(authenticated_client, monkeypatch, caplog):
