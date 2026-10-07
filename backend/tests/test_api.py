@@ -600,6 +600,66 @@ def test_chat_context_uses_branch_summary_then_fresh_raw_history(authenticated_c
 	assert values["total_tokens"] == sum(value for name, value in values.items() if name != "total_tokens")
 
 
+def test_chat_context_rejects_summary_from_sibling_branch(authenticated_client):
+	from uuid import uuid4
+
+	import app.main as main_module
+	from sqlalchemy import select
+
+	from app.database import SessionLocal
+	from app.models import BranchSummary, Message
+
+	conversation_id = authenticated_client.post(
+		"/api/conversations", json={"title": "Sibling summary isolation"},
+	).json()["conversation"]["id"]
+	user_id = authenticated_client.get("/api/auth/me").json()["user"]["id"]
+	with SessionLocal() as db:
+		a = Message(id=str(uuid4()), conversation_id=conversation_id, role="user", content="A")
+		b = Message(id=str(uuid4()), conversation_id=conversation_id, role="assistant", content="B", reply_to_id=a.id)
+		c = Message(
+			id=str(uuid4()), conversation_id=conversation_id, role="user",
+			content="C OLD_C_UNIQUE_FACT", reply_to_id=b.id, is_active=False,
+		)
+		d = Message(
+			id=str(uuid4()), conversation_id=conversation_id, role="assistant",
+			content="D OLD_D_UNIQUE_FACT", reply_to_id=c.id,
+		)
+		c2 = Message(
+			id=str(uuid4()), conversation_id=conversation_id, role="user",
+			content="C2", reply_to_id=b.id, is_active=True,
+		)
+		db.add_all([a, b, c, d, c2])
+		db.flush()
+		db.add(BranchSummary(
+			conversation_id=conversation_id,
+			branch_anchor_message_id=c.id,
+			summarized_through_message_id=d.id,
+			summary_text="SIBLING_SUMMARY_WITH_C_D_FACTS",
+		))
+		db.commit()
+
+		context, _, _, _ = main_module.build_chat_context(
+			db, conversation_id, user_id, "C2", c2,
+		)
+		conversation_messages = list(db.scalars(
+			select(Message)
+			.where(Message.conversation_id == conversation_id)
+			.order_by(Message.created_at, Message.id)
+		))
+		active_path = main_module._message_path(conversation_messages, c2.id)
+
+	assert [message.content for message in active_path] == ["A", "B", "C2"]
+	assert [(message["role"], message["content"]) for message in context[1:]] == [
+		("user", "A"),
+		("assistant", "B"),
+		("user", "C2"),
+	]
+	serialized_context = "\n".join(message["content"] for message in context)
+	assert "SIBLING_SUMMARY_WITH_C_D_FACTS" not in serialized_context
+	assert "OLD_C_UNIQUE_FACT" not in serialized_context
+	assert "OLD_D_UNIQUE_FACT" not in serialized_context
+
+
 def test_chat_context_builder_limits_history_by_total_context_budget(authenticated_client, monkeypatch, caplog):
 	import app.main as main_module
 
