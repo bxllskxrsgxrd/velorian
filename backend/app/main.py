@@ -662,9 +662,50 @@ def _branch_summary_messages(
 	]
 
 
+def _log_branch_summary_metrics(
+	completion,
+	*,
+	existing_summary: BranchSummary | None,
+	new_messages: list[Message],
+	correlation_id: str | None,
+	trigger_reason: str,
+	status: AIInteractionStatus,
+) -> None:
+	if settings.app_env != "development" or not settings.summary_debug_metrics:
+		return
+	usage = _normalize_ai_usage(completion)
+	choice = completion.choices[0] if completion is not None and completion.choices else None
+	content = _usage_value(_usage_value(choice, "message"), "content")
+	new_summary_tokens = estimate_tokens(content.strip()) if isinstance(content, str) and content.strip() else None
+	previous_summary_tokens = estimate_tokens(existing_summary.summary_text) if existing_summary is not None else 0
+	logger.info(json.dumps({
+		"event": "BRANCH_SUMMARY_METRICS",
+		"correlation_id": correlation_id,
+		"previous_summary_tokens": previous_summary_tokens,
+		"new_summary_tokens": new_summary_tokens,
+		"summary_size_delta_tokens": (
+			new_summary_tokens - previous_summary_tokens if new_summary_tokens is not None else None
+		),
+		"excluded_message_count": len(new_messages),
+		"excluded_message_tokens": sum(
+			estimate_tokens(message.content or "[Сообщение содержало только файлы]")
+			for message in new_messages
+		),
+		"summary_input_tokens": usage["input_tokens"] if usage is not None else None,
+		"summary_output_tokens": usage["output_tokens"] if usage is not None else None,
+		"finish_reason": _usage_value(choice, "finish_reason"),
+		"summarized_through_message_id": new_messages[-1].id if new_messages else None,
+		"trigger_reason": trigger_reason,
+		"status": status,
+	}, ensure_ascii=False, sort_keys=True))
+
+
 async def _generate_branch_summary(
 	existing_summary: BranchSummary | None,
 	new_messages: list[Message],
+	*,
+	correlation_id: str | None = None,
+	trigger_reason: str = "new_excluded_history",
 ) -> str | None:
 	if client is None or not new_messages:
 		return None
@@ -714,6 +755,14 @@ async def _generate_branch_summary(
 			status=status,
 			latency_ms=(time.perf_counter() - started) * 1000,
 		)
+		_log_branch_summary_metrics(
+			completion,
+			existing_summary=existing_summary,
+			new_messages=new_messages,
+			correlation_id=correlation_id,
+			trigger_reason=trigger_reason,
+			status=status,
+		)
 	content = completion.choices[0].message.content if completion.choices else ""
 	return content.strip() if isinstance(content, str) and content.strip() else None
 
@@ -742,6 +791,8 @@ async def _update_branch_summary(
 	conversation_id: str,
 	current_message: Message,
 	excluded_history: list[Message],
+	*,
+	correlation_id: str | None = None,
 ) -> bool:
 	if not excluded_history:
 		return False
@@ -764,7 +815,12 @@ async def _update_branch_summary(
 	]
 	if not new_messages:
 		return False
-	summary_text = await _generate_branch_summary(existing_summary, new_messages)
+	summary_text = await _generate_branch_summary(
+		existing_summary,
+		new_messages,
+		correlation_id=correlation_id,
+		trigger_reason="new_excluded_history",
+	)
 	if summary_text is None:
 		return False
 	try:
@@ -2312,7 +2368,13 @@ async def stream_chat(
 			knowledge_search=search_mode == "knowledge",
 			file_generation=file_generation,
 		)
-		summary_updated = await _update_branch_summary(db, conversation.id, user_message, excluded_history)
+		summary_updated = await _update_branch_summary(
+			db,
+			conversation.id,
+			user_message,
+			excluded_history,
+			correlation_id=request_id,
+		)
 		if summary_updated:
 			ai_messages, knowledge_result, uses_knowledge_context, _ = build_chat_context(
 				db,

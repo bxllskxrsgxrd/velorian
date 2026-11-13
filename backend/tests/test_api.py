@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -59,7 +60,10 @@ class BranchSummaryCompletions(FakeCompletions):
 		self.call_order.append("summary")
 		self.summary_calls.append(kwargs)
 		return SimpleNamespace(
-			choices=[SimpleNamespace(message=SimpleNamespace(content="SUMMARY_OLD_ACTIVE"))],
+			choices=[SimpleNamespace(
+				message=SimpleNamespace(content="SUMMARY_OLD_ACTIVE"),
+				finish_reason="stop",
+			)],
 			usage=SimpleNamespace(prompt_tokens=20, completion_tokens=5),
 		)
 
@@ -609,10 +613,18 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 		f"/api/conversations/{conversation_id}/stream",
 		data={"prompt": "ACTIVE_FRESH", "edit_message_id": sibling_b1["id"]},
 	)
-	monkeypatch.setattr(main_module, "settings", replace(main_module.settings, history_token_budget=15))
+	monkeypatch.setattr(main_module, "settings", replace(
+		main_module.settings,
+		app_env="development",
+		history_token_budget=15,
+		summary_debug_metrics=True,
+	))
 
-	with caplog.at_level("INFO", logger="uvicorn.error"):
-		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "CURRENT"})
+	with caplog.at_level("INFO"):
+		first_response = authenticated_client.post(
+			f"/api/conversations/{conversation_id}/stream", data={"prompt": "CURRENT"},
+		)
+	first_meta = next(json.loads(line) for line in first_response.text.splitlines() if '"type": "meta"' in line)
 
 	assert len(completions.summary_calls) == 1
 	assert completions.call_order[-2:] == ["summary", "chat"]
@@ -654,8 +666,11 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 	assert "task_type=summary" in usage_logs[0]
 	assert "prompt_version=branch_summary:v1" in usage_logs[0]
 
-	with caplog.at_level("INFO", logger="uvicorn.error"):
-		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "NEXT"})
+	with caplog.at_level("INFO"):
+		second_response = authenticated_client.post(
+			f"/api/conversations/{conversation_id}/stream", data={"prompt": "NEXT"},
+		)
+	second_meta = next(json.loads(line) for line in second_response.text.splitlines() if '"type": "meta"' in line)
 
 	assert len(completions.summary_calls) == 2
 	incremental_input = completions.summary_calls[1]["messages"][1]["content"]
@@ -670,9 +685,103 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 		"CURRENT", "NEXT",
 	]
 	with SessionLocal() as db:
-		assert len(list(db.scalars(
+		summaries = list(db.scalars(
 			select(BranchSummary).where(BranchSummary.conversation_id == conversation_id)
-		))) == 2
+		))
+		assert len(summaries) == 2
+
+	metric_logs = [
+		json.loads(record.getMessage())
+		for record in caplog.records
+		if record.name == "velorian" and '"event": "BRANCH_SUMMARY_METRICS"' in record.getMessage()
+	]
+	assert len(metric_logs) == 2
+	summary_tokens = main_module.estimate_tokens("SUMMARY_OLD_ACTIVE")
+	for index, (metric, correlation_id, call) in enumerate(zip(
+		metric_logs,
+		(first_meta["requestId"], second_meta["requestId"]),
+		completions.summary_calls,
+		strict=True,
+	)):
+		input_content = call["messages"][1]["content"]
+		excluded_contents = re.findall(
+			r'<message role="[^"]+" id="[^"]+">\n(.*?)\n</message>',
+			input_content,
+			flags=re.DOTALL,
+		)
+		assert metric == {
+			"event": "BRANCH_SUMMARY_METRICS",
+			"correlation_id": correlation_id,
+			"previous_summary_tokens": 0 if index == 0 else summary_tokens,
+			"new_summary_tokens": summary_tokens,
+			"summary_size_delta_tokens": summary_tokens if index == 0 else 0,
+			"excluded_message_count": len(excluded_contents),
+			"excluded_message_tokens": sum(main_module.estimate_tokens(content) for content in excluded_contents),
+			"summary_input_tokens": 20,
+			"summary_output_tokens": 5,
+			"finish_reason": "stop",
+			"summarized_through_message_id": metric["summarized_through_message_id"],
+			"trigger_reason": "new_excluded_history",
+			"status": "success",
+		}
+	assert {metric["summarized_through_message_id"] for metric in metric_logs} == {
+		summary.summarized_through_message_id for summary in summaries
+	}
+
+
+def test_branch_summary_metrics_require_development_flag_and_cover_failed_launch(monkeypatch, caplog):
+	import app.main as main_module
+
+	completion = SimpleNamespace(
+		choices=[SimpleNamespace(
+			message=SimpleNamespace(content="summary"),
+			finish_reason="stop",
+		)],
+		usage=SimpleNamespace(prompt_tokens=10, completion_tokens=2),
+	)
+	message = SimpleNamespace(id="message-1", content="excluded")
+	base_settings = main_module.settings
+	with caplog.at_level("INFO", logger="velorian"):
+		for app_env, enabled in (("development", False), ("production", True)):
+			monkeypatch.setattr(main_module, "settings", replace(
+				base_settings,
+				app_env=app_env,
+				summary_debug_metrics=enabled,
+			))
+			main_module._log_branch_summary_metrics(
+				completion,
+				existing_summary=None,
+				new_messages=[message],
+				correlation_id="correlation-1",
+				trigger_reason="new_excluded_history",
+				status="success",
+			)
+
+	assert not any("BRANCH_SUMMARY_METRICS" in record.getMessage() for record in caplog.records)
+	caplog.clear()
+	monkeypatch.setattr(main_module, "settings", replace(
+		base_settings,
+		app_env="development",
+		summary_debug_metrics=True,
+	))
+	with caplog.at_level("INFO", logger="velorian"):
+		main_module._log_branch_summary_metrics(
+			None,
+			existing_summary=None,
+			new_messages=[message],
+			correlation_id="correlation-1",
+			trigger_reason="new_excluded_history",
+			status="error",
+		)
+	metric = json.loads(next(record.getMessage() for record in caplog.records if "BRANCH_SUMMARY_METRICS" in record.getMessage()))
+	assert metric["status"] == "error"
+	assert metric["correlation_id"] == "correlation-1"
+	assert metric["excluded_message_count"] == 1
+	assert metric["summarized_through_message_id"] == "message-1"
+	assert metric["new_summary_tokens"] is None
+	assert metric["summary_input_tokens"] is None
+	assert metric["summary_output_tokens"] is None
+	assert metric["finish_reason"] is None
 
 
 def test_branch_summaries_stay_scoped_and_do_not_duplicate_raw_groq_history(authenticated_client, monkeypatch):
