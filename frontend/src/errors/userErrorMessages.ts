@@ -11,7 +11,9 @@ function formatLimit(bytes: number): string {
 const ERROR_MESSAGES: Record<string, ErrorDefinition> = {
 	AUTH_REQUIRED: { title: 'Требуется вход', description: 'Войдите в аккаунт, чтобы продолжить', retryable: false },
 	INVALID_SESSION: { title: 'Сессия завершилась', description: 'Войдите в аккаунт снова', retryable: false },
-	INVALID_CREDENTIALS: { title: 'Не удалось войти', description: 'Проверьте email и пароль', retryable: false },
+	INVALID_CREDENTIALS: { title: 'Не удалось войти', description: 'Проверьте email или логин и пароль', retryable: false },
+	LOGIN_EXISTS: { title: 'Логин уже занят', description: 'Пользователь с таким логином уже существует', retryable: false },
+	EMAIL_EXISTS: { title: 'Email уже используется', description: 'Пользователь с таким email уже существует', retryable: false },
 	FORBIDDEN: {
 		title: 'Действие недоступно',
 		description: 'У вас недостаточно прав для этого действия',
@@ -30,6 +32,11 @@ const ERROR_MESSAGES: Record<string, ErrorDefinition> = {
 	MESSAGE_TOO_LARGE: {
 		title: 'Сообщение слишком большое',
 		description: 'Добавьте длинный текст как файл и отправьте запрос снова',
+		retryable: false,
+	},
+	CONTEXT_TOO_LARGE: {
+		title: 'Контекст диалога слишком большой',
+		description: 'Контекст диалога превышает допустимый лимит',
 		retryable: false,
 	},
 	FILE_TOO_LARGE: {

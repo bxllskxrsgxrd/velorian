@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createConversation, streamChat } from './chatApi';
+import { createConversation, loadAttachmentFile, streamChat } from './chatApi';
 import { setCsrfToken } from './httpClient';
 
 afterEach(() => vi.restoreAllMocks());
@@ -43,5 +43,32 @@ describe('streamChat', () => {
 		const body = fetchMock.mock.calls[0][1]?.body as FormData;
 		expect(body.get('search_mode')).toBe('knowledge');
 		expect(body.has('userId')).toBe(false);
+	});
+});
+
+describe('loadAttachmentFile', () => {
+	it('reuses inline generated content without downloading the attachment', async () => {
+		const fetchMock = vi.spyOn(globalThis, 'fetch');
+		const file = await loadAttachmentFile({
+			id: 'generated-inline', name: 'poem.txt', size: 20, type: 'text/plain', url: '/file', isImage: false,
+			content: 'Тихий шёпот осени',
+		});
+
+		expect(await file.text()).toBe('Тихий шёпот осени');
+		expect(fetchMock).not.toHaveBeenCalled();
+	});
+
+	it('downloads the selected attachment when only metadata is available', async () => {
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response('Тихий шёпот осени', {
+			status: 200,
+			headers: { 'Content-Type': 'text/plain' },
+		}));
+		const file = await loadAttachmentFile({
+			id: 'generated-stored', name: 'poem.txt', size: 20, type: 'text/plain', url: '/file', isImage: false,
+		});
+
+		expect(file.name).toBe('poem.txt');
+		expect(await file.text()).toBe('Тихий шёпот осени');
+		expect(fetch).toHaveBeenCalledWith('/api/attachments/generated-stored', expect.objectContaining({ credentials: 'include' }));
 	});
 });

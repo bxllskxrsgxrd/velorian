@@ -381,3 +381,20 @@ export function StarIcon({ size = 18, ...props }: IconProps) {
 		</svg>
 	);
 }
+
+export function EyeIcon({ size = 18, ...props }: IconProps) {
+	return (
+		<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
+			<path d="M2.5 12s3.5-6 9.5-6 9.5 6 9.5 6-3.5 6-9.5 6-9.5-6-9.5-6Z" />
+			<circle cx="12" cy="12" r="2.7" />
+		</svg>
+	);
+}
+
+export function EyeOffIcon({ size = 18, ...props }: IconProps) {
+	return (
+		<svg width={size} height={size} viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.7" {...props}>
+			<path d="m3 3 18 18M10.6 6.1c.5-.1.9-.1 1.4-.1 6 0 9.5 6 9.5 6a17 17 0 0 1-2.5 3.2M6.2 6.3C3.8 8 2.5 12 2.5 12s3.5 6 9.5 6c1.4 0 2.7-.3 3.8-.8M9.9 9.8a3 3 0 0 0 4.2 4.3" />
+		</svg>
+	);
+}

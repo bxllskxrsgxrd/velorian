@@ -42,6 +42,44 @@ describe('PromptBar web search', () => {
 		await waitFor(() => expect(textarea.closest('form')).toHaveClass('prompt-bar--multiline'));
 	});
 
+	it('keeps the multiline layout until the textarea is fully cleared', async () => {
+		renderPromptBar();
+		const textarea = screen.getByRole('textbox');
+		const form = textarea.closest('form');
+
+		fireEvent.change(textarea, { target: { value: 'первая строка\nвторая строка' } });
+		await waitFor(() => expect(form).toHaveClass('prompt-bar--multiline'));
+
+		fireEvent.change(textarea, { target: { value: 'короткий текст' } });
+		expect(form).toHaveClass('prompt-bar--multiline');
+
+		fireEvent.change(textarea, { target: { value: '' } });
+		await waitFor(() => expect(form).not.toHaveClass('prompt-bar--multiline'));
+
+		fireEvent.change(textarea, { target: { value: 'новый текст' } });
+		expect(form).not.toHaveClass('prompt-bar--multiline');
+	});
+
+	it('focuses the textarea from free prompt-bar space without intercepting action buttons', () => {
+		renderPromptBar();
+		const textarea = screen.getByRole('textbox');
+		const form = textarea.closest('form');
+		if (!form) throw new Error('Prompt form is missing');
+		const inputContainer = form.querySelector('.prompt-bar__input-container');
+		if (!inputContainer) throw new Error('Prompt input container is missing');
+
+		fireEvent.click(inputContainer);
+		expect(textarea).toHaveFocus();
+		textarea.blur();
+		fireEvent.click(form);
+		expect(textarea).toHaveFocus();
+
+		const actionsButton = screen.getByLabelText('Открыть меню действий');
+		actionsButton.focus();
+		fireEvent.click(actionsButton);
+		expect(actionsButton).toHaveFocus();
+	});
+
 	it('keeps search after deleting the separator and disables it when the marker is edited', () => {
 		renderPromptBar();
 		enableWebSearch();

@@ -7,6 +7,7 @@ import {
 	getConversation,
 	getMessageKnowledgeLink,
 	listConversations,
+	loadAttachmentFile,
 	removeMessageRating,
 	restoreKnowledgeItem,
 	setMessageRating,
@@ -29,7 +30,9 @@ import type {
 	SearchMode,
 } from '../types/chat';
 import { attachmentToPreviewFile, createChatAttachment, fileToPreviewFile } from '../utils/files';
+import { getActiveBranchLeafAssistantId, getMessageParentId } from '../utils/chatBranches';
 import { reportError } from '../utils/reportError';
+import { splitAssistantResponse } from '../utils/assistantResponse';
 import './_chatPage.scss';
 import { useToast } from '../hooks/useToast';
 import { getUserFacingError } from '../errors/userErrorMessages';
@@ -41,10 +44,6 @@ import { useFilesStore } from '../stores/filesStore';
 import { useUiStore } from '../stores/uiStore';
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
-
-function knowledgeTitle(content: string) {
-	return content.split('\n').map((line) => line.trim().replace(/^#+\s*/, '')).find(Boolean)?.slice(0, 255) || 'Ответ ассистента';
-}
 
 export function ChatPage() {
 	const { showToast } = useToast();
@@ -96,6 +95,17 @@ export function ChatPage() {
 		if (previousId && previousId !== activeConversationId) requestControllersRef.current.get(previousId)?.abort();
 		previousConversationIdRef.current = activeConversationId;
 	}, [activeConversationId]);
+
+	useEffect(() => {
+		const frameId = requestAnimationFrame(() => {
+			const textarea = chatPageRef.current?.querySelector<HTMLTextAreaElement>('textarea[aria-label="Введите запрос"]');
+
+			if (!textarea || textarea.disabled) return;
+			textarea.focus({ preventScroll: true });
+		});
+
+		return () => cancelAnimationFrame(frameId);
+	}, [routeConversationId]);
 
 	useEffect(() => {
 		if (!activeConversationId) return;
@@ -233,6 +243,9 @@ export function ChatPage() {
 		const editSourceMessage = editMessageId
 			? sourceMessages.find((message) => message.id === editMessageId && message.role === CHAT_ROLES.USER)
 			: undefined;
+		const parentMessageId = editSourceMessage
+			? getMessageParentId(sourceMessages, editSourceMessage.id)
+			: getActiveBranchLeafAssistantId(sourceMessages);
 		const tempUserId = crypto.randomUUID();
 		const tempAttachments = currentFiles.map(createChatAttachment);
 		tempAttachments.forEach((attachment) => attachmentUrlsRef.current.add(attachment.url));
@@ -268,6 +281,7 @@ export function ChatPage() {
 			attachments: editSourceMessage?.attachments ?? retrySourceMessage?.attachments ?? tempAttachments,
 			status: CHAT_MESSAGE_STATUSES.DONE,
 			branchGroupId: editSourceMessage ? editSourceMessage.branchGroupId || editSourceMessage.id : tempUserId,
+			replyToId: parentMessageId,
 			isActive: true,
 		};
 		const optimistic: ChatMessage[] = [optimisticUser];
@@ -366,11 +380,11 @@ export function ChatPage() {
 						current.map((message) =>
 							message.id === tempAssistantId
 								? {
-									...message,
-									content: message.content || messageText,
-									error: undefined,
-									status: CHAT_MESSAGE_STATUSES.CANCELLED,
-								}
+										...message,
+										content: message.content || messageText,
+										error: undefined,
+										status: CHAT_MESSAGE_STATUSES.CANCELLED,
+									}
 								: message,
 						),
 					);
@@ -560,17 +574,32 @@ export function ChatPage() {
 				openExistingKnowledge(message.id, existing);
 				return;
 			}
-			const source: KnowledgeCreateSource = {
-				type: attachment ? 'assistant_file' : 'assistant_message',
-				messageId: message.id,
-				fileId: attachment?.id,
-				title: attachment?.name ?? knowledgeTitle(message.content),
-				content: message.content,
-				rating: message.rating?.score ?? null,
-				fileName: attachment?.name,
-				mimeType: attachment?.type,
-				returnTo: `/chat/${activeConversationId}`,
-			};
+			let source: KnowledgeCreateSource;
+			if (attachment) {
+				const file = await loadAttachmentFile(attachment);
+				source = {
+					type: 'assistant_file',
+					messageId: message.id,
+					fileId: attachment.id,
+					title: attachment.name,
+					content: await file.text(),
+					rating: message.rating?.score ?? null,
+					fileName: attachment.name,
+					mimeType: attachment.type,
+					file,
+					returnTo: `/chat/${activeConversationId}`,
+				};
+			} else {
+				const response = splitAssistantResponse(message.content);
+				source = {
+					type: 'assistant_message',
+					messageId: message.id,
+					title: response.title,
+					content: response.content,
+					rating: message.rating?.score ?? null,
+					returnTo: `/chat/${activeConversationId}`,
+				};
+			}
 			navigate('/knowledge/new', { state: { knowledgeSource: source } });
 		} catch (error) {
 			showToast(error instanceof Error ? error.message : 'Не удалось открыть редактор базы знаний', 'error');
@@ -598,7 +627,8 @@ export function ChatPage() {
 		if (!activeConversationId) return;
 		const conversationId = activeConversationId;
 		try {
-			const { attachment, created } = await createMessageMarkdownFile(message.id);
+			const { title } = splitAssistantResponse(message.content);
+			const { attachment, created } = await createMessageMarkdownFile(message.id, title);
 			setConversationMessages(conversationId, (current) =>
 				current.map((entry) =>
 					entry.id === message.id

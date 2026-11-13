@@ -23,6 +23,39 @@ async function selectCustomOption(page: Page, trigger: Locator, optionName: stri
 		.click();
 }
 
+test('shows unified approach cards with editable rating and inactive state', async ({ page }) => {
+	await installMockApi(page);
+	await page.goto('/knowledge/approaches');
+
+	const interviewCard = page.locator('article.knowledge-card').filter({ hasText: 'Интервью' });
+	const showCard = page.locator('article.knowledge-card').filter({ hasText: 'Шоу' });
+
+	await expect(interviewCard).toContainText('Связанных материалов: 3');
+	await expect(interviewCard.locator('.rating__star')).toHaveCount(5);
+	await expect(interviewCard.locator(':scope > .knowledge-card__select-column')).toHaveCount(1);
+	await expect(showCard.locator('.rating__star--active')).toHaveCount(5);
+
+	await interviewCard.locator('label.knowledge-card__select').click();
+	const bulkBar = page.getByRole('region', { name: 'Действия с выбранными подходами' });
+	await expect(interviewCard).toHaveClass(/knowledge-card--selected/);
+	await expect(bulkBar).toContainText('Выбрано: 1');
+	await bulkBar.getByRole('button', { name: 'Снять выбор' }).click();
+	await expect(bulkBar).not.toBeVisible();
+	await expect(page.locator('.knowledge-page__bulk-slot')).toHaveCount(1);
+
+	await showCard.getByText('Подход активен').click();
+	await expect(showCard).toHaveClass(/knowledge-card--inactive/);
+
+	const ratingFour = interviewCard.getByRole('button', { name: 'Поставить рейтинг 4 из 5' });
+	await ratingFour.click();
+	await expect(ratingFour).toHaveAttribute('aria-pressed', 'true');
+	await expect(interviewCard.getByRole('checkbox', { name: 'Подход активен' })).toBeChecked();
+
+	await page.getByRole('button', { name: 'Сортировка' }).click();
+	await page.getByRole('button', { name: 'Рейтинг: высокий' }).click();
+	await expect(page.locator('article.knowledge-card').first()).toContainText('Шоу');
+});
+
 test('opens Knowledge Base from sidebar and creates rated manual data', async ({ page }) => {
 	await installMockApi(page);
 

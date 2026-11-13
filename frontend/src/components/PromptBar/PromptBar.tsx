@@ -46,12 +46,7 @@ export function PromptBar({
 	const submissionsRef = useRef(new Set<string>());
 	const promptValue = stripPromptMarker(value, searchMode);
 	const isSendDisabled = isGenerating || (!promptValue.trim() && files.length === 0);
-	const promptBarClassName = [
-		'prompt-bar',
-		isMultiline && 'prompt-bar--multiline',
-	]
-		.filter(Boolean)
-		.join(' ');
+	const promptBarClassName = ['prompt-bar', isMultiline && 'prompt-bar--multiline'].filter(Boolean).join(' ');
 
 	function handleChange(event: React.ChangeEvent<HTMLTextAreaElement>) {
 		const nextValue = event.currentTarget.value;
@@ -105,8 +100,23 @@ export function PromptBar({
 		}
 	}
 
+	function handlePromptBarClick(event: React.MouseEvent<HTMLFormElement>) {
+		if (!(event.target instanceof Element)) return;
+		if (
+			event.target.closest(
+				'textarea, .prompt-bar__actions, .prompt-bar__send, .prompt-bar__attachments, .prompt-bar__error',
+			)
+		)
+			return;
+
+		const textarea = event.currentTarget.querySelector<HTMLTextAreaElement>('textarea[aria-label="Введите запрос"]');
+
+		if (!textarea || textarea.disabled) return;
+		textarea.focus({ preventScroll: true });
+	}
+
 	return (
-		<form className={promptBarClassName} onSubmit={handleSubmit}>
+		<form className={promptBarClassName} onClick={handlePromptBarClick} onSubmit={handleSubmit}>
 			{files.length > 0 && (
 				<div className="prompt-bar__attachments">
 					{files.map((file, index) => (

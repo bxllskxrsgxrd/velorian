@@ -20,6 +20,7 @@ class User(Base):
 
 	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
 	email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
+	login: Mapped[str] = mapped_column(String(80), unique=True, index=True)
 	password_hash: Mapped[str] = mapped_column(String(255))
 	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
@@ -27,6 +28,7 @@ class User(Base):
 	ratings: Mapped[list["MessageRating"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 	knowledge_items: Mapped[list["KnowledgeItem"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 	knowledge_approaches: Mapped[list["KnowledgeApproach"]] = relationship(back_populates="user", cascade="all, delete-orphan")
+	structured_memory_items: Mapped[list["StructuredMemoryItem"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
 class Conversation(Base):
@@ -42,6 +44,7 @@ class Conversation(Base):
 	user: Mapped[User] = relationship(back_populates="conversations")
 	messages: Mapped[list["Message"]] = relationship(back_populates="conversation", cascade="all, delete-orphan")
 	attachments: Mapped[list["Attachment"]] = relationship(back_populates="conversation", cascade="all, delete-orphan")
+	branch_summaries: Mapped[list["BranchSummary"]] = relationship(back_populates="conversation", cascade="all, delete-orphan")
 
 
 class Message(Base):
@@ -65,6 +68,55 @@ class Message(Base):
 	attachments: Mapped[list["Attachment"]] = relationship(back_populates="message", cascade="all, delete-orphan")
 	ratings: Mapped[list["MessageRating"]] = relationship(back_populates="message", cascade="all, delete-orphan")
 	knowledge_items: Mapped[list["KnowledgeItem"]] = relationship(back_populates="source_message")
+
+
+class BranchSummary(Base):
+	__tablename__ = "branch_summaries"
+	__table_args__ = (
+		UniqueConstraint(
+			"conversation_id",
+			"branch_anchor_message_id",
+			"summarized_through_message_id",
+			name="uq_branch_summary_scope",
+		),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+	conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"), index=True)
+	branch_anchor_message_id: Mapped[str] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), index=True)
+	summarized_through_message_id: Mapped[str] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"), index=True)
+	summary_text: Mapped[str] = mapped_column(Text)
+	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+	conversation: Mapped[Conversation] = relationship(back_populates="branch_summaries")
+
+
+class StructuredMemoryItem(Base):
+	__tablename__ = "structured_memory_items"
+	__table_args__ = (
+		UniqueConstraint("user_id", "category", "name", name="uq_structured_memory_user_category_name"),
+		CheckConstraint(
+			"category IN ('project', 'preferences', 'decisions')",
+			name="ck_structured_memory_category",
+		),
+		CheckConstraint(
+			"(category = 'decisions' AND name IS NULL) OR "
+			"(category IN ('project', 'preferences') AND name IS NOT NULL)",
+			name="ck_structured_memory_name",
+		),
+		Index("ix_structured_memory_user_category", "user_id", "category"),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+	user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+	category: Mapped[str] = mapped_column(String(16))
+	name: Mapped[str | None] = mapped_column(String(160), nullable=True)
+	value: Mapped[object] = mapped_column(JSON)
+	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
+	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+
+	user: Mapped[User] = relationship(back_populates="structured_memory_items")
 
 
 class Attachment(Base):
@@ -124,7 +176,9 @@ class KnowledgeApproach(Base):
 	__tablename__ = "knowledge_approaches"
 	__table_args__ = (
 		UniqueConstraint("user_id", "slug", name="uq_knowledge_approach_user_slug"),
+		CheckConstraint("rating IS NULL OR (rating >= 1 AND rating <= 5)", name="ck_knowledge_approach_rating"),
 		Index("ix_knowledge_approach_user_name", "user_id", "name"),
+		Index("ix_knowledge_approach_user_rating", "user_id", "rating"),
 	)
 
 	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
@@ -138,6 +192,7 @@ class KnowledgeApproach(Base):
 	writing_guidelines: Mapped[list] = mapped_column(JSON, default=list)
 	avoid: Mapped[list] = mapped_column(JSON, default=list)
 	example_knowledge_item_ids: Mapped[list] = mapped_column(JSON, default=list)
+	rating: Mapped[int | None] = mapped_column(Integer, nullable=True)
 	is_active: Mapped[bool] = mapped_column(Boolean, default=True, index=True)
 	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)

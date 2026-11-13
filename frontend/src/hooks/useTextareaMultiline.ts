@@ -46,7 +46,7 @@ export function useTextareaMultiline({ value, maxHeight = 320 }: UseTextareaMult
 		textarea.style.maxHeight = `${maxHeight}px`;
 		textarea.style.overflowY = contentHeight > maxHeight ? 'auto' : 'hidden';
 
-		const nextMultiline = value.includes('\n') || contentHeight > singleLineHeight + 1;
+		const nextMultiline = value.length > 0 && (isMultiline || value.includes('\n') || contentHeight > singleLineHeight + 1);
 		if (isMultiline !== nextMultiline) setIsMultiline(nextMultiline);
 		updateScrollMask(textarea);
 	}, [isMultiline, maxHeight, setIsMultiline, value]);

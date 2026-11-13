@@ -1,12 +1,15 @@
 import json
+from dataclasses import replace
 from types import SimpleNamespace
 
 import httpx
-from groq import APIStatusError
+from groq import APIConnectionError, APIStatusError, RateLimitError
 
 
 class FakeCompletions:
 	async def create(self, **kwargs):
+		if not kwargs.get("stream", False):
+			return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=""))])
 		async def chunks():
 			for content in ("Привет", ", мир!"):
 				yield SimpleNamespace(
@@ -25,15 +28,48 @@ class RecordingCompletions(FakeCompletions):
 		self.calls: list[dict] = []
 
 	async def create(self, **kwargs):
-		self.calls.append(kwargs)
+		if kwargs.get("stream", False):
+			self.calls.append(kwargs)
 		return await super().create(**kwargs)
+
+
+class ResponseStream:
+	def __init__(self, stream, request_id: str):
+		self.stream = stream
+		request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+		self.response = httpx.Response(200, request=request, headers={"x-request-id": request_id})
+
+	def __aiter__(self):
+		return self.stream.__aiter__()
+
+
+class BranchSummaryCompletions(FakeCompletions):
+	def __init__(self):
+		self.stream_calls: list[dict] = []
+		self.summary_calls: list[dict] = []
+
+	async def create(self, **kwargs):
+		if kwargs.get("stream", False):
+			self.stream_calls.append(kwargs)
+			return await super().create(**kwargs)
+		if "response_format" in kwargs:
+			return await super().create(**kwargs)
+		self.summary_calls.append(kwargs)
+		return SimpleNamespace(
+			choices=[SimpleNamespace(message=SimpleNamespace(content="SUMMARY_OLD_ACTIVE"))],
+			usage=SimpleNamespace(prompt_tokens=20, completion_tokens=5),
+		)
 
 
 class FixedCompletions:
 	def __init__(self, content: str):
 		self.content = content
+		self.calls: list[dict] = []
 
 	async def create(self, **kwargs):
+		if not kwargs.get("stream", False):
+			return SimpleNamespace(choices=[SimpleNamespace(message=SimpleNamespace(content=""))])
+		self.calls.append(kwargs)
 		async def chunks():
 			yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content=self.content))])
 		return chunks()
@@ -41,12 +77,29 @@ class FixedCompletions:
 
 class ContextRejectingCompletions(RecordingCompletions):
 	async def create(self, **kwargs):
+		if not kwargs.get("stream", False):
+			return await FakeCompletions.create(self, **kwargs)
 		self.calls.append(kwargs)
 		if len(kwargs["messages"]) > 2:
 			request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
-			response = httpx.Response(500, request=request)
-			raise APIStatusError("context rejected", response=response, body={"error": "test"})
-		return await FakeCompletions.create(self, **kwargs)
+			response = httpx.Response(413, request=request, headers={"x-request-id": "provider-full-413"})
+			raise APIStatusError("context rejected", response=response, body={"error": {
+				"message": "Maximum context length exceeded. Limit: 100000, Requested: 100500",
+				"type": "invalid_request_error",
+				"code": "context_length_exceeded",
+			}})
+		stream = await FakeCompletions.create(self, **kwargs)
+		return ResponseStream(stream, "provider-compact-success")
+
+
+class FailingStreamCompletions(FakeCompletions):
+	def __init__(self, error_factory):
+		self.error_factory = error_factory
+
+	async def create(self, **kwargs):
+		if kwargs.get("stream", False):
+			raise self.error_factory()
+		return await super().create(**kwargs)
 
 
 def test_auth_session_and_structured_error(client):
@@ -56,10 +109,11 @@ def test_auth_session_and_structured_error(client):
 
 	registered = client.post(
 		"/api/auth/register",
-		json={"email": "first@example.com", "password": "strong-password"},
+		json={"login": "first-user", "email": "first@example.com", "password": "strong-password"},
 	)
 	assert registered.status_code == 200
 	assert registered.json()["user"]["email"] == "first@example.com"
+	assert registered.json()["user"]["login"] == "first-user"
 	client.headers.update({"X-CSRF-Token": registered.json()["csrfToken"]})
 	assert client.get("/api/auth/me").status_code == 200
 
@@ -69,14 +123,44 @@ def test_auth_session_and_structured_error(client):
 	client.headers.update({"X-CSRF-Token": csrf})
 	login = client.post(
 		"/api/auth/login",
-		json={"email": "first@example.com", "password": "strong-password"},
+		json={"identifier": "first@example.com", "password": "strong-password"},
 	)
 	assert login.status_code == 200
 	client.headers.update({"X-CSRF-Token": login.json()["csrfToken"]})
+	client.post("/api/auth/logout")
+	csrf = client.get("/api/auth/csrf").json()["csrfToken"]
+	client.headers.update({"X-CSRF-Token": csrf})
+	login_by_name = client.post("/api/auth/login", json={"identifier": "FIRST-USER", "password": "strong-password"})
+	assert login_by_name.status_code == 200
+	client.headers.update({"X-CSRF-Token": login_by_name.json()["csrfToken"]})
 
-	validation = client.post("/api/auth/login", json={"email": "a", "password": "x"})
+	duplicate_login = client.post("/api/auth/register", json={
+		"login": "first-user", "email": "different@example.com", "password": "strong-password",
+	})
+	assert duplicate_login.status_code == 409
+	assert duplicate_login.json()["error"]["code"] == "LOGIN_EXISTS"
+	assert duplicate_login.json()["error"]["details"] == {"field": "login"}
+	duplicate_email = client.post("/api/auth/register", json={
+		"login": "different-user", "email": "first@example.com", "password": "strong-password",
+	})
+	assert duplicate_email.status_code == 409
+	assert duplicate_email.json()["error"]["code"] == "EMAIL_EXISTS"
+	assert duplicate_email.json()["error"]["details"] == {"field": "email"}
+
+	validation = client.post("/api/auth/login", json={"identifier": "a", "password": "x"})
 	assert validation.status_code == 422
 	assert validation.json()["error"]["code"] == "VALIDATION_ERROR"
+	assert validation.json()["error"]["details"]["fieldErrors"] == {
+		"identifier": "Введите корректный email или логин",
+		"password": "Пароль должен содержать от 8 до 128 символов",
+	}
+	invalid_login = client.post("/api/auth/register", json={
+		"login": "name@example.com", "email": "valid@example.com", "password": "strong-password",
+	})
+	assert invalid_login.status_code == 422
+	assert invalid_login.json()["error"]["details"]["fieldErrors"] == {
+		"login": "Введите корректный логин без пробелов и символа @",
+	}
 
 
 def test_conversation_crud(authenticated_client):
@@ -255,11 +339,17 @@ def test_normalizes_broken_history():
 	assert "И уточни детали" in normalized[-1]["content"]
 
 
-def test_retries_rejected_history_with_compact_context(authenticated_client, monkeypatch):
+def test_retries_rejected_history_with_compact_context(authenticated_client, monkeypatch, caplog):
 	import app.main as main_module
+	from app import groq_diagnostics
 
 	completions = ContextRejectingCompletions()
 	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	monkeypatch.setattr(
+		groq_diagnostics,
+		"settings",
+		replace(groq_diagnostics.settings, app_env="development", groq_debug_errors=True),
+	)
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Контекст"}).json()["conversation"]["id"]
 
 	first = authenticated_client.post(
@@ -268,15 +358,72 @@ def test_retries_rejected_history_with_compact_context(authenticated_client, mon
 	)
 	assert '"type": "done"' in first.text
 
-	second = authenticated_client.post(
-		f"/api/conversations/{conversation_id}/stream",
-		data={"prompt": "Продолжи"},
-	)
+	with caplog.at_level("WARNING", logger="velorian"):
+		second = authenticated_client.post(
+			f"/api/conversations/{conversation_id}/stream",
+			data={"prompt": "Продолжи"},
+		)
 
 	assert '"type": "done"' in second.text
 	assert len(completions.calls) == 3
 	assert [message["role"] for message in completions.calls[1]["messages"]] == ["system", "user", "assistant", "user"]
 	assert [message["role"] for message in completions.calls[2]["messages"]] == ["system", "user"]
+	meta = next(json.loads(line) for line in second.text.splitlines() if '"type": "meta"' in line)
+	diagnostics = [
+		json.loads(record.getMessage())
+		for record in caplog.records
+		if record.name == "velorian" and record.getMessage().startswith("{")
+	]
+	provider_error = next(item for item in diagnostics if item.get("event") == "GROQ_API_ERROR")
+	fallback_started = next(item for item in diagnostics if item.get("event") == "GROQ_COMPACT_FALLBACK_STARTED")
+	fallback_result = next(item for item in diagnostics if item.get("event") == "GROQ_COMPACT_FALLBACK_RESULT")
+	assert provider_error["http_status"] == 413
+	assert provider_error["constraint_type"] == "context"
+	assert provider_error["provider_request_id"] == "provider-full-413"
+	assert provider_error["correlation_id"] == meta["requestId"]
+	assert fallback_started["correlation_id"] == meta["requestId"]
+	assert fallback_started["reason"] == "retryable_provider_status_without_partial_output"
+	assert fallback_started["full_input_tokens_estimate"] > fallback_started["compact_input_tokens_estimate"]
+	assert fallback_result["correlation_id"] == meta["requestId"]
+	assert fallback_result["result"] == "success"
+	assert fallback_result["provider_request_id"] == "provider-compact-success"
+	assert "Первый вопрос" not in "\n".join(record.getMessage() for record in caplog.records)
+	assert "Продолжи" not in "\n".join(record.getMessage() for record in caplog.records)
+
+
+def test_provider_rate_limit_and_connection_errors_remain_safe_for_frontend(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	def rate_limit_error():
+		request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+		response = httpx.Response(429, request=request, headers={"x-request-id": "provider-rate-limit"})
+		return RateLimitError(
+			"raw rate limit SDK message",
+			response=response,
+			body={"error": {"message": "raw private provider reason", "type": "rate_limit", "code": "tpm"}},
+		)
+
+	def connection_error():
+		request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+		return APIConnectionError(message="raw private connection reason", request=request)
+
+	for index, (error_factory, expected_code) in enumerate((
+		(rate_limit_error, "AI_RATE_LIMITED"),
+		(connection_error, "AI_UNAVAILABLE"),
+	)):
+		monkeypatch.setattr(main_module, "client", FakeGroq(FailingStreamCompletions(error_factory)))
+		conversation_id = authenticated_client.post(
+			"/api/conversations",
+			json={"title": f"Provider failure {index}"},
+		).json()["conversation"]["id"]
+		response = authenticated_client.post(
+			f"/api/conversations/{conversation_id}/stream",
+			data={"prompt": "Проверь безопасную ошибку"},
+		)
+		error_event = next(json.loads(line) for line in response.text.splitlines() if '"type": "error"' in line)
+		assert error_event["code"] == expected_code
+		assert "raw private" not in response.text
+		assert "raw rate limit SDK message" not in response.text
 
 
 def test_retry_creates_a_new_user_message(authenticated_client, monkeypatch):
@@ -314,37 +461,559 @@ def test_retry_creates_a_new_user_message(authenticated_client, monkeypatch):
 def test_edit_creates_branch_and_can_switch_versions(authenticated_client, monkeypatch):
 	import app.main as main_module
 
-	monkeypatch.setattr(main_module, "client", FakeGroq())
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Ветки"}).json()["conversation"]["id"]
-	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Первая версия"})
-	original = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"][0]
+	for prompt in ("A", "B1"):
+		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
+	messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
+	original = next(message for message in messages if message["content"] == "B1")
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "C"},
+		files={"files": ("old-branch.txt", b"OLD BRANCH ATTACHMENT", "text/plain")},
+	)
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "D"})
 
 	edited = authenticated_client.post(
 		f"/api/conversations/{conversation_id}/stream",
-		data={"prompt": "Изменённая версия", "edit_message_id": original["id"]},
+		data={"prompt": "B2", "edit_message_id": original["id"]},
 	)
 	assert '"type": "done"' in edited.text
+	assert [message["content"] for message in completions.calls[-1]["messages"] if message["role"] == "user"] == ["A", "B2"]
+	assert "OLD BRANCH ATTACHMENT" not in completions.calls[-1]["messages"][-1]["content"]
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "E"})
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "F"})
+	assert [message["content"] for message in completions.calls[-1]["messages"] if message["role"] == "user"] == ["A", "B2", "E", "F"]
+
 	messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
-	user_versions = [message for message in messages if message["role"] == "user"]
-	assert len(user_versions) == 2
+	user_versions = [message for message in messages if message["content"] in {"B1", "B2"}]
 	assert user_versions[0]["branchGroupId"] == user_versions[1]["branchGroupId"]
 	assert [message["isActive"] for message in user_versions] == [False, True]
+	assert user_versions[0]["replyToId"] == user_versions[1]["replyToId"]
+	assert {message["content"] for message in messages if message["role"] == "user"} == {"A", "B1", "C", "D", "B2", "E", "F"}
 
 	activated = authenticated_client.patch(f"/api/messages/{original['id']}/activate")
 	assert activated.status_code == 200
-	user_versions = [
-		message
-		for message in authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
+	user_versions = [message for message in authenticated_client.get(
+		f"/api/conversations/{conversation_id}"
+	).json()["conversation"]["messages"] if message["content"] in {"B1", "B2"}]
+	assert [message["isActive"] for message in user_versions] == [True, False]
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "G"})
+	assert [
+		message["content"].split("\n\n<document_context>", 1)[0]
+		for message in completions.calls[-1]["messages"] if message["role"] == "user"
+	] == [
+		"A", "B1", "C", "D", "G",
+	]
+
+
+def test_chat_context_builder_isolates_sibling_branches(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Изоляция веток"}).json()["conversation"]["id"]
+	for prompt in ("A", "B", "C1", "D1"):
+		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
+
+	messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
+	c1 = next(message for message in messages if message["content"] == "C1")
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "C2", "edit_message_id": c1["id"]},
+	)
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "D2"})
+
+	user_path = [
+		message["content"]
+		for message in completions.calls[-1]["messages"]
 		if message["role"] == "user"
 	]
-	assert [message["isActive"] for message in user_versions] == [True, False]
+	assert user_path == ["A", "B", "C2", "D2"]
+	assert not {"C1", "D1"}.intersection(user_path)
+
+
+def test_chat_context_builder_limits_active_branch_history_by_token_budget(authenticated_client, monkeypatch, caplog):
+	import app.main as main_module
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	monkeypatch.setattr(main_module, "settings", replace(main_module.settings, history_token_budget=15))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "History budget"}).json()["conversation"]["id"]
+
+	with caplog.at_level("INFO", logger="uvicorn.error"):
+		for prompt in ("A" * 20, "B" * 8, "C" * 4, "D" * 2):
+			authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
+
+	selected_messages = completions.calls[-1]["messages"][1:]
+	assert [(message["role"], message["content"]) for message in selected_messages] == [
+		("user", "C" * 4),
+		("assistant", "Привет, мир!"),
+		("user", "D" * 2),
+	]
+
+	context_logs = [record.getMessage() for record in caplog.records if record.getMessage().startswith("AI context size ")]
+	history_tokens = int(next(part for part in context_logs[-1].split() if part.startswith("history_tokens=")).split("=", 1)[1])
+	assert history_tokens <= 15
+
+
+def test_branch_summary_contains_only_evicted_active_history(authenticated_client, monkeypatch, caplog):
+	import app.main as main_module
+	from sqlalchemy import select
+
+	from app.database import SessionLocal
+	from app.models import BranchSummary, Message
+
+	completions = BranchSummaryCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post(
+		"/api/conversations", json={"title": "Branch summary budget"},
+	).json()["conversation"]["id"]
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "OLD_ACTIVE_MESSAGE_" * 3},
+	)
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "SIBLING_B1"})
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "SIBLING_C1"})
+	messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
+	sibling_b1 = next(message for message in messages if message["content"] == "SIBLING_B1")
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "ACTIVE_FRESH", "edit_message_id": sibling_b1["id"]},
+	)
+	monkeypatch.setattr(main_module, "settings", replace(main_module.settings, history_token_budget=15))
+
+	with caplog.at_level("INFO", logger="uvicorn.error"):
+		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "CURRENT"})
+
+	assert len(completions.summary_calls) == 1
+	summary_input = completions.summary_calls[0]["messages"][1]["content"]
+	assert "OLD_ACTIVE_MESSAGE_" in summary_input
+	assert "SIBLING_B1" not in summary_input
+	assert "SIBLING_C1" not in summary_input
+	assert "ACTIVE_FRESH" not in summary_input
+	assert "CURRENT" not in summary_input
+	main_context = completions.stream_calls[-1]["messages"]
+	assert [message["content"] for message in main_context if message["role"] == "user"] == [
+		"ACTIVE_FRESH", "CURRENT",
+	]
+	assert all("SUMMARY_OLD_ACTIVE" not in message["content"] for message in main_context)
+
+	with SessionLocal() as db:
+		summary = db.scalar(select(BranchSummary).where(BranchSummary.conversation_id == conversation_id))
+		assert summary is not None
+		assert summary.summary_text == "SUMMARY_OLD_ACTIVE"
+		assert db.get(Message, summary.branch_anchor_message_id).content == "CURRENT"
+		assert db.get(Message, summary.summarized_through_message_id).reply_to_id is not None
+
+	usage_logs = [record.getMessage() for record in caplog.records if "purpose=branch_summary" in record.getMessage()]
+	assert len(usage_logs) == 1
+	assert "task_type=summary" in usage_logs[0]
+	assert "prompt_version=branch_summary:v1" in usage_logs[0]
+
+	with caplog.at_level("INFO", logger="uvicorn.error"):
+		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "NEXT"})
+
+	assert len(completions.summary_calls) == 2
+	incremental_input = completions.summary_calls[1]["messages"][1]["content"]
+	assert "SUMMARY_OLD_ACTIVE" in incremental_input
+	assert "ACTIVE_FRESH" in incremental_input
+	assert "OLD_ACTIVE_MESSAGE_" not in incremental_input
+	assert "SIBLING_B1" not in incremental_input
+	assert "SIBLING_C1" not in incremental_input
+	assert "CURRENT" not in incremental_input
+	assert "NEXT" not in incremental_input
+	assert [message["content"] for message in completions.stream_calls[-1]["messages"] if message["role"] == "user"] == [
+		"CURRENT", "NEXT",
+	]
+	with SessionLocal() as db:
+		assert len(list(db.scalars(
+			select(BranchSummary).where(BranchSummary.conversation_id == conversation_id)
+		))) == 2
+
+
+def test_chat_context_uses_branch_summary_then_fresh_raw_history(authenticated_client, caplog):
+	from uuid import uuid4
+
+	import app.main as main_module
+	from app.database import SessionLocal
+	from app.models import BranchSummary, Message
+
+	conversation_id = authenticated_client.post(
+		"/api/conversations", json={"title": "Summary context"},
+	).json()["conversation"]["id"]
+	user_id = authenticated_client.get("/api/auth/me").json()["user"]["id"]
+	with SessionLocal() as db:
+		a = Message(id=str(uuid4()), conversation_id=conversation_id, role="user", content="A")
+		b = Message(id=str(uuid4()), conversation_id=conversation_id, role="assistant", content="B", reply_to_id=a.id)
+		c = Message(id=str(uuid4()), conversation_id=conversation_id, role="assistant", content="C", reply_to_id=b.id)
+		d = Message(id=str(uuid4()), conversation_id=conversation_id, role="user", content="D", reply_to_id=c.id)
+		e = Message(id=str(uuid4()), conversation_id=conversation_id, role="assistant", content="E", reply_to_id=d.id)
+		f = Message(id=str(uuid4()), conversation_id=conversation_id, role="user", content="F", reply_to_id=e.id)
+		db.add_all([a, b, c, d, e, f])
+		db.flush()
+		db.add(BranchSummary(
+			conversation_id=conversation_id,
+			branch_anchor_message_id=f.id,
+			summarized_through_message_id=c.id,
+			summary_text="Summary of A B C",
+		))
+		db.commit()
+
+		with caplog.at_level("INFO", logger="uvicorn.error"):
+			context, _, _, excluded_history = main_module.build_chat_context(
+				db, conversation_id, user_id, "F", f,
+			)
+
+	assert context[0] == {"role": "system", "content": main_module.CHAT_PROMPT}
+	assert context[1] == {
+		"role": "system",
+		"content": main_module.BRANCH_SUMMARY_CONTEXT_PREFIX + "Summary of A B C",
+	}
+	assert [(message["role"], message["content"]) for message in context[2:]] == [
+		("user", "D"),
+		("assistant", "E"),
+		("user", "F"),
+	]
+	assert excluded_history == []
+
+	context_log = next(
+		record.getMessage() for record in reversed(caplog.records)
+		if record.getMessage().startswith("AI context size ")
+	)
+	values = {
+		name: int(next(part for part in context_log.split() if part.startswith(f"{name}=")).split("=", 1)[1])
+		for name in ("system_tokens", "summary_tokens", "history_tokens", "memory_tokens", "knowledge_tokens", "user_tokens", "total_tokens")
+	}
+	assert values["summary_tokens"] == main_module.estimate_tokens(context[1]["content"])
+	assert values["total_tokens"] == sum(value for name, value in values.items() if name != "total_tokens")
+
+
+def test_chat_context_rejects_summary_from_sibling_branch(authenticated_client):
+	from uuid import uuid4
+
+	import app.main as main_module
+	from sqlalchemy import select
+
+	from app.database import SessionLocal
+	from app.models import BranchSummary, Message
+
+	conversation_id = authenticated_client.post(
+		"/api/conversations", json={"title": "Sibling summary isolation"},
+	).json()["conversation"]["id"]
+	user_id = authenticated_client.get("/api/auth/me").json()["user"]["id"]
+	with SessionLocal() as db:
+		a = Message(id=str(uuid4()), conversation_id=conversation_id, role="user", content="A")
+		b = Message(id=str(uuid4()), conversation_id=conversation_id, role="assistant", content="B", reply_to_id=a.id)
+		c = Message(
+			id=str(uuid4()), conversation_id=conversation_id, role="user",
+			content="C OLD_C_UNIQUE_FACT", reply_to_id=b.id, is_active=False,
+		)
+		d = Message(
+			id=str(uuid4()), conversation_id=conversation_id, role="assistant",
+			content="D OLD_D_UNIQUE_FACT", reply_to_id=c.id,
+		)
+		c2 = Message(
+			id=str(uuid4()), conversation_id=conversation_id, role="user",
+			content="C2", reply_to_id=b.id, is_active=True,
+		)
+		db.add_all([a, b, c, d, c2])
+		db.flush()
+		db.add(BranchSummary(
+			conversation_id=conversation_id,
+			branch_anchor_message_id=c.id,
+			summarized_through_message_id=d.id,
+			summary_text="SIBLING_SUMMARY_WITH_C_D_FACTS",
+		))
+		db.commit()
+
+		context, _, _, _ = main_module.build_chat_context(
+			db, conversation_id, user_id, "C2", c2,
+		)
+		conversation_messages = list(db.scalars(
+			select(Message)
+			.where(Message.conversation_id == conversation_id)
+			.order_by(Message.created_at, Message.id)
+		))
+		active_path = main_module._message_path(conversation_messages, c2.id)
+
+	assert [message.content for message in active_path] == ["A", "B", "C2"]
+	assert [(message["role"], message["content"]) for message in context[1:]] == [
+		("user", "A"),
+		("assistant", "B"),
+		("user", "C2"),
+	]
+	serialized_context = "\n".join(message["content"] for message in context)
+	assert "SIBLING_SUMMARY_WITH_C_D_FACTS" not in serialized_context
+	assert "OLD_C_UNIQUE_FACT" not in serialized_context
+	assert "OLD_D_UNIQUE_FACT" not in serialized_context
+
+
+def test_chat_context_builder_limits_history_by_total_context_budget(authenticated_client, monkeypatch, caplog):
+	import app.main as main_module
+
+	current_prompt = "D" * 2
+	chat_context_budget = main_module.estimate_tokens(main_module.CHAT_PROMPT) + main_module.estimate_tokens(current_prompt) + 15
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	monkeypatch.setattr(
+		main_module,
+		"settings",
+		replace(main_module.settings, chat_context_budget=chat_context_budget, history_token_budget=1000),
+	)
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Context budget"}).json()["conversation"]["id"]
+
+	with caplog.at_level("INFO", logger="uvicorn.error"):
+		for prompt in ("A" * 20, "B" * 8, "C" * 4, current_prompt):
+			authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
+
+	selected_messages = completions.calls[-1]["messages"]
+	assert selected_messages[0] == {"role": "system", "content": main_module.CHAT_PROMPT}
+	assert [(message["role"], message["content"]) for message in selected_messages[1:]] == [
+		("user", "C" * 4),
+		("assistant", "Привет, мир!"),
+		("user", current_prompt),
+	]
+
+	context_logs = [record.getMessage() for record in caplog.records if record.getMessage().startswith("AI context size ")]
+	total_tokens = int(next(part for part in context_logs[-1].split() if part.startswith("total_tokens=")).split("=", 1)[1])
+	assert total_tokens <= chat_context_budget
+
+
+def test_pre_stream_context_error_finalizes_assistant_and_next_request_continues(authenticated_client, monkeypatch):
+	import app.main as main_module
+	from sqlalchemy import select
+
+	from app.database import SessionLocal
+	from app.errors import AppError
+	from app.models import Message
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	original_build_chat_context = main_module.build_chat_context
+	should_fail = True
+
+	def fail_first_context_build(*args, **kwargs):
+		nonlocal should_fail
+		if should_fail:
+			should_fail = False
+			raise AppError(413, "CONTEXT_TOO_LARGE", "Контекст диалога превышает допустимый лимит")
+		return original_build_chat_context(*args, **kwargs)
+
+	monkeypatch.setattr(main_module, "build_chat_context", fail_first_context_build)
+	conversation_id = authenticated_client.post(
+		"/api/conversations", json={"title": "Pre-stream lifecycle"},
+	).json()["conversation"]["id"]
+	request_id = "pre-stream-context-too-large"
+	failed = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "FIRST_USER_MESSAGE"},
+		headers={"X-Request-ID": request_id},
+	)
+
+	assert failed.status_code == 413
+	assert failed.json()["error"]["code"] == "CONTEXT_TOO_LARGE"
+	assert failed.json()["error"]["request_id"] == request_id
+	conversation = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]
+	assert [(message["role"], message["status"]) for message in conversation["messages"]] == [
+		("user", "done"),
+		("assistant", "error"),
+	]
+	failed_assistant = conversation["messages"][1]
+	assert failed_assistant["error"]["code"] == "CONTEXT_TOO_LARGE"
+	assert failed_assistant["error"]["requestId"] == request_id
+
+	succeeded = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "SECOND_USER_MESSAGE"},
+	)
+	assert succeeded.status_code == 200
+	assert '"type": "done"' in succeeded.text
+	user_context = [
+		message["content"] for message in completions.calls[-1]["messages"] if message["role"] == "user"
+	]
+	assert user_context == ["SECOND_USER_MESSAGE"]
+	assert all(
+		"Контекст диалога превышает допустимый лимит" not in message["content"]
+		for message in completions.calls[-1]["messages"]
+	)
+
+	with SessionLocal() as db:
+		messages = list(db.scalars(
+			select(Message)
+			.where(Message.conversation_id == conversation_id)
+			.order_by(Message.created_at, Message.id)
+		))
+		assert not any(message.status == "streaming" for message in messages)
+		assert [message.content for message in main_module._message_path(messages, messages[-1].id) if message.role == "user"] == [
+			"FIRST_USER_MESSAGE", "SECOND_USER_MESSAGE",
+		]
+
+
+def test_failed_turn_is_excluded_from_next_ai_history(authenticated_client, monkeypatch):
+	import app.main as main_module
+	from sqlalchemy import select
+
+	from app.database import SessionLocal
+	from app.errors import AppError
+	from app.models import Message
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post(
+		"/api/conversations", json={"title": "Failed turn history"},
+	).json()["conversation"]["id"]
+	first_prompt = "Расскажи кратко про Vue"
+	failed_prompt = "Расскажи кратко про React"
+	current_prompt = "Ответь одним словом: работает"
+	assert authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream", data={"prompt": first_prompt},
+	).status_code == 200
+
+	original_build_chat_context = main_module.build_chat_context
+	should_fail = True
+
+	def fail_next_context_build(*args, **kwargs):
+		nonlocal should_fail
+		if should_fail:
+			should_fail = False
+			raise AppError(413, "CONTEXT_TOO_LARGE", "Контекст диалога превышает допустимый лимит")
+		return original_build_chat_context(*args, **kwargs)
+
+	monkeypatch.setattr(main_module, "build_chat_context", fail_next_context_build)
+	failed = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream", data={"prompt": failed_prompt},
+	)
+	assert failed.status_code == 413
+	assert failed.json()["error"]["code"] == "CONTEXT_TOO_LARGE"
+	succeeded = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream", data={"prompt": current_prompt},
+	)
+	assert succeeded.status_code == 200
+	assert '"type": "done"' in succeeded.text
+
+	ai_messages = completions.calls[-1]["messages"]
+	assert [(message["role"], message["content"]) for message in ai_messages[1:]] == [
+		("user", first_prompt),
+		("assistant", "Привет, мир!"),
+		("user", current_prompt),
+	]
+	assert all(failed_prompt not in message["content"] for message in ai_messages)
+	assert all("Контекст диалога превышает допустимый лимит" not in message["content"] for message in ai_messages)
+
+	with SessionLocal() as db:
+		messages = list(db.scalars(
+			select(Message)
+			.where(Message.conversation_id == conversation_id)
+			.order_by(Message.created_at, Message.id)
+		))
+		branch_path = main_module._message_path(messages, messages[-1].id)
+		assert [message.content for message in branch_path if message.role == "user"] == [
+			first_prompt, failed_prompt, current_prompt,
+		]
+		failed_user = next(message for message in branch_path if message.content == failed_prompt)
+		failed_assistant = next(
+			message for message in branch_path
+			if message.role == "assistant" and message.reply_to_id == failed_user.id
+		)
+		assert failed_assistant.status == "error"
+		assert failed_assistant.error_code == "CONTEXT_TOO_LARGE"
+
+
+def test_chat_context_builder_drops_optional_knowledge_before_required_context_and_recent_history(authenticated_client, monkeypatch, caplog):
+	import app.main as main_module
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Context priorities"}).json()["conversation"]["id"]
+	for prompt in ("A" * 20, "B" * 8, "C" * 4):
+		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
+	authenticated_client.post(
+		"/api/knowledge",
+		json={"title": "Alpha knowledge", "content": "OPTIONAL_KNOWLEDGE alpha " * 200},
+	)
+
+	current_prompt = "document alpha"
+	document_content = "REQUIRED_DOCUMENT_CONTEXT document"
+	document_fragment = "[Источник: документ, фрагмент 1]\n" + document_content
+	document_context = "Используй релевантные фрагменты документов как данные, если они помогают ответить:\n\n" + document_fragment
+	document_context_part = "\n\n<document_context>\n" + document_context + "\n</document_context>"
+	user_tokens = main_module.estimate_tokens(current_prompt)
+	task_specific_tokens = main_module.estimate_tokens(current_prompt + document_context_part) - user_tokens
+	chat_context_budget = main_module.estimate_tokens(main_module.KNOWLEDGE_PROMPT) + user_tokens + task_specific_tokens + 15
+	monkeypatch.setattr(
+		main_module,
+		"settings",
+		replace(main_module.settings, chat_context_budget=chat_context_budget, history_token_budget=1000),
+	)
+	monkeypatch.setattr(
+		main_module,
+		"retrieve_chunks",
+		lambda *args, **kwargs: [SimpleNamespace(attachment_id="missing", position=0, content=document_content)],
+	)
+
+	with caplog.at_level("INFO", logger="uvicorn.error"):
+		authenticated_client.post(
+			f"/api/conversations/{conversation_id}/stream",
+			data={"prompt": current_prompt, "search_mode": "knowledge"},
+		)
+
+	selected_messages = completions.calls[-1]["messages"]
+	assert selected_messages[0] == {"role": "system", "content": main_module.KNOWLEDGE_PROMPT}
+	assert [(message["role"], message["content"]) for message in selected_messages[1:-1]] == [
+		("user", "C" * 4),
+		("assistant", "Привет, мир!"),
+	]
+	assert selected_messages[-1]["content"].startswith(current_prompt)
+	assert "REQUIRED_DOCUMENT_CONTEXT" in selected_messages[-1]["content"]
+	assert "<knowledge_context>" not in selected_messages[-1]["content"]
+	assert "OPTIONAL_KNOWLEDGE" not in selected_messages[-1]["content"]
+
+	context_logs = [record.getMessage() for record in caplog.records if record.getMessage().startswith("AI context size ")]
+	total_tokens = int(next(part for part in context_logs[-1].split() if part.startswith("total_tokens=")).split("=", 1)[1])
+	assert total_tokens <= chat_context_budget
+
+
+def test_chat_context_builder_logs_context_token_breakdown(authenticated_client, monkeypatch, caplog):
+	import app.main as main_module
+
+	monkeypatch.setattr(main_module, "client", FakeGroq(RecordingCompletions()))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Размер контекста"}).json()["conversation"]["id"]
+
+	with caplog.at_level("INFO", logger="uvicorn.error"):
+		for prompt in ("Первый вопрос", "Второй вопрос", "Третий вопрос"):
+			authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
+		authenticated_client.post("/api/knowledge", json={"title": "Альфа", "content": "Справочный материал альфа"})
+		authenticated_client.post(
+			f"/api/conversations/{conversation_id}/stream",
+			data={"prompt": "Расскажи про альфа", "search_mode": "knowledge"},
+		)
+
+	context_logs = [record.getMessage() for record in caplog.records if record.getMessage().startswith("AI context size ")]
+	assert len(context_logs) == 4
+
+	def token_value(log: str, name: str) -> int:
+		return int(next(part for part in log.split() if part.startswith(f"{name}=")).split("=", 1)[1])
+
+	assert token_value(context_logs[0], "history_tokens") == 0
+	assert token_value(context_logs[1], "history_tokens") > 0
+	assert token_value(context_logs[2], "history_tokens") > token_value(context_logs[1], "history_tokens")
+	assert all(token_value(log, "knowledge_tokens") == 0 for log in context_logs[:3])
+	assert token_value(context_logs[3], "knowledge_tokens") > 0
+	for log in context_logs:
+		assert token_value(log, "total_tokens") == sum(
+			token_value(log, name)
+			for name in ("system_tokens", "summary_tokens", "history_tokens", "memory_tokens", "knowledge_tokens", "user_tokens")
+		)
 
 
 def test_generated_file_is_attached_and_downloadable(authenticated_client, monkeypatch):
 	import app.main as main_module
 
 	answer = "```file:hello.py\nprint('Velorian')\n```\n\nФайл готов."
-	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(answer)))
+	completions = FixedCompletions(answer)
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Новый чат"}).json()["conversation"]["id"]
 	response = authenticated_client.post(
 		f"/api/conversations/{conversation_id}/stream",
@@ -359,13 +1028,15 @@ def test_generated_file_is_attached_and_downloadable(authenticated_client, monke
 	assert download.status_code == 200
 	assert download.content == b"print('Velorian')"
 	assert "attachment" in download.headers["content-disposition"]
+	assert completions.calls[0]["messages"][0]["content"] == main_module.FILE_GENERATION_PROMPT
 
 
 def test_code_request_does_not_create_file_without_explicit_file_intent(authenticated_client, monkeypatch):
 	import app.main as main_module
 
 	answer = "```file:app.js\nconsole.log('Hello');\n```\n\nГотово."
-	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(answer)))
+	completions = FixedCompletions(answer)
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Новый чат"}).json()["conversation"]["id"]
 	response = authenticated_client.post(
 		f"/api/conversations/{conversation_id}/stream",
@@ -374,6 +1045,7 @@ def test_code_request_does_not_create_file_without_explicit_file_intent(authenti
 	done = next(json.loads(line) for line in response.text.splitlines() if '"type": "done"' in line)
 	assert done["message"]["attachments"] == []
 	assert done["message"]["content"] == "```javascript\nconsole.log('Hello');\n```\n\nГотово."
+	assert completions.calls[0]["messages"][0]["content"] != main_module.FILE_GENERATION_PROMPT
 
 
 def test_automatic_title_is_short_and_has_no_emoji(authenticated_client, monkeypatch):
@@ -388,6 +1060,47 @@ def test_automatic_title_is_short_and_has_no_emoji(authenticated_client, monkeyp
 	title = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["title"]
 	assert title == "Архитектура большого современного приложения"
 	assert len(title) <= 48
+
+
+def test_automatic_title_uses_semantic_summary_of_first_message(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	class SemanticTitleCompletions(FakeCompletions):
+		def __init__(self):
+			self.title_call = None
+
+		async def create(self, **kwargs):
+			if not kwargs.get("stream", False) and kwargs["messages"][0]["content"] == main_module.TITLE_PROMPT:
+				self.title_call = kwargs
+				return SimpleNamespace(choices=[SimpleNamespace(
+					message=SimpleNamespace(content='Заголовок: "Перевод промпта на английский."'),
+				)])
+			return await super().create(**kwargs)
+
+	completions = SemanticTitleCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Новый чат"}).json()["conversation"]["id"]
+	first_message = "переведи промпт на английский, не меняя формулировок и ничего не добавляя от себя"
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": first_message},
+	)
+
+	title = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["title"]
+	assert title == "Перевод промпта на английский"
+	assert completions.title_call["messages"][1] == {"role": "user", "content": first_message}
+	assert completions.title_call["max_completion_tokens"] == 128
+	assert completions.title_call["reasoning_effort"] == "low"
+	assert completions.title_call["include_reasoning"] is False
+	title_prompt = completions.title_call["messages"][0]["content"]
+	assert title_prompt == main_module.TITLE_PROMPT
+
+
+def test_semantic_title_is_not_truncated_after_generation():
+	from app.main import _normalize_generated_title
+
+	title = "Login by email or login through one form"
+	assert _normalize_generated_title(title) == title
 
 
 def test_automatic_title_summarizes_code_request():
@@ -503,7 +1216,7 @@ def test_rating_upsert_delete_and_no_duplicates(authenticated_client, monkeypatc
 def test_cannot_rate_another_users_message(client, monkeypatch):
 	import app.main as main_module
 	monkeypatch.setattr(main_module, "client", FakeGroq())
-	first = client.post("/api/auth/register", json={"email": "rating-owner@example.com", "password": "strong-password"})
+	first = client.post("/api/auth/register", json={"login": "rating-owner", "email": "rating-owner@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": first.json()["csrfToken"]})
 	conversation_id = client.post("/api/conversations", json={"title": "Чужой"}).json()["conversation"]["id"]
 	client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Ответ"})
@@ -511,7 +1224,7 @@ def test_cannot_rate_another_users_message(client, monkeypatch):
 	client.post("/api/auth/logout")
 	csrf = client.get("/api/auth/csrf").json()["csrfToken"]
 	client.headers.update({"X-CSRF-Token": csrf})
-	second = client.post("/api/auth/register", json={"email": "rating-other@example.com", "password": "strong-password"})
+	second = client.post("/api/auth/register", json={"login": "rating-other", "email": "rating-other@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": second.json()["csrfToken"]})
 	response = client.put(f"/api/messages/{message_id}/rating", json={"score": 5})
 	assert response.status_code == 404
@@ -520,7 +1233,7 @@ def test_cannot_rate_another_users_message(client, monkeypatch):
 def test_knowledge_manual_file_rated_message_and_ownership(client, monkeypatch):
 	import app.main as main_module
 	monkeypatch.setattr(main_module, "client", FakeGroq())
-	first = client.post("/api/auth/register", json={"email": "knowledge-owner@example.com", "password": "strong-password"})
+	first = client.post("/api/auth/register", json={"login": "knowledge-owner", "email": "knowledge-owner@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": first.json()["csrfToken"]})
 	manual = client.post("/api/knowledge", json={"title": "Тестовый материал", "content": "Проверенный текст"})
 	assert manual.status_code == 200
@@ -548,7 +1261,7 @@ def test_knowledge_manual_file_rated_message_and_ownership(client, monkeypatch):
 	client.post("/api/auth/logout")
 	csrf = client.get("/api/auth/csrf").json()["csrfToken"]
 	client.headers.update({"X-CSRF-Token": csrf})
-	second = client.post("/api/auth/register", json={"email": "knowledge-other@example.com", "password": "strong-password"})
+	second = client.post("/api/auth/register", json={"login": "knowledge-other", "email": "knowledge-other@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": second.json()["csrfToken"]})
 	assert client.get(f"/api/knowledge/{manual_id}").status_code == 404
 	assert client.patch(f"/api/knowledge/{manual_id}", json={"title": "Взлом"}).status_code == 404
@@ -695,6 +1408,27 @@ def test_knowledge_rating_filters_sort_and_pagination(authenticated_client):
 		assert authenticated_client.patch(f"/api/knowledge/{second.json()['item']['id']}", json={"rating": invalid_rating}).status_code == 422
 
 
+def test_knowledge_activity_sort_and_pagination(authenticated_client):
+	for title in ("Активный 1", "Неактивный", "Активный 2"):
+		response = authenticated_client.post("/api/knowledge", json={"title": title, "content": title})
+		assert response.status_code == 200
+		if title == "Неактивный":
+			inactive_id = response.json()["item"]["id"]
+
+	assert authenticated_client.patch(f"/api/knowledge/{inactive_id}", json={"is_active": False}).status_code == 200
+	active_first = authenticated_client.get("/api/knowledge?sort=activity_desc").json()["items"]
+	inactive_first = authenticated_client.get("/api/knowledge?sort=activity_asc").json()["items"]
+	assert [item["isActive"] for item in active_first] == [True, True, False]
+	assert [item["isActive"] for item in inactive_first] == [False, True, True]
+
+	page_one = authenticated_client.get("/api/knowledge?sort=activity_desc&limit=2").json()
+	page_two = authenticated_client.get(
+		f"/api/knowledge?sort=activity_desc&limit=2&cursor={page_one['pageInfo']['nextCursor']}"
+	).json()
+	assert [item["isActive"] for item in page_one["items"]] == [True, True]
+	assert [item["isActive"] for item in page_two["items"]] == [False]
+
+
 def test_knowledge_search_handles_unicode_multiple_terms_and_literals(authenticated_client):
 	a = authenticated_client.post("/api/knowledge", json={"title": "Ёлочный ОФФЕР", "content": "Проверенный русский Текст"}).json()["item"]
 	authenticated_client.post("/api/knowledge", json={"title": "English Hooks", "content": "Curiosity angle"})
@@ -735,7 +1469,13 @@ def test_knowledge_schema_has_non_destructive_constraints_and_indexes():
 	assert foreign_keys["source_file_id"]["options"]["ondelete"] == "SET NULL"
 	assert foreign_keys["approach_id"]["options"]["ondelete"] == "SET NULL"
 	approach_indexes = {index["name"] for index in inspector.get_indexes("knowledge_approaches")}
-	assert {"ix_knowledge_approaches_user_id", "ix_knowledge_approach_user_name"}.issubset(approach_indexes)
+	approach_columns = {column["name"]: column for column in inspector.get_columns("knowledge_approaches")}
+	assert approach_columns["rating"]["nullable"] is True
+	assert {
+		"ix_knowledge_approaches_user_id",
+		"ix_knowledge_approach_user_name",
+		"ix_knowledge_approach_user_rating",
+	}.issubset(approach_indexes)
 	conversation_columns = {column["name"]: column for column in inspector.get_columns("conversations")}
 	assert conversation_columns["deleted_at"]["nullable"] is True
 	assert "ix_conversations_deleted_at" in {index["name"] for index in inspector.get_indexes("conversations")}
@@ -770,17 +1510,17 @@ def test_knowledge_file_delete_failure_preserves_database_item(authenticated_cli
 def test_knowledge_search_is_opt_in_and_owner_scoped(client, monkeypatch):
 	import app.main as main_module
 
-	owner = client.post("/api/auth/register", json={"email": "retrieval-owner@example.com", "password": "strong-password"})
+	owner = client.post("/api/auth/register", json={"login": "retrieval-owner", "email": "retrieval-owner@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": owner.json()["csrfToken"]})
 	client.post("/api/knowledge", json={"title": "Альфа", "content": "Собственный секрет альфа", "rating": 5})
 	client.post("/api/auth/logout")
 	client.headers.update({"X-CSRF-Token": client.get("/api/auth/csrf").json()["csrfToken"]})
-	other = client.post("/api/auth/register", json={"email": "retrieval-other@example.com", "password": "strong-password"})
+	other = client.post("/api/auth/register", json={"login": "retrieval-other", "email": "retrieval-other@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": other.json()["csrfToken"]})
 	client.post("/api/knowledge", json={"title": "Чужое", "content": "Чужой секрет альфа", "rating": 5})
 	client.post("/api/auth/logout")
 	client.headers.update({"X-CSRF-Token": client.get("/api/auth/csrf").json()["csrfToken"]})
-	login = client.post("/api/auth/login", json={"email": "retrieval-owner@example.com", "password": "strong-password"})
+	login = client.post("/api/auth/login", json={"identifier": "retrieval-owner@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": login.json()["csrfToken"]})
 
 	completions = RecordingCompletions()
@@ -788,6 +1528,8 @@ def test_knowledge_search_is_opt_in_and_owner_scoped(client, monkeypatch):
 	conversation_id = client.post("/api/conversations", json={"title": "Поиск знаний"}).json()["conversation"]["id"]
 	client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Расскажи про альфа", "search_mode": "none"})
 	client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Расскажи про альфа", "search_mode": "knowledge"})
+	assert completions.calls[0]["messages"][0]["content"] == main_module.CHAT_PROMPT
+	assert completions.calls[1]["messages"][0]["content"] == main_module.KNOWLEDGE_PROMPT
 	assert "<knowledge_context>" not in completions.calls[0]["messages"][-1]["content"]
 	knowledge_prompt = completions.calls[1]["messages"][-1]["content"]
 	assert "Собственный секрет альфа" in knowledge_prompt
@@ -837,12 +1579,12 @@ def test_knowledge_list_intent_browses_metadata_without_toggle(authenticated_cli
 def test_knowledge_list_intent_is_owner_scoped(client, monkeypatch):
 	import app.main as main_module
 
-	owner = client.post("/api/auth/register", json={"email": "list-owner@example.com", "password": "strong-password"})
+	owner = client.post("/api/auth/register", json={"login": "list-owner", "email": "list-owner@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": owner.json()["csrfToken"]})
 	client.post("/api/knowledge", json={"title": "Owner Material", "content": "owner-only knowledge"})
 	client.post("/api/auth/logout")
 	client.headers.update({"X-CSRF-Token": client.get("/api/auth/csrf").json()["csrfToken"]})
-	other = client.post("/api/auth/register", json={"email": "list-other@example.com", "password": "strong-password"})
+	other = client.post("/api/auth/register", json={"login": "list-other", "email": "list-other@example.com", "password": "strong-password"})
 	client.headers.update({"X-CSRF-Token": other.json()["csrfToken"]})
 
 	completions = RecordingCompletions()
@@ -978,7 +1720,7 @@ def test_knowledge_approach_crud_filter_delete_and_user_isolation(authenticated_
 	assert preserved.json()["item"]["approach"]["isActive"] is False
 
 	second = authenticated_client.post("/api/auth/register", json={
-		"email": "approach-isolation@example.com", "password": "strong-password",
+		"login": "approach-isolation", "email": "approach-isolation@example.com", "password": "strong-password",
 	})
 	assert second.status_code == 200
 	authenticated_client.headers.update({"X-CSRF-Token": second.json()["csrfToken"]})
@@ -1001,6 +1743,7 @@ def test_global_approach_crud_preserves_linked_items(authenticated_client):
 		"writing_guidelines": ["ссылаться на источники"],
 		"avoid": ["сенсационность"],
 		"example_knowledge_item_ids": [example["id"]],
+		"rating": 4,
 		"is_active": True,
 	}
 	created_response = authenticated_client.post("/api/approaches", json=payload)
@@ -1008,16 +1751,23 @@ def test_global_approach_crud_preserves_linked_items(authenticated_client):
 	created = created_response.json()["item"]
 	assert created["writingGuidelines"] == payload["writing_guidelines"]
 	assert created["exampleKnowledgeItemIds"] == [example["id"]]
+	assert created["rating"] == 4
 
 	linked = authenticated_client.post("/api/knowledge", json={
 		"title": "Связанный материал", "content": "Содержимое", "approach_id": created["id"],
 	}).json()["item"]
 	updated = authenticated_client.patch(f"/api/approaches/{created['id']}", json={
-		"description": "Обновлённое описание", "is_active": True,
+		"description": "Обновлённое описание", "rating": None,
 	})
 	assert updated.status_code == 200
 	assert updated.json()["item"]["description"] == "Обновлённое описание"
+	assert updated.json()["item"]["rating"] is None
+	assert updated.json()["item"]["isActive"] is True
 	assert updated.json()["item"]["linkedKnowledgeItemsCount"] == 1
+	for invalid_rating in (0, 6, -1, 3.7, "5"):
+		assert authenticated_client.patch(
+			f"/api/approaches/{created['id']}", json={"rating": invalid_rating},
+		).status_code == 422
 
 	assert authenticated_client.delete(f"/api/approaches/{created['id']}").status_code == 204
 	deactivated = authenticated_client.get(f"/api/approaches/{created['id']}")
@@ -1082,10 +1832,10 @@ def test_dynamic_approach_resolver_scopes_context_and_distinguishes_empty(authen
 	assert "Status: approach_empty" in completions.calls[-1]["messages"][-1]["content"]
 
 
-def test_assistant_response_markdown_file_is_exact_idempotent_and_downloadable(authenticated_client, monkeypatch):
+def test_assistant_response_markdown_file_removes_title_and_is_idempotent_and_downloadable(authenticated_client, monkeypatch):
 	import app.main as main_module
 
-	markdown = "## Тихий вечер\n\n**Жирный текст**\n\n- пункт\n\n| A | B |\n|---|---|\n| 1 | 2 |"
+	markdown = "1. **Ласковый след**\n\nТихий шёпот утра,\nИ хвост, как клятва, виляя,"
 	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(markdown)))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Markdown"}).json()["conversation"]["id"]
 	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Напиши материал"})
@@ -1095,10 +1845,10 @@ def test_assistant_response_markdown_file_is_exact_idempotent_and_downloadable(a
 	assert created.status_code == 200
 	attachment = created.json()["attachment"]
 	assert created.json()["created"] is True
-	assert attachment["name"] == "Тихий вечер.md"
+	assert attachment["name"] == "Ласковый след.md"
 	assert attachment["type"] == "text/markdown"
 	assert attachment["generated"] is True
-	assert authenticated_client.get(attachment["downloadUrl"]).content.decode() == markdown
+	assert authenticated_client.get(attachment["downloadUrl"]).content.decode() == "Тихий шёпот утра,\nИ хвост, как клятва, виляя,"
 
 	duplicate = authenticated_client.post(f"/api/messages/{message['id']}/markdown-file", json={})
 	assert duplicate.status_code == 200
@@ -1106,10 +1856,27 @@ def test_assistant_response_markdown_file_is_exact_idempotent_and_downloadable(a
 	assert duplicate.json()["attachment"]["id"] == attachment["id"]
 
 
+def test_rated_assistant_response_knowledge_removes_bold_title(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	markdown = "**Poem**\n\nSoftly falls the evening light,\nAnd old winds whisper in the shade."
+	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(markdown)))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Poem"}).json()["conversation"]["id"]
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Write a poem"})
+	message = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"][-1]
+	assert message["content"] == markdown
+	authenticated_client.put(f"/api/messages/{message['id']}/rating", json={"score": 5})
+
+	item = authenticated_client.post(f"/api/knowledge/messages/{message['id']}").json()["items"][0]
+	assert item["title"] == "Poem"
+	assert item["content"] == "Softly falls the evening light,\nAnd old winds whisper in the shade."
+
+
 def test_message_editor_knowledge_link_lifecycle_and_file_reuse(authenticated_client, monkeypatch):
 	import app.main as main_module
 
 	markdown = "## Связанный материал\n\nТочное содержимое файла."
+	body = "Точное содержимое файла."
 	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(markdown)))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Связь"}).json()["conversation"]["id"]
 	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Создай материал"})
@@ -1117,8 +1884,8 @@ def test_message_editor_knowledge_link_lifecycle_and_file_reuse(authenticated_cl
 	attachment = authenticated_client.post(f"/api/messages/{message['id']}/markdown-file", json={}).json()["attachment"]
 
 	created = authenticated_client.post("/api/knowledge", json={
-		"title": attachment["name"],
-		"content": markdown,
+		"title": "Связанный материал",
+		"content": body,
 		"rating": None,
 		"source_message_id": message["id"],
 		"source_file_id": attachment["id"],
@@ -1128,8 +1895,10 @@ def test_message_editor_knowledge_link_lifecycle_and_file_reuse(authenticated_cl
 	assert item["sourceType"] == "assistant_file"
 	assert item["sourceMessageId"] == message["id"]
 	assert item["sourceFileId"] == attachment["id"]
+	assert item["title"] == "Связанный материал"
 	assert item["rating"] is None
-	assert authenticated_client.get(item["originalDownloadUrl"]).content.decode() == markdown
+	assert item["content"] == body
+	assert authenticated_client.get(item["originalDownloadUrl"]).content.decode() == body
 	assert authenticated_client.get(f"/api/knowledge/messages/{message['id']}/link").json()["item"] == {
 		"id": item["id"], "deletedAt": None, "rating": None,
 	}
@@ -1156,7 +1925,7 @@ def test_message_editor_knowledge_link_lifecycle_and_file_reuse(authenticated_cl
 	conversation = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]
 	assert conversation["messages"][-1]["knowledgeItem"] is None
 	assert conversation["messages"][-1]["attachments"][0]["id"] == attachment["id"]
-	assert authenticated_client.get(attachment["downloadUrl"]).content.decode() == markdown
+	assert authenticated_client.get(attachment["downloadUrl"]).content.decode() == body
 
 
 def test_message_editor_text_source_preserves_selected_or_absent_rating(authenticated_client, monkeypatch):
@@ -1165,6 +1934,7 @@ def test_message_editor_text_source_preserves_selected_or_absent_rating(authenti
 	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions("Текст ответа")))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Оценки редактора"}).json()["conversation"]["id"]
 	created_ratings = []
+	created_ids = []
 	for prompt, rating in (("С оценкой", 3), ("Без оценки", None)):
 		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
 		message = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"][-1]
@@ -1177,14 +1947,18 @@ def test_message_editor_text_source_preserves_selected_or_absent_rating(authenti
 		assert created.status_code == 200
 		assert created.json()["item"]["sourceType"] == "assistant_message"
 		created_ratings.append(created.json()["item"]["rating"])
+		created_ids.append(created.json()["item"]["id"])
 
 	assert created_ratings == [3, None]
+	filtered = authenticated_client.get("/api/knowledge", params={"source_type": "rated_content"})
+	assert {item["id"] for item in filtered.json()["items"]} == set(created_ids)
 
 
 def test_generated_markdown_file_to_knowledge_filters_and_retrieval(authenticated_client, monkeypatch):
 	import app.main as main_module
 
 	markdown = "## Материал 1\n\nНейтральный тестовый текст с **Markdown**."
+	body = "Нейтральный тестовый текст с **Markdown**."
 	completions = RecordingCompletions()
 	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(markdown)))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Фильтры"}).json()["conversation"]["id"]
@@ -1200,11 +1974,14 @@ def test_generated_markdown_file_to_knowledge_filters_and_retrieval(authenticate
 	item = saved.json()["item"]
 	assert saved.json()["created"] is True
 	assert item["sourceType"] == "assistant_file"
-	assert item["content"] == markdown
+	assert item["title"] == "Материал 1"
+	assert item["content"] == body
 	assert item["mimeType"] == "text/markdown"
 	assert item["fileName"] == "Материал 1.md"
 	assert item["filters"] == filters
-	assert authenticated_client.get(item["downloadUrl"]).content.decode() == markdown
+	assert authenticated_client.get(item["downloadUrl"]).content.decode() == body
+	filtered = authenticated_client.get("/api/knowledge", params={"source_type": "uploaded_file"})
+	assert [entry["id"] for entry in filtered.json()["items"]] == [item["id"]]
 
 	duplicate = authenticated_client.post(f"/api/knowledge/attachments/{attachment['id']}", json={"filters": filters})
 	assert duplicate.status_code == 200
@@ -1290,12 +2067,18 @@ def test_knowledge_filters_optional_update_clear_and_legacy_record(authenticated
 
 
 def test_markdown_file_name_sanitizes_cross_platform_characters():
-	from app.markdown_files import markdown_file_name, unique_markdown_file_name
+	from app.markdown_files import markdown_file_name, split_markdown_title, unique_markdown_file_name
 
 	name = markdown_file_name('Тихий / вечер\\: ?* "тест"')
 	assert name.endswith(".md")
 	assert not any(character in name for character in '<>:"/\\|?*')
 	assert unique_markdown_file_name("article", {"article.md", "ARTICLE-2.MD"}) == "article-3.md"
+	assert split_markdown_title("**Poem**\n\nSoftly falls\nunchanged") == ("Poem", "Softly falls\nunchanged")
+	assert split_markdown_title("1. **Ласковый след**\n\nТихий шёпот утра") == ("Ласковый след", "Тихий шёпот утра")
+	plain = "Softly falls\nunchanged"
+	assert split_markdown_title(plain) == ("Softly falls", plain)
+	ordered_item = "1. Обычный пункт\n2. Следующий пункт"
+	assert split_markdown_title(ordered_item)[1] == ordered_item
 
 
 def test_csrf_rejects_missing_invalid_and_rotated_tokens(client):
@@ -1306,7 +2089,7 @@ def test_csrf_rejects_missing_invalid_and_rotated_tokens(client):
 	client.headers.update({"X-CSRF-Token": "invalid"})
 	assert client.post("/api/conversations", json={"title": "Плохой токен"}).status_code == 403
 	client.headers.update({"X-CSRF-Token": valid})
-	registered = client.post("/api/auth/register", json={"email": "csrf@example.com", "password": "strong-password"})
+	registered = client.post("/api/auth/register", json={"login": "csrf-user", "email": "csrf@example.com", "password": "strong-password"})
 	assert registered.status_code == 200
 	rotated = registered.json()["csrfToken"]
 	assert rotated != valid

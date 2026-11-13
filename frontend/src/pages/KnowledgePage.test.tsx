@@ -135,7 +135,7 @@ function renderKnowledge(initialEntry: string | { pathname: string; state: unkno
 				path: '/',
 				element: <TestShell />,
 				children: [
-					{ path: 'knowledge', element: <KnowledgePage user={{ id: 'user', email: 'user@example.com' }} /> },
+					{ path: 'knowledge', element: <KnowledgePage user={{ id: 'user', email: 'user@example.com', login: 'user' }} /> },
 					{ path: 'knowledge/new', element: <KnowledgeEditorPage /> },
 					{ path: 'knowledge/:knowledgeId', element: <KnowledgeEditorPage /> },
 					{ path: 'chat/:chatId', element: <div>Чат</div> },
@@ -238,19 +238,23 @@ describe('KnowledgePage', () => {
 	});
 
 	it('prefills a generated file and preserves an absent rating', async () => {
+		const generatedFile = new File(['Тихий шёпот осени\nПродолжение стихотворения.'], 'poem.txt', { type: 'text/plain' });
 		const source = {
 			type: 'assistant_file' as const,
 			messageId: 'assistant-file',
 			fileId: 'file-1',
-			title: 'Ответ.md',
-			content: '# Ответ\n\nСодержимое',
+			title: 'poem.txt',
+			content: 'Тихий шёпот осени\nПродолжение стихотворения.',
 			rating: null,
-			fileName: 'Ответ.md',
-			mimeType: 'text/markdown',
+			fileName: 'poem.txt',
+			mimeType: 'text/plain',
+			file: generatedFile,
 		};
 		renderKnowledge({ pathname: '/knowledge/new', state: { knowledgeSource: source } });
 
-		expect(await screen.findByRole('button', { name: 'Выбрать файл' })).toHaveTextContent('Ответ.md');
+		expect(await screen.findByRole('textbox', { name: 'Название' })).toHaveValue('poem.txt');
+		expect(screen.getByRole('textbox', { name: 'Содержимое' })).toHaveValue(source.content);
+		expect(screen.getByRole('button', { name: 'Выбрать файл' })).toHaveTextContent('poem.txt');
 		fireEvent.click(screen.getByRole('button', { name: 'Добавить данные' }));
 		await waitFor(() => expect(api.createKnowledgeItem).toHaveBeenCalledWith(
 			source.title,
@@ -408,7 +412,21 @@ describe('KnowledgePage', () => {
 			});
 		});
 
-		expect(screen.getByLabelText('Текущий URL')).toHaveTextContent('/knowledge/knowledge-1');
+		await waitFor(() => {
+			expect(screen.getByLabelText('Текущий URL')).toHaveTextContent('/knowledge/knowledge-1');
+		});
+	});
+
+	it('uses the shared inactive card state for disabled knowledge items', async () => {
+		api.listKnowledge.mockResolvedValue({
+			items: [{ ...item, isActive: false }],
+			pageInfo: { nextCursor: null, hasMore: false },
+		});
+
+		renderKnowledge();
+
+		const title = await screen.findByText(item.title, { selector: 'strong' });
+		expect(title.closest('article')).toHaveClass('knowledge-card--inactive');
 	});
 
 	it('updates an existing card through the selected file', async () => {
@@ -611,6 +629,18 @@ describe('KnowledgePage', () => {
 		});
 
 		expect(reset).toBeDisabled();
+	});
+
+	it('sorts knowledge items by activity from the search controls', async () => {
+		renderKnowledge();
+
+		fireEvent.click(screen.getByRole('button', { name: 'Сортировка' }));
+		fireEvent.click(screen.getByRole('button', { name: 'Сначала активные' }));
+
+		expect(screen.getByLabelText('Текущий URL')).toHaveTextContent('/knowledge?sort=activity_desc');
+		await waitFor(() => {
+			expect(api.listKnowledge).toHaveBeenLastCalledWith(expect.objectContaining({ sort: 'activity_desc' }));
+		});
 	});
 
 	it('shows the stored rating in edit mode and saves the changed rating', async () => {

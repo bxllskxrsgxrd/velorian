@@ -18,6 +18,25 @@ describe('getUserErrorMessage', () => {
 		expect(getUserFacingError('ATTACHMENTS_TOTAL_SIZE_LIMIT_EXCEEDED').title).toBe('Превышен общий размер вложений');
 	});
 
+	it('keeps context and file size errors distinct for HTTP 413', () => {
+		expect(getUserFacingError('CONTEXT_TOO_LARGE', 413, 'request-context')).toEqual({
+			code: 'CONTEXT_TOO_LARGE',
+			title: 'Контекст диалога слишком большой',
+			description: 'Контекст диалога превышает допустимый лимит',
+			requestId: 'request-context',
+			retryable: false,
+		});
+		expect(getUserFacingError('FILE_SIZE_LIMIT_EXCEEDED', 413).title).toBe('Файл слишком большой');
+	});
+
+	it('prefers a known backend code over the generic HTTP status fallback', () => {
+		expect(getUserFacingError('AI_SERVICE_ERROR', 413)).toMatchObject({
+			title: 'Не удалось получить ответ',
+			retryable: true,
+		});
+		expect(getUserFacingError('AI_SERVICE_ERROR', 413).title).not.toBe('Файл слишком большой');
+	});
+
 	it('normalizes title, description and retry policy independently', () => {
 		expect(getUserFacingError('AI_PROVIDER_UNAVAILABLE', 502, 'request-1')).toEqual({
 			code: 'AI_PROVIDER_UNAVAILABLE',

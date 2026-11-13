@@ -22,7 +22,7 @@ from .database import get_db
 from .errors import AppError
 from .file_processing import extract_text, validate_file_name
 from .knowledge_retrieval import KnowledgeRetrievalResult, KnowledgeSearchOptions, knowledge_retrieval_service
-from .markdown_files import markdown_file_name, markdown_title
+from .markdown_files import markdown_file_name, split_markdown_title
 from .models import Attachment, Conversation, KnowledgeApproach, KnowledgeItem, Message, MessageRating, User, utc_now
 from .storage import build_storage_key, get_file_storage
 
@@ -31,6 +31,10 @@ router = APIRouter(prefix=f"{settings.api_prefix}/knowledge", tags=["knowledge"]
 logger = logging.getLogger("velorian")
 RatingValue = Annotated[int, Field(strict=True, ge=1, le=5)]
 KNOWLEDGE_FILTER_KEYS = ("geo", "celebrity", "offer", "news_source")
+KNOWLEDGE_SOURCE_FILTER_GROUPS = {
+	"rated_content": ("rated_content", "assistant_message"),
+	"uploaded_file": ("uploaded_file", "assistant_file"),
+}
 TRASH_RETENTION = timedelta(days=30)
 
 
@@ -123,6 +127,7 @@ def approach_payload(approach: KnowledgeApproach) -> dict:
 		"writingGuidelines": approach.writing_guidelines or [],
 		"avoid": approach.avoid or [],
 		"exampleKnowledgeItemIds": approach.example_knowledge_item_ids or [],
+		"rating": approach.rating,
 		"isActive": approach.is_active,
 		"createdAt": approach.created_at.isoformat(),
 		"updatedAt": approach.updated_at.isoformat(),
@@ -264,7 +269,7 @@ def list_knowledge_items(
 	is_active: bool | None = None,
 	min_rating: int | None = Query(default=None, ge=1, le=5),
 	unrated: bool = False,
-	sort: Literal["date_desc", "date_asc", "rating_desc", "rating_asc"] = "date_desc",
+	sort: Literal["date_desc", "date_asc", "rating_desc", "rating_asc", "activity_desc", "activity_asc"] = "date_desc",
 	limit: int = Query(default=20, ge=1, le=100),
 	cursor: str | None = Query(default=None, max_length=512),
 	user: User = Depends(get_current_user),
@@ -278,7 +283,9 @@ def list_knowledge_items(
 		for term in search.split():
 			statement = statement.where(_knowledge_search_condition(db, term))
 	if source_type:
-		statement = statement.where(KnowledgeItem.source_type == source_type)
+		statement = statement.where(
+			KnowledgeItem.source_type.in_(KNOWLEDGE_SOURCE_FILTER_GROUPS.get(source_type, (source_type,)))
+		)
 	if approach_id:
 		owned_approach(db, approach_id, user.id)
 		statement = statement.where(KnowledgeItem.approach_id == approach_id)
@@ -297,6 +304,8 @@ def list_knowledge_items(
 		"date_asc": (asc(KnowledgeItem.updated_at), asc(KnowledgeItem.id)),
 		"rating_desc": (desc(KnowledgeItem.rating).nullslast(), desc(KnowledgeItem.updated_at), desc(KnowledgeItem.id)),
 		"rating_asc": (asc(KnowledgeItem.rating).nullslast(), desc(KnowledgeItem.updated_at), desc(KnowledgeItem.id)),
+		"activity_desc": (desc(KnowledgeItem.is_active), desc(KnowledgeItem.updated_at), desc(KnowledgeItem.id)),
+		"activity_asc": (asc(KnowledgeItem.is_active), desc(KnowledgeItem.updated_at), desc(KnowledgeItem.id)),
 	}[sort]
 	if cursor:
 		try:
@@ -306,6 +315,9 @@ def list_knowledge_items(
 			cursor_updated = datetime.fromisoformat(decoded["updated"])
 			cursor_id = str(decoded["id"])
 			cursor_rating = decoded.get("rating")
+			cursor_is_active = decoded.get("isActive")
+			if sort.startswith("activity_") and not isinstance(cursor_is_active, bool):
+				raise ValueError
 		except (ValueError, TypeError, KeyError, json.JSONDecodeError, UnicodeDecodeError, binascii.Error):
 			raise AppError(422, "INVALID_CURSOR", "Некорректный курсор страницы")
 		date_desc_after = or_(KnowledgeItem.updated_at < cursor_updated, and_(KnowledgeItem.updated_at == cursor_updated, KnowledgeItem.id < cursor_id))
@@ -314,6 +326,18 @@ def list_knowledge_items(
 			statement = statement.where(date_desc_after)
 		elif sort == "date_asc":
 			statement = statement.where(date_asc_after)
+		elif sort == "activity_desc":
+			statement = statement.where(
+				or_(KnowledgeItem.is_active.is_(False), and_(KnowledgeItem.is_active.is_(True), date_desc_after))
+				if cursor_is_active
+				else and_(KnowledgeItem.is_active.is_(False), date_desc_after)
+			)
+		elif sort == "activity_asc":
+			statement = statement.where(
+				or_(KnowledgeItem.is_active.is_(True), and_(KnowledgeItem.is_active.is_(False), date_desc_after))
+				if not cursor_is_active
+				else and_(KnowledgeItem.is_active.is_(True), date_desc_after)
+			)
 		elif cursor_rating is None:
 			statement = statement.where(KnowledgeItem.rating.is_(None), date_desc_after)
 		else:
@@ -324,7 +348,7 @@ def list_knowledge_items(
 	items = items[:limit]
 	if has_more:
 		last = items[-1]
-		cursor_payload = json.dumps({"sort": sort, "updated": last.updated_at.isoformat(), "id": last.id, "rating": last.rating}, separators=(",", ":"))
+		cursor_payload = json.dumps({"sort": sort, "updated": last.updated_at.isoformat(), "id": last.id, "rating": last.rating, "isActive": last.is_active}, separators=(",", ":"))
 		next_cursor = base64.urlsafe_b64encode(cursor_payload.encode()).decode().rstrip("=")
 	else:
 		next_cursor = None
@@ -548,14 +572,30 @@ async def save_attachment_to_knowledge(
 	if not attachment.extracted_text.strip():
 		raise AppError(422, "EMPTY_KNOWLEDGE_FILE", "Пустой файл нельзя добавить в базу знаний")
 	approach = optional_owned_approach(db, payload.approach_id, user.id)
-	title = (payload.title or Path(attachment.name).stem).strip()[:255]
+	is_generated_markdown = attachment.extraction_status == "generated_markdown"
+	content = attachment.extracted_text
+	semantic_title: str | None = None
+	if is_generated_markdown:
+		source_message = db.get(Message, attachment.message_id) if attachment.message_id else None
+		if source_message is not None:
+			source_title, source_body = split_markdown_title(source_message.content)
+			if source_body != source_message.content:
+				semantic_title = source_title
+		file_title, file_body = split_markdown_title(content)
+		if file_body != content:
+			semantic_title = semantic_title or file_title
+			content = file_body
+	title = (payload.title or semantic_title or Path(attachment.name).stem).strip()
+	if is_generated_markdown and title.lower().endswith(".md"):
+		title = title[:-3].rstrip()
+	title = title[:255]
 	item = KnowledgeItem(
 		user_id=user.id,
 		source_type="assistant_file" if attachment.extraction_status.startswith("generated") else "uploaded_file",
 		source_message_id=attachment.message_id,
 		source_file_id=attachment.id,
 		title=title or "Сохранённый файл",
-		content=attachment.extracted_text,
+		content=content,
 		mime_type="text/markdown" if attachment.name.lower().endswith(".md") else attachment.content_type,
 		original_filename=attachment.name,
 		is_active=payload.is_active,
@@ -596,20 +636,22 @@ async def save_rated_message(message_id: str, user: User = Depends(get_current_u
 	if rating is None or rating.score < settings.knowledge_rating_threshold:
 		raise AppError(422, "RATING_TOO_LOW", f"Для сохранения нужна оценка не ниже {settings.knowledge_rating_threshold}")
 	items: list[KnowledgeItem] = []
+	message_title, message_content = split_markdown_title(message.content, "Сохранённый ответ")
 	message_item = db.scalar(select(KnowledgeItem).where(KnowledgeItem.user_id == user.id, KnowledgeItem.source_message_id == message.id))
 	if message_item is None:
 		message_item = KnowledgeItem(
 			user_id=user.id,
 			source_type="rated_content",
 			source_message_id=message.id,
-			title=markdown_title(message.content, "Сохранённый ответ")[:255],
-			content=message.content,
+			title=message_title[:255],
+			content=message_content,
 			mime_type="text/markdown",
 			rating=rating.score,
 		)
 		db.add(message_item)
 	else:
-		message_item.content = message.content
+		message_item.title = message_title[:255]
+		message_item.content = message_content
 		message_item.rating = rating.score
 		message_item.is_active = True
 		message_item.deleted_at = None

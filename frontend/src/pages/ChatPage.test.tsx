@@ -4,13 +4,14 @@ import { ChatPage } from './ChatPage';
 import { ToastProvider } from '../components/Toast/ToastProvider';
 import { ApiError } from '../api/httpClient';
 import type { StreamEvent } from '../api/chatApi';
-import { MemoryRouter, Route, Routes } from 'react-router-dom';
+import { MemoryRouter, Route, Routes, useLocation } from 'react-router-dom';
 import { useChatStore } from '../stores/chatStore';
 import { usePromptStore } from '../stores/promptStore';
 import { useFilesStore } from '../stores/filesStore';
 import { useConversationsStore } from '../stores/conversationsStore';
 import { useMessageUiStore } from '../stores/messageUiStore';
 import { AppLayout } from '../components/AppLayout/AppLayout';
+import type { KnowledgeCreateSource } from '../types/chat';
 
 const api = vi.hoisted(() => ({
 	createConversation: vi.fn(),
@@ -26,6 +27,7 @@ const api = vi.hoisted(() => ({
 	getConversation: vi.fn(),
 	getMessageKnowledgeLink: vi.fn(),
 	listConversations: vi.fn(),
+	loadAttachmentFile: vi.fn(),
 	renameConversation: vi.fn(),
 	streamChat: vi.fn(),
 	activateMessageBranch: vi.fn(),
@@ -45,13 +47,20 @@ const conversation = {
 	updatedAt: '2026-08-21T00:00:00Z',
 };
 
+function KnowledgeSourceProbe() {
+	const location = useLocation();
+	const source = (location.state as { knowledgeSource?: KnowledgeCreateSource } | null)?.knowledgeSource;
+	return <pre data-testid="knowledge-source">{JSON.stringify(source)}</pre>;
+}
+
 function renderChatPage(initialEntry = `/chat/${conversation.id}`) {
 	return render(
 		<MemoryRouter initialEntries={[initialEntry]}>
 			<ToastProvider>
 				<Routes>
-					<Route element={<AppLayout user={{ id: 'user', email: 'user@example.com' }} onLogout={vi.fn()} />}>
+					<Route element={<AppLayout user={{ id: 'user', email: 'user@example.com', login: 'user' }} onLogout={vi.fn()} />}>
 						<Route path="/chat/:chatId" element={<ChatPage />} />
+						<Route path="/knowledge/new" element={<KnowledgeSourceProbe />} />
 					</Route>
 				</Routes>
 			</ToastProvider>
@@ -163,6 +172,58 @@ describe('ChatPage retry', () => {
 	});
 });
 
+describe('ChatPage assistant title extraction', () => {
+	const content = '1. **Ласковый след**\n\nТихий шёпот утра,\nИ хвост, как клятва, виляя,';
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		api.listConversations.mockResolvedValue([conversation]);
+		api.getMessageKnowledgeLink.mockResolvedValue(null);
+	});
+
+	it('uses the semantic response title when creating a Markdown file', async () => {
+		api.getConversation.mockResolvedValue({
+			...conversation,
+			messages: [{ id: 'assistant-title', role: 'assistant', content, status: 'done', attachments: [] }],
+		});
+		api.createMessageMarkdownFile.mockResolvedValue({
+			created: true,
+			attachment: {
+				id: 'generated-file', name: 'Ласковый след.md', size: 42, type: 'text/markdown',
+				url: '/file', isImage: false, generated: true,
+			},
+		});
+		renderChatPage();
+
+		fireEvent.click(await screen.findByRole('button', { name: 'Создать файл' }));
+		await waitFor(() => expect(api.createMessageMarkdownFile).toHaveBeenCalledWith('assistant-title', 'Ласковый след'));
+	});
+
+	it('uses the selected generated file name and content instead of the response text', async () => {
+		const fileContent = 'Тихий шёпот осени\nЛистья кружат над землёй.';
+		api.getConversation.mockResolvedValue({
+			...conversation,
+			messages: [{
+				id: 'assistant-title', role: 'assistant', content: 'Файл подготовлен. Его можно скачать ниже.', status: 'done',
+				attachments: [{
+					id: 'generated-file', name: 'poem.txt', size: 42, type: 'text/plain',
+					url: '/file', isImage: false, generated: true,
+				}],
+			}],
+		});
+		api.loadAttachmentFile.mockResolvedValue(new File([fileContent], 'poem.txt', { type: 'text/plain' }));
+		renderChatPage();
+
+		fireEvent.click(await screen.findByRole('button', { name: 'Добавить в базу' }));
+		fireEvent.click(screen.getByRole('option', { name: /Файл «poem.txt»/ }));
+		const source = JSON.parse((await screen.findByTestId('knowledge-source')).textContent ?? '{}') as KnowledgeCreateSource;
+		expect(api.loadAttachmentFile).toHaveBeenCalledWith(expect.objectContaining({ id: 'generated-file', name: 'poem.txt' }));
+		expect(source.title).toBe('poem.txt');
+		expect(source.content).toBe(fileContent);
+		expect(source.fileName).toBe('poem.txt');
+	});
+});
+
 describe('ChatPage lazy conversation creation', () => {
 	beforeEach(() => {
 		vi.clearAllMocks();
@@ -174,6 +235,7 @@ describe('ChatPage lazy conversation creation', () => {
 	it('keeps /chat/new virtual and creates exactly one conversation on the first submit', async () => {
 		renderChatPage('/chat/new');
 		const prompt = await screen.findByRole('textbox', { name: /введите запрос/i });
+		await waitFor(() => expect(prompt).toHaveFocus());
 		expect(api.createConversation).not.toHaveBeenCalled();
 		expect(api.getConversation).not.toHaveBeenCalled();
 		fireEvent.change(prompt, { target: { value: 'Первый запрос' } });
@@ -186,6 +248,37 @@ describe('ChatPage lazy conversation creation', () => {
 		expect(api.streamChat).toHaveBeenCalledWith(
 			expect.objectContaining({ conversationId: 'created-on-send', prompt: 'Первый запрос' }),
 		);
+	});
+
+	it('restores prompt focus across chat routes and repeated new-chat actions', async () => {
+		const secondConversation = { ...conversation, id: 'conversation-2', title: 'Второй чат' };
+		api.listConversations.mockResolvedValue([conversation, secondConversation]);
+		api.getConversation.mockImplementation(async (id: string) => ({
+			...(id === conversation.id ? conversation : secondConversation),
+			messages: [],
+		}));
+		renderChatPage();
+		const prompt = await screen.findByRole('textbox', { name: /введите запрос/i });
+		await waitFor(() => expect(prompt).toHaveFocus());
+
+		const newChatButton = screen.getByRole('button', { name: 'Новый чат' });
+		newChatButton.focus();
+		fireEvent.click(newChatButton);
+		await waitFor(() => expect(prompt).toHaveFocus());
+
+		newChatButton.focus();
+		fireEvent.click(newChatButton);
+		await waitFor(() => expect(prompt).toHaveFocus());
+
+		const secondChatButton = await screen.findByRole('button', { name: secondConversation.title });
+		secondChatButton.focus();
+		fireEvent.click(secondChatButton);
+		await waitFor(() => expect(prompt).toHaveFocus());
+
+		const firstChatButton = screen.getByRole('button', { name: conversation.title });
+		firstChatButton.focus();
+		fireEvent.click(firstChatButton);
+		await waitFor(() => expect(prompt).toHaveFocus());
 	});
 
 	it('restores the prompt when creating the first conversation fails', async () => {

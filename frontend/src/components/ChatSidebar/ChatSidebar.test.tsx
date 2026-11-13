@@ -40,7 +40,7 @@ function renderSidebar(isCollapsed = false) {
 
 	render(
 		<ChatSidebar
-			user={{ id: 'user', email: 'user@example.com' }}
+			user={{ id: 'user', email: 'user@example.com', login: 'user' }}
 			activeConversationId="chat-1"
 			onSelect={vi.fn()}
 			onNew={vi.fn()}

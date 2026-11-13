@@ -52,8 +52,8 @@ export async function installMockApi(page: Page, options: Options = {}) {
 		}))
 		: [];
 	let approaches = [
-		{ id: 'approach-interview', name: 'Интервью', slug: 'интервью', description: '', purpose: '', characteristics: [], structure: [], writingGuidelines: [], avoid: [], exampleKnowledgeItemIds: [], isActive: true, linkedKnowledgeItemsCount: 0, createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z' },
-		{ id: 'approach-show', name: 'Шоу', slug: 'шоу', description: '', purpose: '', characteristics: [], structure: [], writingGuidelines: [], avoid: [], exampleKnowledgeItemIds: [], isActive: true, linkedKnowledgeItemsCount: 0, createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z' },
+		{ id: 'approach-interview', name: 'Интервью', slug: 'интервью', description: 'Диалог с героем, раскрывающий тему через личный опыт и последовательные уточняющие вопросы.', purpose: '', characteristics: [], structure: [], writingGuidelines: [], avoid: [], exampleKnowledgeItemIds: [], rating: null, isActive: true, linkedKnowledgeItemsCount: 3, createdAt: '2026-08-25T00:00:00Z', updatedAt: '2026-08-25T00:00:00Z' },
+		{ id: 'approach-show', name: 'Шоу', slug: 'шоу', description: 'Яркая подача', purpose: '', characteristics: [], structure: [], writingGuidelines: [], avoid: [], exampleKnowledgeItemIds: [], rating: 5, isActive: true, linkedKnowledgeItemsCount: 1, createdAt: '2026-08-24T00:00:00Z', updatedAt: '2026-08-26T00:00:00Z' },
 	];
 	const json = (route: Route, body: unknown, status = 200) => route.fulfill({ status, contentType: 'application/json', body: JSON.stringify(body) });
 
@@ -117,6 +117,17 @@ export async function installMockApi(page: Page, options: Options = {}) {
 		if (/^\/api\/messages\/[^/]+\/rating$/.test(path)) return json(route, { rating: { id: 'r1', score: 5, comment: null, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } });
 
 		if (path === '/api/approaches' && method === 'GET') return json(route, { items: approaches });
+		const approachMatch = path.match(/^\/api\/approaches\/([^/]+)$/);
+		if (approachMatch && method === 'PATCH') {
+			const payload = request.postDataJSON() as { rating?: number | null; is_active?: boolean };
+			approaches = approaches.map((item) => item.id === approachMatch[1] ? {
+				...item,
+				rating: payload.rating === undefined ? item.rating : payload.rating,
+				isActive: payload.is_active ?? item.isActive,
+				updatedAt: new Date().toISOString(),
+			} : item);
+			return json(route, { item: approaches.find((item) => item.id === approachMatch[1]) });
+		}
 		if (path === '/api/knowledge/approaches' && method === 'GET') return json(route, { items: approaches });
 		if (path === '/api/knowledge/approaches' && method === 'POST') {
 			const payload = request.postDataJSON() as { name: string };

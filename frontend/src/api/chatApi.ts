@@ -76,10 +76,15 @@ export async function getRuntimeConfig(): Promise<{ attachmentLimits: Attachment
 	return requestJson<{ attachmentLimits: AttachmentLimits }>('/config');
 }
 
-export async function authenticate(mode: 'login' | 'register', email: string, password: string): Promise<AuthUser> {
+export type AuthCredentials =
+	| { mode: 'login'; identifier: string; password: string }
+	| { mode: 'register'; login: string; email: string; password: string };
+
+export async function authenticate(credentials: AuthCredentials): Promise<AuthUser> {
+	const { mode, ...body } = credentials;
 	const payload = await requestJson<{ user: AuthUser; csrfToken: string }>(`/auth/${mode}`, {
 			method: 'POST',
-			body: JSON.stringify({ email, password }),
+			body: JSON.stringify(body),
 		});
 	setCsrfToken(payload.csrfToken);
 	return payload.user;
@@ -221,11 +226,24 @@ export async function saveMessageToKnowledge(messageId: string): Promise<Knowled
 	return (await requestJson<{ items: KnowledgeItem[] }>(`/knowledge/messages/${messageId}`, { method: 'POST' })).items.map(normalizeKnowledgeItem);
 }
 
-export async function createMessageMarkdownFile(messageId: string): Promise<{ attachment: ChatAttachment; created: boolean }> {
+export async function createMessageMarkdownFile(messageId: string, name?: string): Promise<{ attachment: ChatAttachment; created: boolean }> {
 	const result = await requestJson<{ attachment: Omit<ChatAttachment, 'isImage'>; created: boolean }>(`/messages/${messageId}/markdown-file`, {
-		method: 'POST', body: JSON.stringify({}),
+		method: 'POST', body: JSON.stringify({ name }),
 	});
 	return { ...result, attachment: normalizeAttachment(result.attachment) };
+}
+
+export async function loadAttachmentFile(attachment: ChatAttachment): Promise<File> {
+	if (attachment.file instanceof File) return attachment.file;
+	if (attachment.file instanceof Blob) {
+		return new File([await attachment.file.arrayBuffer()], attachment.name, { type: attachment.type || attachment.file.type });
+	}
+	if (attachment.content !== undefined) {
+		return new File([attachment.content], attachment.name, { type: attachment.type || 'text/plain' });
+	}
+	const response = await apiFetch(`/attachments/${encodeURIComponent(attachment.id)}`);
+	const contentType = response.headers.get('Content-Type') ?? '';
+	return new File([await response.arrayBuffer()], attachment.name, { type: attachment.type || contentType });
 }
 
 export async function saveAttachmentToKnowledge(attachmentId: string, filters?: Partial<KnowledgeFilters>): Promise<{ item: KnowledgeItem; created: boolean }> {
@@ -329,6 +347,7 @@ function approachBody(value: Partial<ApproachInput>) {
 		writing_guidelines: value.writingGuidelines,
 		avoid: value.avoid,
 		example_knowledge_item_ids: value.exampleKnowledgeItemIds,
+		rating: value.rating,
 		is_active: value.isActive,
 	};
 }

@@ -41,15 +41,22 @@ export function AppLayout({ user, onLogout }: { user: AuthUser; onLogout: () => 
 	useEffect(() => {
 		let cancelled = false;
 		listConversations()
-			.then((items) => { if (!cancelled) setConversations(items); })
+			.then((items) => {
+				if (!cancelled) setConversations(items);
+			})
 			.catch((error: unknown) => reportError('Не удалось загрузить историю диалогов', error));
-		return () => { cancelled = true; };
+		return () => {
+			cancelled = true;
+		};
 	}, [setConversations, user.id]);
 
-	useEffect(() => () => {
-		const current = useFilesStore.getState().previewFile;
-		if (current?.revokeOnClose) URL.revokeObjectURL(current.url);
-	}, []);
+	useEffect(
+		() => () => {
+			const current = useFilesStore.getState().previewFile;
+			if (current?.revokeOnClose) URL.revokeObjectURL(current.url);
+		},
+		[],
+	);
 
 	function closePreview() {
 		if (previewFile?.revokeOnClose) URL.revokeObjectURL(previewFile.url);
@@ -61,6 +68,13 @@ export function AppLayout({ user, onLogout }: { user: AuthUser; onLogout: () => 
 		resetPrompt();
 		setSidebarOpen(false);
 		navigate('/chat/new');
+
+		requestAnimationFrame(() => {
+			const textarea = document.querySelector<HTMLTextAreaElement>('textarea[aria-label="Введите запрос"]');
+
+			if (!textarea || textarea.disabled) return;
+			textarea.focus({ preventScroll: true });
+		});
 	}
 
 	async function handleDelete(id: string) {
@@ -68,13 +82,14 @@ export function AppLayout({ user, onLogout }: { user: AuthUser; onLogout: () => 
 		const remaining = conversations.filter((item) => item.id !== id);
 		setConversations(remaining);
 		removeConversationState(id);
-		if (activeConversationId === id) navigate(remaining[0] ? `/chat/${remaining[0].id}` : '/chat/new', { replace: true });
+		if (activeConversationId === id)
+			navigate(remaining[0] ? `/chat/${remaining[0].id}` : '/chat/new', { replace: true });
 	}
 
 	async function handleRename(conversation: ConversationSummary, title: string) {
 		if (title === conversation.title) return;
 		const updated = await renameConversation(conversation.id, title);
-		setConversations((current) => current.map((item) => item.id === updated.id ? updated : item));
+		setConversations((current) => current.map((item) => (item.id === updated.id ? updated : item)));
 	}
 
 	function handleExport(format: 'markdown' | 'json') {
@@ -87,7 +102,9 @@ export function AppLayout({ user, onLogout }: { user: AuthUser; onLogout: () => 
 			downloadText(`${safeName}.json`, JSON.stringify({ conversation: active, messages }, null, 2), 'application/json');
 			return;
 		}
-		const markdown = messages.map((message) => `## ${message.role === 'user' ? 'Вы' : 'Velorian'}\n\n${message.content}\n`).join('\n');
+		const markdown = messages
+			.map((message) => `## ${message.role === 'user' ? 'Вы' : 'Velorian'}\n\n${message.content}\n`)
+			.join('\n');
 		downloadText(`${safeName}.md`, `# ${active?.title ?? 'Диалог'}\n\n${markdown}`, 'text/markdown');
 	}
 
@@ -97,25 +114,42 @@ export function AppLayout({ user, onLogout }: { user: AuthUser; onLogout: () => 
 				user={user}
 				activeConversationId={activeConversationId}
 				activeSection={activeSection}
-				onSelect={(id) => { navigate(`/chat/${encodeURIComponent(id)}`); setSidebarOpen(false); }}
+				onSelect={(id) => {
+					navigate(`/chat/${encodeURIComponent(id)}`);
+					setSidebarOpen(false);
+				}}
 				onNew={handleNew}
-				onDelete={(id) => void handleDelete(id).catch((error: unknown) => {
-					reportError('Не удалось удалить диалог', error, { conversationId: id });
-					showToast(error instanceof Error ? error.message : 'Не удалось удалить диалог', 'error');
-				})}
-				onRename={(conversation, title) => void handleRename(conversation, title).catch((error: unknown) => {
-					reportError('Не удалось переименовать диалог', error, { conversationId: conversation.id });
-					showToast(error instanceof Error ? error.message : 'Не удалось переименовать диалог', 'error');
-				})}
+				onDelete={(id) =>
+					void handleDelete(id).catch((error: unknown) => {
+						reportError('Не удалось удалить диалог', error, { conversationId: id });
+						showToast(error instanceof Error ? error.message : 'Не удалось удалить диалог', 'error');
+					})
+				}
+				onRename={(conversation, title) =>
+					void handleRename(conversation, title).catch((error: unknown) => {
+						reportError('Не удалось переименовать диалог', error, { conversationId: conversation.id });
+						showToast(error instanceof Error ? error.message : 'Не удалось переименовать диалог', 'error');
+					})
+				}
 				onLogout={() => void onLogout()}
-				onOpenKnowledge={() => { navigate('/knowledge'); setSidebarOpen(false); }}
-				onOpenSettings={() => navigate('/settings', {
-					state: { from: `${location.pathname}${location.search}${location.hash}` },
-				})}
+				onOpenKnowledge={() => {
+					navigate('/knowledge');
+					setSidebarOpen(false);
+				}}
+				onOpenSettings={() =>
+					navigate('/settings', {
+						state: { from: `${location.pathname}${location.search}${location.hash}` },
+					})
+				}
 			/>
 			<Outlet context={{ onExport: handleExport }} />
 			{sidebarOpen && (
-				<button className="chat-shell__backdrop" type="button" onClick={() => setSidebarOpen(false)} aria-label="Закрыть меню" />
+				<button
+					className="chat-shell__backdrop"
+					type="button"
+					onClick={() => setSidebarOpen(false)}
+					aria-label="Закрыть меню"
+				/>
 			)}
 			{previewFile && <FilePreviewModal file={previewFile} onClose={closePreview} />}
 		</div>

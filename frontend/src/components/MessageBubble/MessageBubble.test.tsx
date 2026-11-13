@@ -1,10 +1,19 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { MessageBubble } from './MessageBubble';
 import { useMessageUiStore } from '../../stores/messageUiStore';
 
 describe('MessageBubble actions', () => {
-	beforeEach(() => useMessageUiStore.getState().reset());
+	const writeText = vi.fn().mockResolvedValue(undefined);
+
+	beforeEach(() => {
+		useMessageUiStore.getState().reset();
+		writeText.mockClear();
+		Object.defineProperty(navigator, 'clipboard', {
+			configurable: true,
+			value: { writeText },
+		});
+	});
 
 	it('does not render message-level copy or speech buttons', () => {
 		render(
@@ -16,6 +25,28 @@ describe('MessageBubble actions', () => {
 
 		expect(screen.queryByRole('button', { name: /копировать/i })).not.toBeInTheDocument();
 		expect(screen.queryByRole('button', { name: /озвучить/i })).not.toBeInTheDocument();
+	});
+
+	it('copies a user message from the action placed before edit', async () => {
+		const { container } = render(
+			<MessageBubble
+				message={{ id: 'user-1', role: 'user', content: 'Текст пользователя', status: 'done' }}
+				onOpenAttachment={vi.fn()}
+				onEdit={vi.fn()}
+			/>,
+		);
+
+		const actions = container.querySelector('.message__user-actions');
+		expect(actions).not.toBeNull();
+		const buttons = within(actions as HTMLElement).getAllByRole('button');
+		expect(buttons.map((button) => button.getAttribute('aria-label'))).toEqual([
+			'Копировать сообщение',
+			'Редактировать сообщение',
+		]);
+
+		fireEvent.click(buttons[0]);
+		await waitFor(() => expect(writeText).toHaveBeenCalledWith('Текст пользователя'));
+		expect(screen.getByRole('button', { name: 'Скопировано' })).toBeInTheDocument();
 	});
 
 	it('renders a dedicated accessible error state and keeps retry', () => {

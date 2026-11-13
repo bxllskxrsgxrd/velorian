@@ -15,6 +15,8 @@ export type ChatAttachment = {
 	extractionStatus?: 'ready' | 'empty' | 'ocr_unavailable' | 'unsupported' | 'generated' | 'generated_markdown';
 	generated?: boolean;
 	knowledgeSaved?: boolean;
+	content?: string;
+	file?: File | Blob;
 };
 
 export type ChatMessageStatus = (typeof CHAT_MESSAGE_STATUSES)[keyof typeof CHAT_MESSAGE_STATUSES];
@@ -55,6 +57,7 @@ export type KnowledgeApproach = {
 	writingGuidelines: string[];
 	avoid: string[];
 	exampleKnowledgeItemIds: string[];
+	rating: number | null;
 	isActive: boolean;
 	linkedKnowledgeItemsCount?: number;
 	createdAt: string;
@@ -62,7 +65,9 @@ export type KnowledgeApproach = {
 };
 
 export type Approach = KnowledgeApproach;
-export type ApproachInput = Omit<Approach, 'id' | 'createdAt' | 'updatedAt' | 'linkedKnowledgeItemsCount' | 'slug'>;
+export type ApproachInput = Omit<Approach, 'id' | 'createdAt' | 'updatedAt' | 'linkedKnowledgeItemsCount' | 'slug' | 'rating'> & {
+	rating?: number | null;
+};
 
 export type KnowledgeFilters = {
 	geo: string | null;
@@ -115,6 +120,7 @@ export type Conversation = ConversationSummary & {
 export type AuthUser = {
 	id: string;
 	email: string;
+	login: string;
 };
 
 export type KnowledgeItem = {
@@ -148,6 +154,7 @@ export type KnowledgeCreateSource = {
 	rating: number | null;
 	fileName?: string;
 	mimeType?: string;
+	file?: File;
 	returnTo?: string;
 };
 

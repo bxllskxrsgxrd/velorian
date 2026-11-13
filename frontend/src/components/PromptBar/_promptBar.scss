@@ -12,7 +12,7 @@
 
 	margin: 0 auto;
 	border: 1px solid var(--color-border);
-	border-radius: var(--radius-large);
+	border-radius: 28px;
 	padding: 12px;
 
 	font-family: var(--main-font);
@@ -23,10 +23,10 @@
 
 	@include ui-transition;
 
-	&:focus-within {
-		border-color: color-mix(in srgb, var(--color-accent) 68%, var(--color-border));
-		box-shadow: var(--shadow-prompt), var(--focus-ring);
-	}
+	// &:focus-within {
+	// 	border-color: color-mix(in srgb, var(--color-accent) 68%, var(--color-border));
+	// 	box-shadow: var(--shadow-prompt), var(--focus-ring);
+	// }
 
 	&__attachments {
 		--attachment-size: 48px;
@@ -158,9 +158,6 @@
 	}
 
 	&__input-container {
-		--textarea-leading-inset: 40px;
-		--textarea-trailing-inset: 40px;
-
 		width: 100%;
 
 		display: grid;
@@ -231,11 +228,6 @@
 				'actions . send';
 			row-gap: 8px;
 			align-items: center;
-		}
-
-		.resizeTextarea {
-			padding-left: var(--textarea-leading-inset);
-			padding-right: var(--textarea-trailing-inset);
 		}
 	}
 

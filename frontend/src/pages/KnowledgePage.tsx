@@ -9,7 +9,8 @@ import { Rating } from '../components/ui/Rating/Rating';
 import { Checkbox } from '../components/ui/Checkbox/Checkbox';
 import { CustomSelect } from '../components/ui/CustomSelect/CustomSelect';
 import { DropZone } from '../components/ui/DropZone/DropZone';
-import { Tooltip } from '../components/ui/Tooltip/Tooltip';
+import { KnowledgeCardMetadata } from '../components/KnowledgeCardMetadata/KnowledgeCardMetadata';
+import { BulkSelectionBar } from '../components/BulkSelectionBar/BulkSelectionBar';
 import { KnowledgeFilterFields } from '../components/KnowledgeFilterFields/KnowledgeFilterFields';
 import type { AuthUser, KnowledgeApproach, KnowledgeFilters, KnowledgeItem } from '../types/chat';
 import { reportError } from '../utils/reportError';
@@ -17,13 +18,13 @@ import { useKnowledgeStore } from '../stores/knowledgeStore';
 import { useUiStore } from '../stores/uiStore';
 import { useApproachesStore } from '../stores/approachesStore';
 import './_knowledgePage.scss';
-import { BurgerIcon, CrossIcon, DocumentIcon, ListIcon, MoveIcon, SearchIcon, TrashIcon } from '../components/icons/AppIcons';
+import { BurgerIcon, CrossIcon, DocumentIcon, ListIcon, MoveIcon, SearchIcon } from '../components/icons/AppIcons';
 import { Button } from '../components/ui/Button/Button';
 
 const MarkdownEditor = lazy(() => import('../components/MarkdownEditor/MarkdownEditor'));
 
 type RatingFilter = 'all' | '5' | '4' | '3' | 'unrated';
-type SortMode = 'date_desc' | 'date_asc' | 'rating_desc' | 'rating_asc';
+type SortMode = 'date_desc' | 'date_asc' | 'rating_desc' | 'rating_asc' | 'activity_desc' | 'activity_asc';
 type FilePreviewState = { status: 'idle' | 'loading' | 'ready' | 'error'; content: string };
 type KnowledgeCardMenuState = { itemId: string; top: number; left: number };
 
@@ -79,48 +80,11 @@ function extractionStatusLabel(item: KnowledgeItem) {
 	return null;
 }
 
-const knowledgeDateFormatter = new Intl.DateTimeFormat('ru-RU', {
-	day: '2-digit',
-	month: '2-digit',
-	year: 'numeric',
-});
-
 function knowledgeSourceLabel(sourceType: KnowledgeItem['sourceType']) {
 	if (sourceType === 'rated_content' || sourceType === 'assistant_message') return 'Ответ агента';
 	if (sourceType === 'assistant_file') return 'Файл из диалога';
 	if (sourceType === 'uploaded_file') return 'Файл';
 	return 'Добавлено вручную';
-}
-
-function KnowledgeCardMetadata({
-	source,
-	createdAt,
-	updatedAt,
-}: {
-	source: string;
-	createdAt: string;
-	updatedAt?: string | null;
-}) {
-	const createdTimestamp = new Date(createdAt).getTime();
-	const updatedTimestamp = updatedAt ? new Date(updatedAt).getTime() : null;
-	const wasUpdated = updatedTimestamp !== null && updatedTimestamp !== createdTimestamp;
-	const createdDate = knowledgeDateFormatter.format(new Date(createdAt));
-	const updatedDate = updatedAt ? knowledgeDateFormatter.format(new Date(updatedAt)) : null;
-
-	return (
-		<Tooltip
-			className="knowledge-card__metadata-summary"
-			content={
-				<>
-					<span>{source}</span>
-					<span>Создано {createdDate}</span>
-					{wasUpdated && <span>Изменено {updatedDate}</span>}
-				</>
-			}
-		>
-			{source} · {wasUpdated ? `Изменено ${updatedDate}` : `Создано ${createdDate}`}
-		</Tooltip>
-	);
 }
 
 function storedFilters(item: KnowledgeItem): KnowledgeFilters {
@@ -934,6 +898,8 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 								{ label: 'Сначала старые', value: 'date_asc' },
 								{ label: 'Рейтинг: высокий', value: 'rating_desc' },
 								{ label: 'Рейтинг: низкий', value: 'rating_asc' },
+								{ label: 'Сначала активные', value: 'activity_desc' },
+								{ label: 'Сначала неактивные', value: 'activity_asc' },
 							].map((item) => (
 								<button
 									key={item.value}
@@ -950,43 +916,20 @@ export function KnowledgePage({ user }: { user: AuthUser }) {
 						</div>
 					)}
 				</section>
-				<div className="knowledge-page__bulk-slot">
-					{selectedItems.length > 0 && (
-						<div className="knowledge-page__bulk-bar" role="region" aria-label="Действия с выбранными элементами">
-							<strong>Выбрано: {selectedItems.length}</strong>
-							<Button
-								variant="outline"
-								tone="neutral"
-								size="small"
-								disabled={selectedItems.length === items.length}
-								onClick={() => setSelectedItemIds(new Set(items.map((item) => item.id)))}
-							>
-								Выбрать все {items.length}
-							</Button>
-
-							<Button variant="outline" tone="neutral" size="small" onClick={() => setSelectedItemIds(new Set())}>
-								Снять выбор
-							</Button>
-
-							<Button
-								variant="outline"
-								tone="danger"
-								size="small"
-								icon={<TrashIcon />}
-								onClick={() => setBulkDeleteOpen(true)}
-							>
-								В корзину {selectedItems.length}
-							</Button>
-						</div>
-					)}
-				</div>
+				<BulkSelectionBar
+					selectedCount={selectedItems.length}
+					totalCount={items.length}
+					onSelectAll={() => setSelectedItemIds(new Set(items.map((item) => item.id)))}
+					onClear={() => setSelectedItemIds(new Set())}
+					onDelete={() => setBulkDeleteOpen(true)}
+				/>
 				<section className="knowledge-page__list">
 					{loading && <p className="knowledge-page__empty">Загрузка…</p>}
 					{!loading && items.length === 0 && <p className="knowledge-page__empty">Сохранённых данных пока нет</p>}
 					{!loading &&
 						items.map((item) => (
 							<article
-								className={`knowledge-card ${selectedItemIds.has(item.id) ? 'knowledge-card--selected' : ''}`}
+								className={`knowledge-card ${selectedItemIds.has(item.id) ? 'knowledge-card--selected' : ''} ${!item.isActive ? 'knowledge-card--inactive' : ''}`}
 								key={item.id}
 								onMouseEnter={(event) => updateCardCursorIndicator(event.target, event.clientX, event.clientY)}
 								onMouseMove={(event) => updateCardCursorIndicator(event.target, event.clientX, event.clientY)}

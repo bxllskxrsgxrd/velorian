@@ -141,7 +141,7 @@
 
 		border: 1px solid var(--color-border);
 
-		background: var(--color-bg-elevated);
+		background: color-mix(in srgb, var(--color-bg-surface) 96%, transparent);
 
 		font-size: 14px;
 		@include ui-transition;
@@ -180,8 +180,9 @@
 	}
 
 	&__search:focus-within {
-		border-color: var(--color-accent);
-		box-shadow: var(--focus-ring);
+		// border-color: var(--color-accent);
+		// box-shadow: var(--focus-ring);
+		background: var(--color-bg-elevated);
 	}
 
 	&__conversations {

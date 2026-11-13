@@ -101,7 +101,7 @@ export function KnowledgeEditorPage() {
 		allowNavigationRef.current = false;
 		if (isCreate) {
 			const sourceFile = createSource?.type === 'assistant_file' && createSource.fileName
-				? new File([createSource.content], createSource.fileName, { type: createSource.mimeType || 'text/markdown' })
+				? (createSource.file ?? new File([createSource.content], createSource.fileName, { type: createSource.mimeType || 'text/markdown' }))
 				: null;
 			const initial = {
 				title: createSource?.title ?? '',
