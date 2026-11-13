@@ -13,9 +13,11 @@ class MemoryExtractionCompletions:
 		self.patches = patches or {}
 		self.failing_messages = failing_messages or set()
 		self.extraction_calls: list[dict] = []
+		self.stream_calls: list[dict] = []
 
 	async def create(self, **kwargs):
 		if kwargs.get("stream", False):
+			self.stream_calls.append(kwargs)
 			async def chunks():
 				yield SimpleNamespace(choices=[SimpleNamespace(delta=SimpleNamespace(content="Готово"))])
 			return chunks()
@@ -135,6 +137,42 @@ def test_memory_extraction_gate_controls_ai_calls_and_uses_only_current_message(
 	usage_logs = [record.getMessage() for record in caplog.records if "purpose=memory_extraction" in record.getMessage()]
 	assert len(usage_logs) == len(extracted_messages)
 
+	user_id = authenticated_client.get("/api/auth/me").json()["user"]["id"]
+	with SessionLocal() as db:
+		assert read_user_memory(db, user_id) == EMPTY_PATCH
+
+
+def test_explicit_branch_local_memory_does_not_leak_to_sibling_context(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	branch_local_message = "В этой ветке мы решили использовать LocalCache для кэша"
+	completions = MemoryExtractionCompletions({
+		branch_local_message: {
+			"project": {"cache": "LocalCache"},
+			"preferences": {},
+			"decisions": [],
+		},
+	})
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post(
+		"/api/conversations", json={"title": "Branch-local memory"},
+	).json()["conversation"]["id"]
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "Общий контекст"})
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream", data={"prompt": branch_local_message},
+	)
+	messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
+	branch_message = next(message for message in messages if message["content"] == branch_local_message)
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Какой LocalCache используется?", "edit_message_id": branch_message["id"]},
+	)
+
+	assert completions.extraction_calls == []
+	assert not any(
+		message["role"] == "system" and message["content"].startswith(main_module.STRUCTURED_MEMORY_CONTEXT_PREFIX)
+		for message in completions.stream_calls[-1]["messages"]
+	)
 	user_id = authenticated_client.get("/api/auth/me").json()["user"]["id"]
 	with SessionLocal() as db:
 		assert read_user_memory(db, user_id) == EMPTY_PATCH

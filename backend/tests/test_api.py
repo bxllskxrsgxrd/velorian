@@ -64,6 +64,30 @@ class BranchSummaryCompletions(FakeCompletions):
 		)
 
 
+class ScopedBranchSummaryCompletions(FakeCompletions):
+	def __init__(self):
+		self.stream_calls: list[dict] = []
+		self.summary_calls: list[dict] = []
+		self.summary_counts = {"LEFT": 0, "RIGHT": 0}
+
+	async def create(self, **kwargs):
+		if kwargs.get("stream", False):
+			self.stream_calls.append(kwargs)
+			return await super().create(**kwargs)
+		if "response_format" in kwargs:
+			return await super().create(**kwargs)
+		summary_input = kwargs["messages"][1]["content"]
+		branch = "LEFT" if "LEFT_" in summary_input else "RIGHT"
+		self.summary_counts[branch] += 1
+		self.summary_calls.append({"branch": branch, "input": summary_input, "kwargs": kwargs})
+		return SimpleNamespace(
+			choices=[SimpleNamespace(message=SimpleNamespace(
+				content=f"{branch}_SUMMARY_{self.summary_counts[branch]}",
+			))],
+			usage=SimpleNamespace(prompt_tokens=20, completion_tokens=5),
+		)
+
+
 class FixedCompletions:
 	def __init__(self, content: str):
 		self.content = content
@@ -649,6 +673,119 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 		assert len(list(db.scalars(
 			select(BranchSummary).where(BranchSummary.conversation_id == conversation_id)
 		))) == 2
+
+
+def test_branch_summaries_stay_scoped_and_do_not_duplicate_raw_groq_history(authenticated_client, monkeypatch):
+	import asyncio
+
+	import app.main as main_module
+	from sqlalchemy import select
+
+	from app.database import SessionLocal
+	from app.models import BranchSummary, Message
+
+	completions = ScopedBranchSummaryCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post(
+		"/api/conversations", json={"title": "Scoped summaries"},
+	).json()["conversation"]["id"]
+	user_id = authenticated_client.get("/api/auth/me").json()["user"]["id"]
+	for prompt in ("COMMON_OLD", "LEFT_ROOT", "LEFT_FRESH"):
+		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
+	messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
+	left_root = next(message for message in messages if message["content"] == "LEFT_ROOT")
+	authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "RIGHT_ROOT", "edit_message_id": left_root["id"]},
+	)
+	authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "RIGHT_FRESH"})
+	messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
+	right_root = next(message for message in messages if message["content"] == "RIGHT_ROOT")
+	monkeypatch.setattr(main_module, "settings", replace(main_module.settings, history_token_budget=1))
+
+	actual_calls: dict[str, dict] = {}
+	for branch, root, prompt in (
+		("RIGHT", right_root, "RIGHT_TRIGGER_1"),
+		("LEFT", left_root, "LEFT_TRIGGER_1"),
+		("RIGHT", right_root, "RIGHT_TRIGGER_2"),
+		("LEFT", left_root, "LEFT_TRIGGER_2"),
+	):
+		assert authenticated_client.patch(f"/api/messages/{root['id']}/activate").status_code == 200
+		response = authenticated_client.post(
+			f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt},
+		)
+		assert '"type": "done"' in response.text
+		actual_calls[prompt] = completions.stream_calls[-1]
+		summary_messages = [
+			message["content"] for message in actual_calls[prompt]["messages"]
+			if message["role"] == "system" and message["content"].startswith(main_module.BRANCH_SUMMARY_CONTEXT_PREFIX)
+		]
+		assert summary_messages == [
+			main_module.BRANCH_SUMMARY_CONTEXT_PREFIX
+			+ f"{branch}_SUMMARY_{1 if prompt.endswith('_1') else 2}"
+		]
+		assert all(f"{'LEFT' if branch == 'RIGHT' else 'RIGHT'}_SUMMARY_" not in content for content in summary_messages)
+
+	assert [call["branch"] for call in completions.summary_calls] == ["RIGHT", "LEFT", "RIGHT", "LEFT"]
+	assert "COMMON_OLD" in completions.summary_calls[0]["input"]
+	assert "COMMON_OLD" in completions.summary_calls[1]["input"]
+	for call in completions.summary_calls:
+		other_branch = "LEFT" if call["branch"] == "RIGHT" else "RIGHT"
+		assert f"{other_branch}_ROOT" not in call["input"]
+		assert f"{other_branch}_FRESH" not in call["input"]
+		assert f"{other_branch}_TRIGGER" not in call["input"]
+
+	with SessionLocal() as db:
+		conversation_messages = list(db.scalars(
+			select(Message)
+			.where(Message.conversation_id == conversation_id)
+			.order_by(Message.created_at, Message.id)
+		))
+		messages_by_content = {message.content: message for message in conversation_messages}
+		left_path = main_module._message_path(conversation_messages, messages_by_content["LEFT_TRIGGER_2"].id)
+		right_path = main_module._message_path(conversation_messages, messages_by_content["RIGHT_TRIGGER_2"].id)
+		summaries = list(db.scalars(
+			select(BranchSummary)
+			.where(BranchSummary.conversation_id == conversation_id)
+			.order_by(BranchSummary.created_at, BranchSummary.id)
+		))
+		assert len(summaries) == 4
+		for summary in summaries:
+			branch = "LEFT" if summary.summary_text.startswith("LEFT_") else "RIGHT"
+			own_path = left_path if branch == "LEFT" else right_path
+			other_path = right_path if branch == "LEFT" else left_path
+			assert main_module._branch_summary_applies(summary, own_path)
+			assert not main_module._branch_summary_applies(summary, other_path)
+			path_ids = [message.id for message in own_path]
+			through_index = path_ids.index(summary.summarized_through_message_id)
+			anchor_index = path_ids.index(summary.branch_anchor_message_id)
+			assert through_index < anchor_index
+			covered_messages = own_path[:through_index + 1]
+			assert covered_messages[-1].id == summary.summarized_through_message_id
+			anchor_content = own_path[anchor_index].content
+			raw_contents = {
+				message["content"] for message in actual_calls[anchor_content]["messages"]
+				if message["role"] != "system"
+			}
+			assert raw_contents.isdisjoint({message.content for message in covered_messages})
+
+		latest_left = messages_by_content["LEFT_TRIGGER_2"]
+		_, _, _, excluded_history = main_module.build_chat_context(
+			db, conversation_id, user_id, latest_left.content, latest_left,
+		)
+		left_path_ids = [message.id for message in left_path]
+		latest_left_summary = max(
+			(summary for summary in summaries if summary.summary_text.startswith("LEFT_")),
+			key=lambda summary: left_path_ids.index(summary.summarized_through_message_id),
+		)
+		through_index = left_path_ids.index(latest_left_summary.summarized_through_message_id)
+		already_summarized_history = left_path[:through_index + 1]
+		summary_call_count = len(completions.summary_calls)
+		assert excluded_history == []
+		assert not asyncio.run(main_module._update_branch_summary(
+			db, conversation_id, latest_left, already_summarized_history,
+		))
+		assert len(completions.summary_calls) == summary_call_count
 
 
 def test_chat_context_uses_branch_summary_then_fresh_raw_history(authenticated_client, caplog):

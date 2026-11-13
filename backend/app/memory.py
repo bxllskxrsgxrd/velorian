@@ -16,6 +16,8 @@ StructuredMemory = dict[str, dict[str, object] | list[object]]
 _BRANCH_LOCAL_MEMORY_PATTERN = re.compile(
 	r"\b(?:red|blue)(?:-[a-z0-9]+)+\b"
 	r"|\bbranch[- ]local\b"
+	r"|\b(?:в|для)\s+(?:этой|текущей|данной)\s+ветк\w*\b"
+	r"|\b(?:this|current)\s+branch\b"
 	r"|\b(?:кодовое слово|секрет|тестов(?:ый|ого) идентификатор)\b"
 	r"|\b(?:codeword|secret|test identifier)\b",
 	re.IGNORECASE,
