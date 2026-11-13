@@ -34,6 +34,7 @@ class Settings:
 	groq_api_key: str | None = os.getenv("GROQ_API_KEY")
 	groq_model: str = os.getenv("GROQ_MODEL", "openai/gpt-oss-120b")
 	groq_vision_model: str = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.6-27b")
+	groq_debug_errors: bool = _as_bool(os.getenv("GROQ_DEBUG_ERRORS"), False)
 	enable_vision: bool = _as_bool(os.getenv("ENABLE_VISION"), True)
 	database_url: str = os.getenv("DATABASE_URL", f"sqlite:///{BASE_DIR / 'data' / 'velorian.db'}")
 	auth_secret: str = os.getenv("AUTH_SECRET", "velorian-development-secret-change-me")

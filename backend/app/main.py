@@ -31,6 +31,13 @@ from .csrf import CSRF_COOKIE_NAME, issue_csrf_token, verify_csrf
 from .database import SessionLocal, engine, get_db, init_database
 from .errors import AppError
 from .file_processing import ExtractedFile, extract_text, image_to_data_url, is_image_file, validate_file_name
+from .groq_diagnostics import (
+	is_groq_provider_error,
+	log_compact_fallback_result,
+	log_compact_fallback_started,
+	log_groq_api_error,
+	provider_request_id,
+)
 from .knowledge import (
 	ensure_default_approaches,
 	list_knowledge,
@@ -602,6 +609,18 @@ async def _generate_chat_title(first_message: str, fallback_source: str) -> str:
 		except asyncio.CancelledError:
 			status = "cancelled"
 			raise
+		except (APIStatusError, APIConnectionError, APITimeoutError) as error:
+			log_groq_api_error(
+				logger,
+				error,
+				purpose="title",
+				task_type=task_type,
+				provider="groq",
+				model=settings.groq_model,
+				latency_ms=(time.perf_counter() - started) * 1000,
+				request_options=completion_options,
+			)
+			raise
 		finally:
 			_log_ai_usage(
 				completion,
@@ -671,6 +690,16 @@ async def _generate_branch_summary(
 		status = "cancelled"
 		raise
 	except Exception as error:
+		log_groq_api_error(
+			logger,
+			error,
+			purpose="branch_summary",
+			task_type=task_type,
+			provider="groq",
+			model=settings.groq_model,
+			latency_ms=(time.perf_counter() - started) * 1000,
+			request_options=completion_options,
+		)
 		logger.warning("Branch summary generation failed: error_type=%s", type(error).__name__)
 		return None
 	finally:
@@ -793,6 +822,16 @@ async def _extract_memory_patch(user_message: str) -> dict[str, dict[str, object
 		status = "cancelled"
 		raise
 	except Exception as error:
+		log_groq_api_error(
+			logger,
+			error,
+			purpose="memory_extraction",
+			task_type=task_type,
+			provider="groq",
+			model=settings.groq_model,
+			latency_ms=(time.perf_counter() - started) * 1000,
+			request_options=completion_options,
+		)
 		logger.warning("Memory extraction failed: error_type=%s", type(error).__name__)
 		return None
 	finally:
@@ -1528,25 +1567,38 @@ async def _extract_file(file_name: str, content_type: str, content: bytes) -> Ex
 		task_type: AITaskType = "knowledge"
 		prompt_version = "vision:v1"
 		data_url = await asyncio.to_thread(image_to_data_url, content)
+		completion_options = {
+			"model": settings.groq_vision_model,
+			"messages": [{
+				"role": "user",
+				"content": [
+					{"type": "text", "text": "Подробно опиши изображение на русском языке. Извлеки весь читаемый текст и важные факты, чтобы описание можно было использовать для поиска по документам."},
+					{"type": "image_url", "image_url": {"url": data_url}},
+				],
+			}],
+			"max_completion_tokens": 1400,
+			"stream": False,
+		}
 		started = time.perf_counter()
 		completion = None
 		status: AIInteractionStatus = "error"
 		try:
-			completion = await client.chat.completions.create(
-				model=settings.groq_vision_model,
-				messages=[{
-					"role": "user",
-					"content": [
-						{"type": "text", "text": "Подробно опиши изображение на русском языке. Извлеки весь читаемый текст и важные факты, чтобы описание можно было использовать для поиска по документам."},
-						{"type": "image_url", "image_url": {"url": data_url}},
-					],
-				}],
-				max_completion_tokens=1400,
-				stream=False,
-			)
+			completion = await client.chat.completions.create(**completion_options)
 			status = "success"
 		except asyncio.CancelledError:
 			status = "cancelled"
+			raise
+		except (APIStatusError, APIConnectionError, APITimeoutError) as error:
+			log_groq_api_error(
+				logger,
+				error,
+				purpose="vision",
+				task_type=task_type,
+				provider="groq",
+				model=settings.groq_vision_model,
+				latency_ms=(time.perf_counter() - started) * 1000,
+				request_options=completion_options,
+			)
 			raise
 		finally:
 			_log_ai_usage(
@@ -1569,8 +1621,15 @@ async def _extract_file(file_name: str, content_type: str, content: bytes) -> Ex
 			parts.append(f"Текст локального OCR:\n{local_result.text}")
 		VISION_REQUESTS_TOTAL.labels("success").inc()
 		return ExtractedFile("\n\n".join(parts), "ready")
-	except Exception:
-		logger.warning("Vision preprocessing unavailable; falling back to local OCR", exc_info=True)
+	except Exception as error:
+		if is_groq_provider_error(error):
+			logger.warning(
+				"Vision preprocessing unavailable; falling back to local OCR: error_type=%s status=%s",
+				type(error).__name__,
+				getattr(error, "status_code", None),
+			)
+		else:
+			logger.warning("Vision preprocessing unavailable; falling back to local OCR", exc_info=True)
 		VISION_REQUESTS_TOTAL.labels("fallback").inc()
 		return local_result
 
@@ -1869,15 +1928,12 @@ def _build_ai_messages(
 	)
 
 
-async def _stream_ai_deltas(
+def _chat_completion_options(
 	messages: list[dict[str, str]],
 	user_id: str,
 	web_search: bool,
-	*,
-	task_type: AITaskType,
-	prompt_version: str,
-) -> AsyncIterator[str]:
-	kwargs = {
+) -> dict:
+	options = {
 		"model": settings.groq_model,
 		"messages": messages,
 		"stream": True,
@@ -1885,14 +1941,30 @@ async def _stream_ai_deltas(
 		"user": user_id,
 	}
 	if web_search:
-		kwargs["tools"] = [{"type": "browser_search"}]
+		options["tools"] = [{"type": "browser_search"}]
 	if _supports_stream_options(client.chat.completions.create):
-		kwargs["stream_options"] = {"include_usage": True}
+		options["stream_options"] = {"include_usage": True}
+	return options
+
+
+async def _stream_ai_deltas(
+	messages: list[dict[str, str]],
+	user_id: str,
+	web_search: bool,
+	*,
+	task_type: AITaskType,
+	prompt_version: str,
+	correlation_id: str | None = None,
+	attempt: str = "full",
+) -> AsyncIterator[str]:
+	kwargs = _chat_completion_options(messages, user_id, web_search)
 	started = time.perf_counter()
 	usage = None
 	status: AIInteractionStatus = "error"
+	stream_provider_request_id = None
 	try:
 		stream = await client.chat.completions.create(**kwargs)
+		stream_provider_request_id = provider_request_id(stream)
 		async for chunk in stream:
 			chunk_usage = _normalize_ai_usage(chunk)
 			if chunk_usage is not None:
@@ -1904,7 +1976,41 @@ async def _stream_ai_deltas(
 	except (asyncio.CancelledError, GeneratorExit):
 		status = "cancelled"
 		raise
+	except (APIStatusError, APIConnectionError, APITimeoutError) as error:
+		latency_ms = (time.perf_counter() - started) * 1000
+		log_groq_api_error(
+			logger,
+			error,
+			purpose="chat",
+			task_type=task_type,
+			provider="groq",
+			model=settings.groq_model,
+			latency_ms=latency_ms,
+			request_options=kwargs,
+			correlation_id=correlation_id,
+			attempt=attempt,
+		)
+		if attempt == "compact" and correlation_id is not None:
+			log_compact_fallback_result(
+				logger,
+				correlation_id=correlation_id,
+				result="error",
+				latency_ms=latency_ms,
+				error=error,
+			)
+		raise
+	except Exception as error:
+		if attempt == "compact" and correlation_id is not None:
+			log_compact_fallback_result(
+				logger,
+				correlation_id=correlation_id,
+				result="error",
+				latency_ms=(time.perf_counter() - started) * 1000,
+				error=error,
+			)
+		raise
 	finally:
+		latency_ms = (time.perf_counter() - started) * 1000
 		_log_ai_usage(
 			usage,
 			purpose="chat",
@@ -1914,8 +2020,16 @@ async def _stream_ai_deltas(
 			prompt_version=prompt_version,
 			reasoning_effort=None,
 			status=status,
-			latency_ms=(time.perf_counter() - started) * 1000,
+			latency_ms=latency_ms,
 		)
+		if status == "success" and attempt == "compact" and correlation_id is not None:
+			log_compact_fallback_result(
+				logger,
+				correlation_id=correlation_id,
+				result="success",
+				latency_ms=latency_ms,
+				provider_request_id_value=stream_provider_request_id,
+			)
 
 
 @app.post(f"{settings.api_prefix}/conversations/{{conversation_id}}/stream", tags=["chat"])
@@ -2207,6 +2321,8 @@ async def stream_chat(
 					web_search,
 					task_type=task_type,
 					prompt_version=prompt_version,
+					correlation_id=request_id,
+					attempt="full",
 				):
 					answer_parts.append(delta)
 					yield _event("delta", content=delta)
@@ -2220,6 +2336,14 @@ async def stream_chat(
 					getattr(error, "status_code", None),
 					request_id,
 				)
+				log_compact_fallback_started(
+					logger,
+					correlation_id=request_id,
+					error=error,
+					full_request_options=_chat_completion_options(ai_messages, user.id, web_search),
+					compact_request_options=_chat_completion_options(compact_messages, user.id, web_search),
+					reason="retryable_provider_status_without_partial_output",
+				)
 				AI_CONTEXT_RETRIES_TOTAL.labels("started").inc()
 				try:
 					async for delta in _stream_ai_deltas(
@@ -2228,6 +2352,8 @@ async def stream_chat(
 						web_search,
 						task_type=task_type,
 						prompt_version=prompt_version,
+						correlation_id=request_id,
+						attempt="compact",
 					):
 						answer_parts.append(delta)
 						yield _event("delta", content=delta)
@@ -2267,7 +2393,7 @@ async def stream_chat(
 			AI_REQUESTS_TOTAL.labels("error", str(web_search).lower()).inc()
 			yield _event("error", code=error.code, message=error.message, requestId=request_id)
 		except Exception as error:
-			logger.exception(json.dumps({
+			failure_diagnostic = json.dumps({
 				"event": "AI_REQUEST_FAILED",
 				"timestamp": utc_now().isoformat(),
 				"requestId": request_id,
@@ -2278,7 +2404,11 @@ async def stream_chat(
 				"errorType": type(error).__name__,
 				"providerStatus": getattr(error, "status_code", None),
 				"durationMs": round((time.perf_counter() - started) * 1000, 2),
-			}, ensure_ascii=False))
+			}, ensure_ascii=False)
+			if is_groq_provider_error(error):
+				logger.error(failure_diagnostic)
+			else:
+				logger.exception(failure_diagnostic)
 			code, message = _safe_ai_error(error)
 			assistant_message.content = message
 			assistant_message.status = "error"

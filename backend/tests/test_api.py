@@ -3,7 +3,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import httpx
-from groq import APIStatusError
+from groq import APIConnectionError, APIStatusError, RateLimitError
 
 
 class FakeCompletions:
@@ -31,6 +31,16 @@ class RecordingCompletions(FakeCompletions):
 		if kwargs.get("stream", False):
 			self.calls.append(kwargs)
 		return await super().create(**kwargs)
+
+
+class ResponseStream:
+	def __init__(self, stream, request_id: str):
+		self.stream = stream
+		request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+		self.response = httpx.Response(200, request=request, headers={"x-request-id": request_id})
+
+	def __aiter__(self):
+		return self.stream.__aiter__()
 
 
 class BranchSummaryCompletions(FakeCompletions):
@@ -72,9 +82,24 @@ class ContextRejectingCompletions(RecordingCompletions):
 		self.calls.append(kwargs)
 		if len(kwargs["messages"]) > 2:
 			request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
-			response = httpx.Response(500, request=request)
-			raise APIStatusError("context rejected", response=response, body={"error": "test"})
-		return await FakeCompletions.create(self, **kwargs)
+			response = httpx.Response(413, request=request, headers={"x-request-id": "provider-full-413"})
+			raise APIStatusError("context rejected", response=response, body={"error": {
+				"message": "Maximum context length exceeded. Limit: 100000, Requested: 100500",
+				"type": "invalid_request_error",
+				"code": "context_length_exceeded",
+			}})
+		stream = await FakeCompletions.create(self, **kwargs)
+		return ResponseStream(stream, "provider-compact-success")
+
+
+class FailingStreamCompletions(FakeCompletions):
+	def __init__(self, error_factory):
+		self.error_factory = error_factory
+
+	async def create(self, **kwargs):
+		if kwargs.get("stream", False):
+			raise self.error_factory()
+		return await super().create(**kwargs)
 
 
 def test_auth_session_and_structured_error(client):
@@ -314,11 +339,17 @@ def test_normalizes_broken_history():
 	assert "И уточни детали" in normalized[-1]["content"]
 
 
-def test_retries_rejected_history_with_compact_context(authenticated_client, monkeypatch):
+def test_retries_rejected_history_with_compact_context(authenticated_client, monkeypatch, caplog):
 	import app.main as main_module
+	from app import groq_diagnostics
 
 	completions = ContextRejectingCompletions()
 	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	monkeypatch.setattr(
+		groq_diagnostics,
+		"settings",
+		replace(groq_diagnostics.settings, app_env="development", groq_debug_errors=True),
+	)
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Контекст"}).json()["conversation"]["id"]
 
 	first = authenticated_client.post(
@@ -327,15 +358,72 @@ def test_retries_rejected_history_with_compact_context(authenticated_client, mon
 	)
 	assert '"type": "done"' in first.text
 
-	second = authenticated_client.post(
-		f"/api/conversations/{conversation_id}/stream",
-		data={"prompt": "Продолжи"},
-	)
+	with caplog.at_level("WARNING", logger="velorian"):
+		second = authenticated_client.post(
+			f"/api/conversations/{conversation_id}/stream",
+			data={"prompt": "Продолжи"},
+		)
 
 	assert '"type": "done"' in second.text
 	assert len(completions.calls) == 3
 	assert [message["role"] for message in completions.calls[1]["messages"]] == ["system", "user", "assistant", "user"]
 	assert [message["role"] for message in completions.calls[2]["messages"]] == ["system", "user"]
+	meta = next(json.loads(line) for line in second.text.splitlines() if '"type": "meta"' in line)
+	diagnostics = [
+		json.loads(record.getMessage())
+		for record in caplog.records
+		if record.name == "velorian" and record.getMessage().startswith("{")
+	]
+	provider_error = next(item for item in diagnostics if item.get("event") == "GROQ_API_ERROR")
+	fallback_started = next(item for item in diagnostics if item.get("event") == "GROQ_COMPACT_FALLBACK_STARTED")
+	fallback_result = next(item for item in diagnostics if item.get("event") == "GROQ_COMPACT_FALLBACK_RESULT")
+	assert provider_error["http_status"] == 413
+	assert provider_error["constraint_type"] == "context"
+	assert provider_error["provider_request_id"] == "provider-full-413"
+	assert provider_error["correlation_id"] == meta["requestId"]
+	assert fallback_started["correlation_id"] == meta["requestId"]
+	assert fallback_started["reason"] == "retryable_provider_status_without_partial_output"
+	assert fallback_started["full_input_tokens_estimate"] > fallback_started["compact_input_tokens_estimate"]
+	assert fallback_result["correlation_id"] == meta["requestId"]
+	assert fallback_result["result"] == "success"
+	assert fallback_result["provider_request_id"] == "provider-compact-success"
+	assert "Первый вопрос" not in "\n".join(record.getMessage() for record in caplog.records)
+	assert "Продолжи" not in "\n".join(record.getMessage() for record in caplog.records)
+
+
+def test_provider_rate_limit_and_connection_errors_remain_safe_for_frontend(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	def rate_limit_error():
+		request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+		response = httpx.Response(429, request=request, headers={"x-request-id": "provider-rate-limit"})
+		return RateLimitError(
+			"raw rate limit SDK message",
+			response=response,
+			body={"error": {"message": "raw private provider reason", "type": "rate_limit", "code": "tpm"}},
+		)
+
+	def connection_error():
+		request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+		return APIConnectionError(message="raw private connection reason", request=request)
+
+	for index, (error_factory, expected_code) in enumerate((
+		(rate_limit_error, "AI_RATE_LIMITED"),
+		(connection_error, "AI_UNAVAILABLE"),
+	)):
+		monkeypatch.setattr(main_module, "client", FakeGroq(FailingStreamCompletions(error_factory)))
+		conversation_id = authenticated_client.post(
+			"/api/conversations",
+			json={"title": f"Provider failure {index}"},
+		).json()["conversation"]["id"]
+		response = authenticated_client.post(
+			f"/api/conversations/{conversation_id}/stream",
+			data={"prompt": "Проверь безопасную ошибку"},
+		)
+		error_event = next(json.loads(line) for line in response.text.splitlines() if '"type": "error"' in line)
+		assert error_event["code"] == expected_code
+		assert "raw private" not in response.text
+		assert "raw rate limit SDK message" not in response.text
 
 
 def test_retry_creates_a_new_user_message(authenticated_client, monkeypatch):
