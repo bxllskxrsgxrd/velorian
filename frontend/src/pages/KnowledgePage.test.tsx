@@ -412,7 +412,9 @@ describe('KnowledgePage', () => {
 			});
 		});
 
-		expect(screen.getByLabelText('Текущий URL')).toHaveTextContent('/knowledge/knowledge-1');
+		await waitFor(() => {
+			expect(screen.getByLabelText('Текущий URL')).toHaveTextContent('/knowledge/knowledge-1');
+		});
 	});
 
 	it('uses the shared inactive card state for disabled knowledge items', async () => {
