@@ -47,13 +47,16 @@ class BranchSummaryCompletions(FakeCompletions):
 	def __init__(self):
 		self.stream_calls: list[dict] = []
 		self.summary_calls: list[dict] = []
+		self.call_order: list[str] = []
 
 	async def create(self, **kwargs):
 		if kwargs.get("stream", False):
+			self.call_order.append("chat")
 			self.stream_calls.append(kwargs)
 			return await super().create(**kwargs)
 		if "response_format" in kwargs:
 			return await super().create(**kwargs)
+		self.call_order.append("summary")
 		self.summary_calls.append(kwargs)
 		return SimpleNamespace(
 			choices=[SimpleNamespace(message=SimpleNamespace(content="SUMMARY_OLD_ACTIVE"))],
@@ -588,6 +591,7 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "CURRENT"})
 
 	assert len(completions.summary_calls) == 1
+	assert completions.call_order[-2:] == ["summary", "chat"]
 	summary_input = completions.summary_calls[0]["messages"][1]["content"]
 	assert "OLD_ACTIVE_MESSAGE_" in summary_input
 	assert "SIBLING_B1" not in summary_input
@@ -598,7 +602,21 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 	assert [message["content"] for message in main_context if message["role"] == "user"] == [
 		"ACTIVE_FRESH", "CURRENT",
 	]
-	assert all("SUMMARY_OLD_ACTIVE" not in message["content"] for message in main_context)
+	assert {
+		"role": "system",
+		"content": main_module.BRANCH_SUMMARY_CONTEXT_PREFIX + "SUMMARY_OLD_ACTIVE",
+	} in main_context
+	final_context_log = next(
+		record.getMessage() for record in reversed(caplog.records)
+		if record.getMessage().startswith("AI final context ")
+	)
+	assert "summary_present=true" in final_context_log
+	final_summary_tokens = int(
+		next(part for part in final_context_log.split() if part.startswith("summary_tokens=")).split("=", 1)[1]
+	)
+	assert final_summary_tokens == main_module.estimate_tokens(
+		main_module.BRANCH_SUMMARY_CONTEXT_PREFIX + "SUMMARY_OLD_ACTIVE"
+	)
 
 	with SessionLocal() as db:
 		summary = db.scalar(select(BranchSummary).where(BranchSummary.conversation_id == conversation_id))

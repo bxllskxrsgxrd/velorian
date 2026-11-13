@@ -742,9 +742,9 @@ async def _update_branch_summary(
 	conversation_id: str,
 	current_message: Message,
 	excluded_history: list[Message],
-) -> None:
+) -> bool:
 	if not excluded_history:
-		return
+		return False
 	conversation_messages = list(db.scalars(
 		select(Message)
 		.where(Message.conversation_id == conversation_id)
@@ -763,10 +763,10 @@ async def _update_branch_summary(
 		if path_positions.get(message.id, -1) > previous_through_position
 	]
 	if not new_messages:
-		return
+		return False
 	summary_text = await _generate_branch_summary(existing_summary, new_messages)
 	if summary_text is None:
-		return
+		return False
 	try:
 		db.add(BranchSummary(
 			conversation_id=conversation_id,
@@ -775,9 +775,11 @@ async def _update_branch_summary(
 			summary_text=summary_text,
 		))
 		db.commit()
+		return True
 	except SQLAlchemyError as error:
 		db.rollback()
 		logger.warning("Branch summary persistence failed: error_type=%s", type(error).__name__)
+		return False
 
 
 def _parse_memory_patch(content: str) -> dict[str, dict[str, object] | list[object]]:
@@ -1947,6 +1949,59 @@ def _chat_completion_options(
 	return options
 
 
+def _log_final_ai_context(
+	messages: list[dict[str, str]],
+	*,
+	correlation_id: str | None,
+	task_type: AITaskType,
+	attempt: str,
+) -> None:
+	current_user_index = next(
+		(index for index in range(len(messages) - 1, -1, -1) if messages[index].get("role") == "user"),
+		None,
+	)
+	system_tokens = 0
+	summary_tokens = 0
+	memory_tokens = 0
+	history_tokens = 0
+	user_tokens = 0
+	for index, message in enumerate(messages):
+		content = message.get("content") or ""
+		tokens = estimate_tokens(content)
+		if message.get("role") == "system":
+			if content.startswith(BRANCH_SUMMARY_CONTEXT_PREFIX):
+				summary_tokens += tokens
+			elif content.startswith(STRUCTURED_MEMORY_CONTEXT_PREFIX):
+				memory_tokens += tokens
+			else:
+				system_tokens += tokens
+		elif index == current_user_index:
+			user_tokens += tokens
+		else:
+			history_tokens += tokens
+	input_tokens = system_tokens + summary_tokens + memory_tokens + history_tokens + user_tokens
+	ai_usage_logger.info(
+		"AI final context correlation_id=%s attempt=%s provider=groq model=%s purpose=chat task_type=%s "
+		"message_count=%s summary_present=%s system_tokens=%s summary_tokens=%s memory_tokens=%s history_tokens=%s "
+		"user_tokens=%s input_tokens=%s context_budget=%s history_budget=%s max_output_tokens=%s",
+		correlation_id or "none",
+		attempt,
+		settings.groq_model,
+		task_type,
+		len(messages),
+		str(summary_tokens > 0).lower(),
+		system_tokens,
+		summary_tokens,
+		memory_tokens,
+		history_tokens,
+		user_tokens,
+		input_tokens,
+		settings.chat_context_budget,
+		settings.history_token_budget,
+		settings.max_output_tokens,
+	)
+
+
 async def _stream_ai_deltas(
 	messages: list[dict[str, str]],
 	user_id: str,
@@ -1963,6 +2018,12 @@ async def _stream_ai_deltas(
 	status: AIInteractionStatus = "error"
 	stream_provider_request_id = None
 	try:
+		_log_final_ai_context(
+			messages,
+			correlation_id=correlation_id,
+			task_type=task_type,
+			attempt=attempt,
+		)
 		stream = await client.chat.completions.create(**kwargs)
 		stream_provider_request_id = provider_request_id(stream)
 		async for chunk in stream:
@@ -2251,7 +2312,17 @@ async def stream_chat(
 			knowledge_search=search_mode == "knowledge",
 			file_generation=file_generation,
 		)
-		await _update_branch_summary(db, conversation.id, user_message, excluded_history)
+		summary_updated = await _update_branch_summary(db, conversation.id, user_message, excluded_history)
+		if summary_updated:
+			ai_messages, knowledge_result, uses_knowledge_context, _ = build_chat_context(
+				db,
+				conversation.id,
+				user.id,
+				prompt,
+				user_message,
+				knowledge_search=search_mode == "knowledge",
+				file_generation=file_generation,
+			)
 		if knowledge_result is not None:
 			assistant_message.knowledge_sources = [
 				{
