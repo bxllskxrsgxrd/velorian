@@ -68,6 +68,23 @@ class BranchSummaryCompletions(FakeCompletions):
 		)
 
 
+class SummaryResultCompletions:
+	def __init__(self, content: str, finish_reason: str):
+		self.content = content
+		self.finish_reason = finish_reason
+		self.calls: list[dict] = []
+
+	async def create(self, **kwargs):
+		self.calls.append(kwargs)
+		return SimpleNamespace(
+			choices=[SimpleNamespace(
+				message=SimpleNamespace(content=self.content),
+				finish_reason=self.finish_reason,
+			)],
+			usage=SimpleNamespace(prompt_tokens=30, completion_tokens=10),
+		)
+
+
 class ScopedBranchSummaryCompletions(FakeCompletions):
 	def __init__(self):
 		self.stream_calls: list[dict] = []
@@ -664,7 +681,7 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 	usage_logs = [record.getMessage() for record in caplog.records if "purpose=branch_summary" in record.getMessage()]
 	assert len(usage_logs) == 1
 	assert "task_type=summary" in usage_logs[0]
-	assert "prompt_version=branch_summary:v1" in usage_logs[0]
+	assert "prompt_version=branch_summary:v2" in usage_logs[0]
 
 	with caplog.at_level("INFO"):
 		second_response = authenticated_client.post(
@@ -810,6 +827,115 @@ def test_branch_summary_metrics_follow_server_flags_and_log_completion_details(m
 	assert failed_metric["summary_input_tokens"] is None
 	assert failed_metric["summary_output_tokens"] is None
 	assert failed_metric["finish_reason"] is None
+
+
+def test_branch_summary_uses_dedicated_output_budget_and_compact_prompt(monkeypatch):
+	import asyncio
+
+	import app.main as main_module
+
+	completions = SummaryResultCompletions("COMPLETE_SUMMARY", "stop")
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	monkeypatch.setattr(main_module, "settings", replace(
+		main_module.settings,
+		max_output_tokens=8192,
+		branch_summary_max_output_tokens=1024,
+	))
+	message = SimpleNamespace(id="message-1", role="user", content="Important exact fact ID-42")
+
+	result = asyncio.run(main_module._generate_branch_summary(None, [message]))
+
+	assert result == "COMPLETE_SUMMARY"
+	assert main_module.settings.max_output_tokens == 8192
+	assert completions.calls[0]["max_completion_tokens"] == 1024
+	prompt = completions.calls[0]["messages"][0]["content"]
+	assert "500-700 output tokens" in prompt
+	assert "Compress semantically instead of mechanically truncating text" in prompt
+	assert "Preserve exact facts, decisions, constraints, identifiers, important changes" in prompt
+
+
+def test_branch_summary_rejects_length_finish_reason_but_keeps_metrics(monkeypatch, caplog):
+	import asyncio
+
+	import app.main as main_module
+
+	completions = SummaryResultCompletions("INCOMPLETE_SUMMARY", "length")
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	monkeypatch.setattr(main_module, "settings", replace(
+		main_module.settings,
+		app_env="development",
+		summary_debug_metrics=True,
+	))
+	message = SimpleNamespace(id="message-1", role="user", content="Important batch")
+
+	with caplog.at_level("INFO"):
+		result = asyncio.run(main_module._generate_branch_summary(None, [message]))
+
+	assert result is None
+	metric = json.loads(next(
+		record.getMessage() for record in caplog.records if "BRANCH_SUMMARY_METRICS" in record.getMessage()
+	))
+	assert metric["finish_reason"] == "length"
+	assert metric["summary_input_tokens"] == 30
+	assert metric["summary_output_tokens"] == 10
+	assert metric["status"] == "success"
+	assert any("incomplete summary discarded" in record.getMessage() for record in caplog.records)
+
+
+def test_branch_summary_length_failure_does_not_advance_coverage(authenticated_client, monkeypatch):
+	import asyncio
+	from uuid import uuid4
+
+	import app.main as main_module
+	from sqlalchemy import select
+
+	from app.database import SessionLocal
+	from app.models import BranchSummary, Message
+
+	completions = SummaryResultCompletions("INCOMPLETE_SUMMARY", "length")
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post(
+		"/api/conversations", json={"title": "Summary coverage"},
+	).json()["conversation"]["id"]
+	with SessionLocal() as db:
+		covered = Message(id=str(uuid4()), conversation_id=conversation_id, role="user", content="COVERED")
+		newly_excluded = Message(
+			id=str(uuid4()), conversation_id=conversation_id, role="assistant",
+			content="NEWLY_EXCLUDED", reply_to_id=covered.id,
+		)
+		current = Message(
+			id=str(uuid4()), conversation_id=conversation_id, role="user",
+			content="CURRENT", reply_to_id=newly_excluded.id,
+		)
+		db.add_all([covered, newly_excluded, current])
+		db.flush()
+		existing = BranchSummary(
+			conversation_id=conversation_id,
+			branch_anchor_message_id=current.id,
+			summarized_through_message_id=covered.id,
+			summary_text="EXISTING_SUMMARY",
+		)
+		db.add(existing)
+		db.flush()
+		covered_id = covered.id
+		existing_id = existing.id
+		db.commit()
+
+		updated = asyncio.run(main_module._update_branch_summary(
+			db,
+			conversation_id,
+			current,
+			[newly_excluded],
+		))
+		summaries = list(db.scalars(
+			select(BranchSummary).where(BranchSummary.conversation_id == conversation_id)
+		))
+
+	assert not updated
+	assert len(summaries) == 1
+	assert summaries[0].id == existing_id
+	assert summaries[0].summarized_through_message_id == covered_id
+	assert summaries[0].summary_text == "EXISTING_SUMMARY"
 
 
 def test_branch_summaries_stay_scoped_and_do_not_duplicate_raw_groq_history(authenticated_client, monkeypatch):
