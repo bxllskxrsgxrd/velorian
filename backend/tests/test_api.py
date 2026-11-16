@@ -732,7 +732,7 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 	usage_logs = [record.getMessage() for record in caplog.records if "purpose=branch_summary" in record.getMessage()]
 	assert len(usage_logs) == 1
 	assert "task_type=summary" in usage_logs[0]
-	assert "prompt_version=branch_summary:v2" in usage_logs[0]
+	assert "prompt_version=branch_summary:v3" in usage_logs[0]
 
 	with caplog.at_level("INFO"):
 		second_response = authenticated_client.post(
