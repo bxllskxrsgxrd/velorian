@@ -1727,12 +1727,34 @@ def test_failed_turn_is_excluded_from_next_ai_history(authenticated_client, monk
 
 def test_chat_context_builder_drops_optional_knowledge_before_required_context_and_recent_history(authenticated_client, monkeypatch, caplog):
 	import app.main as main_module
+	from sqlalchemy import select
+
+	from app.database import SessionLocal
+	from app.models import BranchSummary, Message
 
 	completions = RecordingCompletions()
 	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Context priorities"}).json()["conversation"]["id"]
 	for prompt in ("A" * 20, "B" * 8, "C" * 4):
 		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
+	summary_text = "Earlier A and B turns"
+	with SessionLocal() as db:
+		messages = list(db.scalars(
+			select(Message)
+			.where(Message.conversation_id == conversation_id)
+			.order_by(Message.created_at, Message.id)
+		))
+		b_user = next(message for message in messages if message.content == "B" * 8)
+		b_assistant = next(message for message in messages if message.reply_to_id == b_user.id)
+		c_user = next(message for message in messages if message.content == "C" * 4)
+		c_assistant = next(message for message in messages if message.reply_to_id == c_user.id)
+		db.add(BranchSummary(
+			conversation_id=conversation_id,
+			branch_anchor_message_id=c_assistant.id,
+			summarized_through_message_id=b_assistant.id,
+			summary_text=summary_text,
+		))
+		db.commit()
 	authenticated_client.post(
 		"/api/knowledge",
 		json={"title": "Alpha knowledge", "content": "OPTIONAL_KNOWLEDGE alpha " * 200},
@@ -1745,7 +1767,9 @@ def test_chat_context_builder_drops_optional_knowledge_before_required_context_a
 	document_context_part = "\n\n<document_context>\n" + document_context + "\n</document_context>"
 	user_tokens = main_module.estimate_tokens(current_prompt)
 	task_specific_tokens = main_module.estimate_tokens(current_prompt + document_context_part) - user_tokens
-	chat_context_budget = main_module.estimate_tokens(main_module.KNOWLEDGE_PROMPT) + user_tokens + task_specific_tokens + 15
+	summary_content = main_module.BRANCH_SUMMARY_CONTEXT_PREFIX + summary_text
+	summary_tokens = main_module.estimate_tokens(summary_content)
+	chat_context_budget = main_module.estimate_tokens(main_module.KNOWLEDGE_PROMPT) + summary_tokens + user_tokens + task_specific_tokens + 15
 	monkeypatch.setattr(
 		main_module,
 		"settings",
@@ -1757,15 +1781,20 @@ def test_chat_context_builder_drops_optional_knowledge_before_required_context_a
 		lambda *args, **kwargs: [SimpleNamespace(attachment_id="missing", position=0, content=document_content)],
 	)
 
+	call_count_before_current_request = len(completions.calls)
 	with caplog.at_level("INFO", logger="uvicorn.error"):
-		authenticated_client.post(
+		response = authenticated_client.post(
 			f"/api/conversations/{conversation_id}/stream",
 			data={"prompt": current_prompt, "search_mode": "knowledge"},
 		)
 
-	selected_messages = completions.calls[-1]["messages"]
+	assert response.status_code == 200
+	assert '"type": "done"' in response.text
+	assert len(completions.calls) == call_count_before_current_request + 1
+	selected_messages = completions.calls[call_count_before_current_request]["messages"]
 	assert selected_messages[0] == {"role": "system", "content": main_module.KNOWLEDGE_PROMPT}
-	assert [(message["role"], message["content"]) for message in selected_messages[1:-1]] == [
+	assert selected_messages[1] == {"role": "system", "content": summary_content}
+	assert [(message["role"], message["content"]) for message in selected_messages[2:-1]] == [
 		("user", "C" * 4),
 		("assistant", "Привет, мир!"),
 	]
