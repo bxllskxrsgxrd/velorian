@@ -59,6 +59,7 @@ class Message(Base):
 	request_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
 	knowledge_sources: Mapped[list[dict] | None] = mapped_column(JSON, nullable=True)
 	search_mode: Mapped[str] = mapped_column(String(16), default="none")
+	model_id: Mapped[str | None] = mapped_column(String(64), nullable=True)
 	branch_group_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 	reply_to_id: Mapped[str | None] = mapped_column(String(36), nullable=True, index=True)
 	is_active: Mapped[bool] = mapped_column(Boolean, default=True)

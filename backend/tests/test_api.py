@@ -23,6 +23,25 @@ class FakeGroq:
 		self.chat = SimpleNamespace(completions=completions or FakeCompletions())
 
 
+class FakeGeminiModels:
+	def __init__(self):
+		self.calls: list[dict] = []
+
+	async def generate_content_stream(self, **kwargs):
+		self.calls.append(kwargs)
+
+		async def chunks():
+			for content in ("Ответ", " Gemini"):
+				yield SimpleNamespace(text=content, usage_metadata=None)
+
+		return chunks()
+
+
+class FakeGemini:
+	def __init__(self):
+		self.models = FakeGeminiModels()
+
+
 class RecordingCompletions(FakeCompletions):
 	def __init__(self):
 		self.calls: list[dict] = []
@@ -297,6 +316,59 @@ def test_public_config_exposes_canonical_attachment_limits(client):
 		"maxFileSize": settings.max_file_size,
 		"maxTotalSize": settings.max_total_file_size,
 	}
+	models = {model["id"]: model for model in response.json()["aiModels"]}
+	assert set(models) == {"gpt-oss-120b", "qwen-3.8", "gemini-3.8-flash"}
+	assert models["gpt-oss-120b"]["available"] is True
+	assert models["qwen-3.8"]["available"] is True
+	assert response.json()["defaultAiModelId"] == "gpt-oss-120b"
+
+
+def test_stream_uses_selected_qwen_model(authenticated_client, monkeypatch):
+	import app.main as main_module
+	from app.config import settings
+
+	completions = RecordingCompletions()
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Qwen"}).json()["conversation"]["id"]
+	response = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Ответь через Qwen", "model_id": "qwen-3.8"},
+	)
+
+	assert '"type": "done"' in response.text
+	assert completions.calls[-1]["model"] == settings.groq_qwen_model
+	messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
+	assert [message["modelId"] for message in messages] == ["qwen-3.8", "qwen-3.8"]
+
+
+def test_stream_uses_selected_gemini_model(authenticated_client, monkeypatch):
+	import app.main as main_module
+	from app.config import settings
+
+	gemini = FakeGemini()
+	monkeypatch.setattr(main_module, "gemini_client", gemini)
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Gemini"}).json()["conversation"]["id"]
+	response = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Ответь через Gemini", "model_id": "gemini-3.8-flash"},
+	)
+
+	assert '"type": "done"' in response.text
+	assert gemini.models.calls[-1]["model"] == settings.gemini_model
+	assert "Ответ Gemini" in response.text
+	messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
+	assert [message["modelId"] for message in messages] == ["gemini-3.8-flash", "gemini-3.8-flash"]
+
+
+def test_stream_rejects_unknown_model(authenticated_client):
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Unknown model"}).json()["conversation"]["id"]
+	response = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Проверка", "model_id": "provider/arbitrary-model"},
+	)
+
+	assert response.status_code == 422
+	assert response.json()["error"]["code"] == "AI_MODEL_INVALID"
 
 
 def test_streaming_and_retry(authenticated_client, monkeypatch):
@@ -1029,6 +1101,64 @@ def test_generated_file_is_attached_and_downloadable(authenticated_client, monke
 	assert download.content == b"print('Velorian')"
 	assert "attachment" in download.headers["content-disposition"]
 	assert completions.calls[0]["messages"][0]["content"] == main_module.FILE_GENERATION_PROMPT
+
+
+def test_qwen_generated_file_uses_selected_model_and_is_downloadable(authenticated_client, monkeypatch):
+	import app.main as main_module
+	from app.config import settings
+
+	answer = "```file:qwen-result.txt\nQwen file content\n```\n\nФайл готов."
+	completions = FixedCompletions(answer)
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Qwen file"}).json()["conversation"]["id"]
+	response = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Создай файл qwen-result.txt", "model_id": "qwen-3.8"},
+	)
+
+	done = next(json.loads(line) for line in response.text.splitlines() if '"type": "done"' in line)
+	attachment = done["message"]["attachments"][0]
+	assert completions.calls[-1]["model"] == settings.groq_qwen_model
+	assert done["message"]["modelId"] == "qwen-3.8"
+	assert attachment["name"] == "qwen-result.txt"
+	assert authenticated_client.get(attachment["downloadUrl"]).content == b"Qwen file content"
+
+
+def test_file_request_pattern_recognizes_explicit_natural_phrases():
+	from app.main import FILE_REQUEST_PATTERN
+
+	for prompt in (
+		"Создай мне файлы с результатами",
+		"Предоставь результат отдельным файлом",
+		"Мне нужен документ с итогами",
+		"Подготовь результат в CSV",
+		"Generate files with the report",
+	):
+		assert FILE_REQUEST_PATTERN.search(prompt), prompt
+	assert FILE_REQUEST_PATTERN.search("Напиши простенький скрипт на node js") is None
+
+
+def test_generated_file_count_limit_returns_error_without_partial_attachments(authenticated_client, monkeypatch):
+	import app.main as main_module
+	from app.config import settings
+
+	answer = "\n".join(
+		f"```file:result-{index}.txt\n{index}\n```"
+		for index in range(settings.max_files + 1)
+	)
+	monkeypatch.setattr(main_module, "client", FakeGroq(FixedCompletions(answer)))
+	conversation_id = authenticated_client.post("/api/conversations", json={"title": "File limit"}).json()["conversation"]["id"]
+	response = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Создай файлы с результатами"},
+	)
+
+	events = [json.loads(line) for line in response.text.splitlines() if line.strip()]
+	assert events[-1]["type"] == "error"
+	assert events[-1]["code"] == "ATTACHMENT_COUNT_LIMIT_EXCEEDED"
+	messages = authenticated_client.get(f"/api/conversations/{conversation_id}").json()["conversation"]["messages"]
+	assert messages[-1]["status"] == "error"
+	assert messages[-1]["attachments"] == []
 
 
 def test_code_request_does_not_create_file_without_explicit_file_intent(authenticated_client, monkeypatch):

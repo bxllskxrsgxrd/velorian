@@ -197,6 +197,9 @@
 
 	&__send {
 		grid-area: send;
+		display: flex;
+		align-items: center;
+		gap: 6px;
 
 		.icon-button {
 			color: var(--color-text-light);
@@ -234,4 +237,15 @@
 	@include mobile {
 		padding: 10px;
 	}
+}
+
+:root[data-compact='true'] .prompt-bar {
+	padding: 8px;
+	border-radius: 23px;
+}
+
+:root[data-compact='true'] .prompt-bar__attachments {
+	--attachment-size: 40px;
+	gap: 6px;
+	padding-bottom: 6px;
 }
