@@ -198,3 +198,30 @@ export function getUserFacingError(code: string, status = 0, requestId?: string)
 export function getUserErrorMessage(code: string, status = 0) {
 	return getUserFacingError(code, status).description;
 }
+
+type AuthOperation = 'login' | 'register';
+
+export function getAuthErrorMessage(error: unknown, operation: AuthOperation): string {
+	const candidate = error && typeof error === 'object'
+		? error as { code?: unknown; status?: unknown; name?: unknown; message?: unknown }
+		: {};
+	const code = typeof candidate.code === 'string' ? candidate.code : '';
+	const status = typeof candidate.status === 'number' ? candidate.status : 0;
+	const technicalMessage = typeof candidate.message === 'string' ? candidate.message : '';
+	const isNetworkError = code === 'NETWORK_ERROR'
+		|| error instanceof TypeError
+		|| candidate.name === 'NetworkError'
+		|| /failed to fetch|networkerror|network request failed|load failed/i.test(technicalMessage);
+
+	if (isNetworkError)
+		return 'Не удалось подключиться к серверу. Проверьте интернет-соединение и попробуйте снова';
+	if (code === 'BACKEND_UNAVAILABLE' || status === 502 || status === 503 || status === 504)
+		return 'Сервис временно недоступен. Попробуйте войти немного позже';
+	if (code === 'INVALID_CREDENTIALS') return ERROR_MESSAGES.INVALID_CREDENTIALS.description;
+	if (code === 'CSRF_INVALID') return ERROR_MESSAGES.CSRF_INVALID.description;
+	if (code === 'RATE_LIMITED') return ERROR_MESSAGES.RATE_LIMITED.description;
+	if (code === 'VALIDATION_ERROR') return ERROR_MESSAGES.VALIDATION_ERROR.description;
+	return operation === 'login'
+		? 'Не удалось войти. Проверьте данные и попробуйте снова'
+		: 'Не удалось создать аккаунт. Проверьте данные и попробуйте снова';
+}
