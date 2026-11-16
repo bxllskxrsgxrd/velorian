@@ -4,6 +4,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import httpx
+import pytest
 from groq import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 
 
@@ -182,9 +183,13 @@ class FailingStreamCompletions(FakeCompletions):
 		return await super().create(**kwargs)
 
 
-def summary_provider_status_error(status_code: int) -> APIStatusError:
+def summary_provider_status_error(status_code: int, retry_after: str | None = None) -> APIStatusError:
 	request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
-	response = httpx.Response(status_code, request=request)
+	response = httpx.Response(
+		status_code,
+		request=request,
+		headers={"Retry-After": retry_after} if retry_after is not None else None,
+	)
 	error_type = RateLimitError if status_code == 429 else APIStatusError
 	return error_type(
 		f"summary provider error {status_code}",
@@ -919,8 +924,9 @@ def test_branch_summary_uses_dedicated_output_budget_and_compact_prompt(monkeypa
 	assert completions.calls[0]["max_completion_tokens"] == 1024
 	prompt = completions.calls[0]["messages"][0]["content"]
 	assert "500-700 output tokens" in prompt
-	assert "Compress semantically instead of mechanically truncating text" in prompt
-	assert "Preserve exact facts, decisions, constraints, identifiers, important changes" in prompt
+	assert "Compress semantically; never truncate mechanically" in prompt
+	assert "Preserve chronology, exact facts, decisions, constraints, identifiers, important changes" in prompt
+	assert "[No existing summary]" not in completions.calls[0]["messages"][1]["content"]
 
 
 def test_branch_summary_rejects_length_finish_reason_but_keeps_metrics(monkeypatch, caplog):
@@ -1029,6 +1035,97 @@ def test_branch_summary_provider_errors_return_no_summary(monkeypatch):
 
 		assert result is None
 		assert len(completions.summary_calls) == 1
+
+
+def test_branch_summary_retries_one_short_rate_limit_then_succeeds(monkeypatch):
+	import asyncio
+
+	import app.main as main_module
+
+	completions = SequencedBranchSummaryCompletions([
+		summary_provider_status_error(429, "1"),
+		("RETRIED_SUMMARY", "stop"),
+	])
+	waits: list[float] = []
+
+	async def record_sleep(seconds: float):
+		waits.append(seconds)
+
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	monkeypatch.setattr(main_module.asyncio, "sleep", record_sleep)
+	message = SimpleNamespace(id="message-1", role="user", content="Important context")
+
+	result = asyncio.run(main_module._generate_branch_summary(None, [message]))
+
+	assert result == "RETRIED_SUMMARY"
+	assert waits == [1.0]
+	assert len(completions.summary_calls) == 2
+	assert completions.summary_calls[0] == completions.summary_calls[1]
+
+
+def test_branch_summary_does_not_wait_for_long_rate_limit(monkeypatch):
+	import asyncio
+
+	import app.main as main_module
+
+	completions = SequencedBranchSummaryCompletions([summary_provider_status_error(429, "30")])
+
+	async def unexpected_sleep(_seconds: float):
+		raise AssertionError("Long Retry-After must not be awaited")
+
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	monkeypatch.setattr(main_module.asyncio, "sleep", unexpected_sleep)
+	message = SimpleNamespace(id="message-1", role="user", content="Important context")
+
+	result = asyncio.run(main_module._generate_branch_summary(None, [message]))
+
+	assert result is None
+	assert len(completions.summary_calls) == 1
+
+
+def test_branch_summary_stops_after_repeated_short_rate_limit(monkeypatch):
+	import asyncio
+
+	import app.main as main_module
+
+	completions = SequencedBranchSummaryCompletions([
+		summary_provider_status_error(429, "1"),
+		summary_provider_status_error(429, "1"),
+	])
+	waits: list[float] = []
+
+	async def record_sleep(seconds: float):
+		waits.append(seconds)
+
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	monkeypatch.setattr(main_module.asyncio, "sleep", record_sleep)
+	message = SimpleNamespace(id="message-1", role="user", content="Important context")
+
+	result = asyncio.run(main_module._generate_branch_summary(None, [message]))
+
+	assert result is None
+	assert waits == [1.0]
+	assert len(completions.summary_calls) == 2
+
+
+def test_branch_summary_cancellation_during_rate_limit_wait_is_propagated(monkeypatch):
+	import asyncio
+
+	import app.main as main_module
+
+	completions = SequencedBranchSummaryCompletions([summary_provider_status_error(429, "1")])
+
+	async def cancel_sleep(_seconds: float):
+		raise asyncio.CancelledError
+
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	monkeypatch.setattr(main_module.asyncio, "sleep", cancel_sleep)
+	message = SimpleNamespace(id="message-1", role="user", content="Important context")
+
+	with pytest.raises(asyncio.CancelledError):
+		asyncio.run(main_module._generate_branch_summary(None, [message]))
+
+	assert len(completions.summary_calls) == 1
 
 
 def test_chat_is_blocked_when_evicted_history_summary_fails(authenticated_client, monkeypatch):
