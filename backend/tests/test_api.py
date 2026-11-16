@@ -693,7 +693,7 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 	metric_logs = [
 		json.loads(record.getMessage())
 		for record in caplog.records
-		if record.name == "velorian" and '"event": "BRANCH_SUMMARY_METRICS"' in record.getMessage()
+		if record.name == "uvicorn.error" and '"event": "BRANCH_SUMMARY_METRICS"' in record.getMessage()
 	]
 	assert len(metric_logs) == 2
 	summary_tokens = main_module.estimate_tokens("SUMMARY_OLD_ACTIVE")
@@ -729,7 +729,7 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 	}
 
 
-def test_branch_summary_metrics_require_development_flag_and_cover_failed_launch(monkeypatch, caplog):
+def test_branch_summary_metrics_follow_server_flags_and_log_completion_details(monkeypatch, caplog):
 	import app.main as main_module
 
 	completion = SimpleNamespace(
@@ -739,23 +739,23 @@ def test_branch_summary_metrics_require_development_flag_and_cover_failed_launch
 		)],
 		usage=SimpleNamespace(prompt_tokens=10, completion_tokens=2),
 	)
-	message = SimpleNamespace(id="message-1", content="excluded")
+	existing_summary = SimpleNamespace(summary_text="previous summary")
+	message = SimpleNamespace(id="message-1", content="excluded batch")
 	base_settings = main_module.settings
-	with caplog.at_level("INFO", logger="velorian"):
-		for app_env, enabled in (("development", False), ("production", True)):
-			monkeypatch.setattr(main_module, "settings", replace(
-				base_settings,
-				app_env=app_env,
-				summary_debug_metrics=enabled,
-			))
-			main_module._log_branch_summary_metrics(
-				completion,
-				existing_summary=None,
-				new_messages=[message],
-				correlation_id="correlation-1",
-				trigger_reason="new_excluded_history",
-				status="success",
-			)
+	monkeypatch.setattr(main_module, "settings", replace(
+		base_settings,
+		app_env="production",
+		summary_debug_metrics=True,
+	))
+	with caplog.at_level("INFO", logger="uvicorn.error"):
+		main_module._log_branch_summary_metrics(
+			completion,
+			existing_summary=existing_summary,
+			new_messages=[message],
+			correlation_id="correlation-1",
+			trigger_reason="new_excluded_history",
+			status="success",
+		)
 
 	assert not any("BRANCH_SUMMARY_METRICS" in record.getMessage() for record in caplog.records)
 	caplog.clear()
@@ -764,24 +764,52 @@ def test_branch_summary_metrics_require_development_flag_and_cover_failed_launch
 		app_env="development",
 		summary_debug_metrics=True,
 	))
-	with caplog.at_level("INFO", logger="velorian"):
+	with caplog.at_level("INFO", logger="uvicorn.error"):
+		main_module._log_branch_summary_metrics(
+			completion,
+			existing_summary=existing_summary,
+			new_messages=[message],
+			correlation_id="correlation-1",
+			trigger_reason="new_excluded_history",
+			status="success",
+		)
+	metric = json.loads(next(record.getMessage() for record in caplog.records if "BRANCH_SUMMARY_METRICS" in record.getMessage()))
+	previous_tokens = main_module.estimate_tokens(existing_summary.summary_text)
+	new_tokens = main_module.estimate_tokens("summary")
+	assert metric == {
+		"event": "BRANCH_SUMMARY_METRICS",
+		"correlation_id": "correlation-1",
+		"previous_summary_tokens": previous_tokens,
+		"new_summary_tokens": new_tokens,
+		"summary_size_delta_tokens": new_tokens - previous_tokens,
+		"excluded_message_count": 1,
+		"excluded_message_tokens": main_module.estimate_tokens(message.content),
+		"summary_input_tokens": 10,
+		"summary_output_tokens": 2,
+		"finish_reason": "stop",
+		"summarized_through_message_id": "message-1",
+		"trigger_reason": "new_excluded_history",
+		"status": "success",
+	}
+	caplog.clear()
+	with caplog.at_level("INFO", logger="uvicorn.error"):
 		main_module._log_branch_summary_metrics(
 			None,
 			existing_summary=None,
 			new_messages=[message],
-			correlation_id="correlation-1",
+			correlation_id="correlation-2",
 			trigger_reason="new_excluded_history",
 			status="error",
 		)
-	metric = json.loads(next(record.getMessage() for record in caplog.records if "BRANCH_SUMMARY_METRICS" in record.getMessage()))
-	assert metric["status"] == "error"
-	assert metric["correlation_id"] == "correlation-1"
-	assert metric["excluded_message_count"] == 1
-	assert metric["summarized_through_message_id"] == "message-1"
-	assert metric["new_summary_tokens"] is None
-	assert metric["summary_input_tokens"] is None
-	assert metric["summary_output_tokens"] is None
-	assert metric["finish_reason"] is None
+	failed_metric = json.loads(next(
+		record.getMessage() for record in caplog.records if "BRANCH_SUMMARY_METRICS" in record.getMessage()
+	))
+	assert failed_metric["status"] == "error"
+	assert failed_metric["correlation_id"] == "correlation-2"
+	assert failed_metric["new_summary_tokens"] is None
+	assert failed_metric["summary_input_tokens"] is None
+	assert failed_metric["summary_output_tokens"] is None
+	assert failed_metric["finish_reason"] is None
 
 
 def test_branch_summaries_stay_scoped_and_do_not_duplicate_raw_groq_history(authenticated_client, monkeypatch):

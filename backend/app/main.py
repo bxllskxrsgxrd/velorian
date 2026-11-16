@@ -678,7 +678,7 @@ def _log_branch_summary_metrics(
 	content = _usage_value(_usage_value(choice, "message"), "content")
 	new_summary_tokens = estimate_tokens(content.strip()) if isinstance(content, str) and content.strip() else None
 	previous_summary_tokens = estimate_tokens(existing_summary.summary_text) if existing_summary is not None else 0
-	logger.info(json.dumps({
+	ai_usage_logger.info(json.dumps({
 		"event": "BRANCH_SUMMARY_METRICS",
 		"correlation_id": correlation_id,
 		"previous_summary_tokens": previous_summary_tokens,
