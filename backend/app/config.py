@@ -52,6 +52,7 @@ class Settings:
 	history_token_budget: int = int(os.getenv("HISTORY_TOKEN_BUDGET", "72000"))
 	max_output_tokens: int = int(os.getenv("MAX_OUTPUT_TOKENS", "4096"))
 	branch_summary_max_output_tokens: int = int(os.getenv("BRANCH_SUMMARY_MAX_OUTPUT_TOKENS", "1024"))
+	branch_summary_request_token_budget: int = int(os.getenv("BRANCH_SUMMARY_REQUEST_TOKEN_BUDGET", "8000"))
 	rate_limit_requests: int = int(os.getenv("RATE_LIMIT_REQUESTS", "60"))
 	rate_limit_window_seconds: int = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
 	ocr_languages: str = os.getenv("OCR_LANGUAGES", "rus+eng")

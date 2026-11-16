@@ -4,7 +4,7 @@ from dataclasses import replace
 from types import SimpleNamespace
 
 import httpx
-from groq import APIConnectionError, APIStatusError, RateLimitError
+from groq import APIConnectionError, APIStatusError, APITimeoutError, RateLimitError
 
 
 class FakeCompletions:
@@ -68,13 +68,19 @@ class BranchSummaryCompletions(FakeCompletions):
 		)
 
 
-class SummaryResultCompletions:
+class SummaryResultCompletions(FakeCompletions):
 	def __init__(self, content: str, finish_reason: str):
 		self.content = content
 		self.finish_reason = finish_reason
 		self.calls: list[dict] = []
+		self.stream_calls: list[dict] = []
 
 	async def create(self, **kwargs):
+		if kwargs.get("stream", False):
+			self.stream_calls.append(kwargs)
+			return await super().create(**kwargs)
+		if "response_format" in kwargs:
+			return await super().create(**kwargs)
 		self.calls.append(kwargs)
 		return SimpleNamespace(
 			choices=[SimpleNamespace(
@@ -82,6 +88,32 @@ class SummaryResultCompletions:
 				finish_reason=self.finish_reason,
 			)],
 			usage=SimpleNamespace(prompt_tokens=30, completion_tokens=10),
+		)
+
+
+class SequencedBranchSummaryCompletions(FakeCompletions):
+	def __init__(self, outcomes: list[tuple[str, str] | Exception]):
+		self.outcomes = list(outcomes)
+		self.summary_calls: list[dict] = []
+		self.stream_calls: list[dict] = []
+
+	async def create(self, **kwargs):
+		if kwargs.get("stream", False):
+			self.stream_calls.append(kwargs)
+			return await super().create(**kwargs)
+		if "response_format" in kwargs:
+			return await super().create(**kwargs)
+		self.summary_calls.append(kwargs)
+		outcome = self.outcomes.pop(0)
+		if isinstance(outcome, Exception):
+			raise outcome
+		content, finish_reason = outcome
+		return SimpleNamespace(
+			choices=[SimpleNamespace(
+				message=SimpleNamespace(content=content),
+				finish_reason=finish_reason,
+			)],
+			usage=SimpleNamespace(prompt_tokens=40, completion_tokens=12),
 		)
 
 
@@ -148,6 +180,17 @@ class FailingStreamCompletions(FakeCompletions):
 		if kwargs.get("stream", False):
 			raise self.error_factory()
 		return await super().create(**kwargs)
+
+
+def summary_provider_status_error(status_code: int) -> APIStatusError:
+	request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+	response = httpx.Response(status_code, request=request)
+	error_type = RateLimitError if status_code == 429 else APIStatusError
+	return error_type(
+		f"summary provider error {status_code}",
+		response=response,
+		body={"error": {"message": "summary request rejected", "code": "summary_error"}},
+	)
 
 
 def test_auth_session_and_structured_error(client):
@@ -585,7 +628,7 @@ def test_chat_context_builder_isolates_sibling_branches(authenticated_client, mo
 def test_chat_context_builder_limits_active_branch_history_by_token_budget(authenticated_client, monkeypatch, caplog):
 	import app.main as main_module
 
-	completions = RecordingCompletions()
+	completions = BranchSummaryCompletions()
 	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
 	monkeypatch.setattr(main_module, "settings", replace(main_module.settings, history_token_budget=15))
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "History budget"}).json()["conversation"]["id"]
@@ -594,7 +637,10 @@ def test_chat_context_builder_limits_active_branch_history_by_token_budget(authe
 		for prompt in ("A" * 20, "B" * 8, "C" * 4, "D" * 2):
 			authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
 
-	selected_messages = completions.calls[-1]["messages"][1:]
+	selected_messages = [
+		message for message in completions.stream_calls[-1]["messages"][1:]
+		if message["role"] != "system"
+	]
 	assert [(message["role"], message["content"]) for message in selected_messages] == [
 		("user", "C" * 4),
 		("assistant", "Привет, мир!"),
@@ -712,10 +758,13 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 		for record in caplog.records
 		if record.name == "uvicorn.error" and '"event": "BRANCH_SUMMARY_METRICS"' in record.getMessage()
 	]
-	assert len(metric_logs) == 2
+	generation_logs = [metric for metric in metric_logs if metric["phase"] == "generation"]
+	persistence_logs = [metric for metric in metric_logs if metric["phase"] == "persistence"]
+	assert len(generation_logs) == 2
+	assert len(persistence_logs) == 2
 	summary_tokens = main_module.estimate_tokens("SUMMARY_OLD_ACTIVE")
 	for index, (metric, correlation_id, call) in enumerate(zip(
-		metric_logs,
+		generation_logs,
 		(first_meta["requestId"], second_meta["requestId"]),
 		completions.summary_calls,
 		strict=True,
@@ -726,22 +775,30 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 			input_content,
 			flags=re.DOTALL,
 		)
-		assert metric == {
-			"event": "BRANCH_SUMMARY_METRICS",
-			"correlation_id": correlation_id,
-			"previous_summary_tokens": 0 if index == 0 else summary_tokens,
-			"new_summary_tokens": summary_tokens,
-			"summary_size_delta_tokens": summary_tokens if index == 0 else 0,
-			"excluded_message_count": len(excluded_contents),
-			"excluded_message_tokens": sum(main_module.estimate_tokens(content) for content in excluded_contents),
-			"summary_input_tokens": 20,
-			"summary_output_tokens": 5,
-			"finish_reason": "stop",
-			"summarized_through_message_id": metric["summarized_through_message_id"],
-			"trigger_reason": "new_excluded_history",
-			"status": "success",
-		}
-	assert {metric["summarized_through_message_id"] for metric in metric_logs} == {
+		assert metric["event"] == "BRANCH_SUMMARY_METRICS"
+		assert metric["result"] == "accepted"
+		assert not metric["summary_persisted"]
+		assert metric["correlation_id"] == correlation_id
+		assert metric["previous_summary_tokens"] == (0 if index == 0 else summary_tokens)
+		assert metric["new_summary_tokens"] == summary_tokens
+		assert metric["summary_size_delta_tokens"] == (summary_tokens if index == 0 else 0)
+		assert metric["excluded_message_count"] == len(excluded_contents)
+		assert metric["excluded_message_tokens"] == sum(
+			main_module.estimate_tokens(content) for content in excluded_contents
+		)
+		assert metric["summary_input_tokens"] == 20
+		assert metric["summary_output_tokens"] == 5
+		assert metric["finish_reason"] == "stop"
+		assert metric["trigger_reason"] == "new_excluded_history"
+		assert metric["status"] == "success"
+		assert (
+			metric["estimated_request_input_tokens"]
+			+ metric["max_completion_tokens"]
+			+ metric["request_token_margin"]
+			<= metric["request_token_budget"]
+		)
+	assert all(metric["result"] == "persisted" and metric["summary_persisted"] for metric in persistence_logs)
+	assert {metric["summarized_through_message_id"] for metric in persistence_logs} == {
 		summary.summarized_through_message_id for summary in summaries
 	}
 
@@ -757,7 +814,7 @@ def test_branch_summary_metrics_follow_server_flags_and_log_completion_details(m
 		usage=SimpleNamespace(prompt_tokens=10, completion_tokens=2),
 	)
 	existing_summary = SimpleNamespace(summary_text="previous summary")
-	message = SimpleNamespace(id="message-1", content="excluded batch")
+	message = SimpleNamespace(id="message-1", role="user", content="excluded batch")
 	base_settings = main_module.settings
 	monkeypatch.setattr(main_module, "settings", replace(
 		base_settings,
@@ -772,6 +829,7 @@ def test_branch_summary_metrics_follow_server_flags_and_log_completion_details(m
 			correlation_id="correlation-1",
 			trigger_reason="new_excluded_history",
 			status="success",
+			result="accepted",
 		)
 
 	assert not any("BRANCH_SUMMARY_METRICS" in record.getMessage() for record in caplog.records)
@@ -789,12 +847,16 @@ def test_branch_summary_metrics_follow_server_flags_and_log_completion_details(m
 			correlation_id="correlation-1",
 			trigger_reason="new_excluded_history",
 			status="success",
+			result="accepted",
 		)
 	metric = json.loads(next(record.getMessage() for record in caplog.records if "BRANCH_SUMMARY_METRICS" in record.getMessage()))
 	previous_tokens = main_module.estimate_tokens(existing_summary.summary_text)
 	new_tokens = main_module.estimate_tokens("summary")
 	assert metric == {
 		"event": "BRANCH_SUMMARY_METRICS",
+		"phase": "generation",
+		"result": "accepted",
+		"summary_persisted": False,
 		"correlation_id": "correlation-1",
 		"previous_summary_tokens": previous_tokens,
 		"new_summary_tokens": new_tokens,
@@ -805,6 +867,12 @@ def test_branch_summary_metrics_follow_server_flags_and_log_completion_details(m
 		"summary_output_tokens": 2,
 		"finish_reason": "stop",
 		"summarized_through_message_id": "message-1",
+		"estimated_request_input_tokens": main_module._branch_summary_request_input_tokens(
+			existing_summary, [message],
+		),
+		"request_token_budget": main_module.settings.branch_summary_request_token_budget,
+		"request_token_margin": main_module.BRANCH_SUMMARY_REQUEST_TOKEN_MARGIN,
+		"max_completion_tokens": main_module.settings.branch_summary_max_output_tokens,
 		"trigger_reason": "new_excluded_history",
 		"status": "success",
 	}
@@ -817,6 +885,7 @@ def test_branch_summary_metrics_follow_server_flags_and_log_completion_details(m
 			correlation_id="correlation-2",
 			trigger_reason="new_excluded_history",
 			status="error",
+			result="provider_error",
 		)
 	failed_metric = json.loads(next(
 		record.getMessage() for record in caplog.records if "BRANCH_SUMMARY_METRICS" in record.getMessage()
@@ -879,6 +948,8 @@ def test_branch_summary_rejects_length_finish_reason_but_keeps_metrics(monkeypat
 	assert metric["summary_input_tokens"] == 30
 	assert metric["summary_output_tokens"] == 10
 	assert metric["status"] == "success"
+	assert metric["result"] == "discarded_length"
+	assert not metric["summary_persisted"]
 	assert any("incomplete summary discarded" in record.getMessage() for record in caplog.records)
 
 
@@ -936,6 +1007,216 @@ def test_branch_summary_length_failure_does_not_advance_coverage(authenticated_c
 	assert summaries[0].id == existing_id
 	assert summaries[0].summarized_through_message_id == covered_id
 	assert summaries[0].summary_text == "EXISTING_SUMMARY"
+
+
+def test_branch_summary_provider_errors_return_no_summary(monkeypatch):
+	import asyncio
+
+	import app.main as main_module
+
+	request = httpx.Request("POST", "https://api.groq.com/openai/v1/chat/completions")
+	errors = (
+		summary_provider_status_error(413),
+		summary_provider_status_error(429),
+		APITimeoutError(request=request),
+	)
+	message = SimpleNamespace(id="message-1", role="user", content="Important context")
+	for error in errors:
+		completions = SequencedBranchSummaryCompletions([error])
+		monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+
+		result = asyncio.run(main_module._generate_branch_summary(None, [message]))
+
+		assert result is None
+		assert len(completions.summary_calls) == 1
+
+
+def test_chat_is_blocked_when_evicted_history_summary_fails(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	base_settings = main_module.settings
+	for completions in (
+		SummaryResultCompletions("INCOMPLETE_SUMMARY", "length"),
+		SequencedBranchSummaryCompletions([summary_provider_status_error(413)]),
+	):
+		monkeypatch.setattr(main_module, "client", FakeGroq())
+		monkeypatch.setattr(main_module, "settings", replace(base_settings, history_token_budget=72000))
+		conversation_id = authenticated_client.post(
+			"/api/conversations", json={"title": "Safe summary failure"},
+		).json()["conversation"]["id"]
+		for prompt in ("DINOSAUR_FACT_A", "DINOSAUR_FACT_B", "DINOSAUR_FACT_C"):
+			response = authenticated_client.post(
+				f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt},
+			)
+			assert response.status_code == 200
+
+		monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+		monkeypatch.setattr(main_module, "settings", replace(base_settings, history_token_budget=1))
+		response = authenticated_client.post(
+			f"/api/conversations/{conversation_id}/stream", data={"prompt": "Recall the dinosaurs"},
+		)
+
+		assert response.status_code == 503
+		assert response.json()["error"]["code"] == "BRANCH_SUMMARY_UNAVAILABLE"
+		assert completions.stream_calls == []
+
+
+def test_large_branch_summary_is_batched_in_order_and_within_request_budget(authenticated_client, monkeypatch):
+	import asyncio
+	from uuid import uuid4
+
+	import app.main as main_module
+	from sqlalchemy import select
+
+	from app.database import SessionLocal
+	from app.models import BranchSummary, Message
+
+	base_input_tokens = main_module._branch_summary_request_input_tokens(None, [])
+	request_budget = base_input_tokens + 900
+	outcomes = [(f"SUMMARY_{index}", "stop") for index in range(30)]
+	completions = SequencedBranchSummaryCompletions(outcomes)
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	monkeypatch.setattr(main_module, "settings", replace(
+		main_module.settings,
+		branch_summary_max_output_tokens=128,
+		branch_summary_request_token_budget=request_budget,
+	))
+	conversation_id = authenticated_client.post(
+		"/api/conversations", json={"title": "Large summary batch"},
+	).json()["conversation"]["id"]
+	markers = ["OVERSIZED_0", "FACT_1", "FACT_2", "FACT_3", "FACT_4"]
+	contents = [markers[0] + " " + ("X" * 5000), *(
+		marker + " " + ("Y" * 500) for marker in markers[1:]
+	)]
+	with SessionLocal() as db:
+		messages: list[Message] = []
+		message_ids: list[str] = []
+		parent_id = None
+		for index, content in enumerate(contents):
+			message_id = str(uuid4())
+			message = Message(
+				id=message_id,
+				conversation_id=conversation_id,
+				role="user" if index % 2 == 0 else "assistant",
+				content=content,
+				reply_to_id=parent_id,
+			)
+			db.add(message)
+			messages.append(message)
+			message_ids.append(message_id)
+			parent_id = message.id
+		current = Message(
+			id=str(uuid4()), conversation_id=conversation_id, role="user",
+			content="CURRENT", reply_to_id=parent_id,
+		)
+		db.add(current)
+		db.commit()
+
+		updated = asyncio.run(main_module._update_branch_summary(
+			db, conversation_id, current, messages,
+		))
+		summaries = list(db.scalars(
+			select(BranchSummary)
+			.where(BranchSummary.conversation_id == conversation_id)
+			.order_by(BranchSummary.created_at, BranchSummary.id)
+		))
+
+	assert updated
+	assert len(completions.summary_calls) > len(summaries)
+	assert len(summaries) >= 2
+	assert summaries[-1].summarized_through_message_id == message_ids[-1]
+	positions = {message_id: index for index, message_id in enumerate(message_ids)}
+	assert [positions[summary.summarized_through_message_id] for summary in summaries] == sorted(
+		positions[summary.summarized_through_message_id] for summary in summaries
+	)
+	input_budget = main_module._branch_summary_input_token_budget()
+	for call in completions.summary_calls:
+		assert sum(main_module.estimate_tokens(item["content"]) + 8 for item in call["messages"]) <= input_budget
+	first_seen = {
+		marker: next(
+			index for index, call in enumerate(completions.summary_calls)
+			if marker in call["messages"][1]["content"]
+		)
+		for marker in markers
+	}
+	assert list(first_seen.values()) == sorted(first_seen.values())
+
+
+def test_branch_summary_recovery_resumes_after_saved_boundary(authenticated_client, monkeypatch):
+	import asyncio
+	from uuid import uuid4
+
+	import app.main as main_module
+	from sqlalchemy import select
+
+	from app.database import SessionLocal
+	from app.models import BranchSummary, Message
+
+	conversation_id = authenticated_client.post(
+		"/api/conversations", json={"title": "Summary recovery"},
+	).json()["conversation"]["id"]
+	with SessionLocal() as db:
+		messages: list[Message] = []
+		message_ids: list[str] = []
+		parent_id = None
+		for index in range(4):
+			message_id = str(uuid4())
+			message = Message(
+				id=message_id, conversation_id=conversation_id,
+				role="user" if index % 2 == 0 else "assistant",
+				content=f"RECOVERY_{index} " + ("Z" * 500), reply_to_id=parent_id,
+			)
+			db.add(message)
+			messages.append(message)
+			message_ids.append(message_id)
+			parent_id = message.id
+		current = Message(
+			id=str(uuid4()), conversation_id=conversation_id, role="user",
+			content="CURRENT", reply_to_id=parent_id,
+		)
+		db.add(current)
+		db.commit()
+
+		one_message_input = main_module._branch_summary_request_input_tokens(None, [messages[0]])
+		monkeypatch.setattr(main_module, "settings", replace(
+			main_module.settings,
+			branch_summary_max_output_tokens=128,
+			branch_summary_request_token_budget=(
+				one_message_input + 128 + main_module.BRANCH_SUMMARY_REQUEST_TOKEN_MARGIN + 8
+			),
+		))
+		first_attempt = SequencedBranchSummaryCompletions([
+			("PARTIAL_SAVED", "stop"),
+			summary_provider_status_error(429),
+		])
+		monkeypatch.setattr(main_module, "client", FakeGroq(first_attempt))
+		assert asyncio.run(main_module._update_branch_summary(
+			db, conversation_id, current, messages,
+		))
+		first_summaries = list(db.scalars(
+			select(BranchSummary).where(BranchSummary.conversation_id == conversation_id)
+		))
+		assert len(first_summaries) == 1
+		covered_through_id = first_summaries[0].summarized_through_message_id
+		covered_position = message_ids.index(covered_through_id)
+
+		second_attempt = SequencedBranchSummaryCompletions([
+			(f"RECOVERED_{index}", "stop") for index in range(10)
+		])
+		monkeypatch.setattr(main_module, "client", FakeGroq(second_attempt))
+		assert asyncio.run(main_module._update_branch_summary(
+			db, conversation_id, current, messages,
+		))
+		all_summaries = list(db.scalars(
+			select(BranchSummary)
+			.where(BranchSummary.conversation_id == conversation_id)
+			.order_by(BranchSummary.created_at, BranchSummary.id)
+		))
+
+	covered_markers = {f"RECOVERY_{index}" for index in range(covered_position + 1)}
+	second_inputs = "\n".join(call["messages"][1]["content"] for call in second_attempt.summary_calls)
+	assert all(marker not in second_inputs for marker in covered_markers)
+	assert all_summaries[-1].summarized_through_message_id == message_ids[-1]
 
 
 def test_branch_summaries_stay_scoped_and_do_not_duplicate_raw_groq_history(authenticated_client, monkeypatch):
@@ -1172,8 +1453,16 @@ def test_chat_context_builder_limits_history_by_total_context_budget(authenticat
 	import app.main as main_module
 
 	current_prompt = "D" * 2
-	chat_context_budget = main_module.estimate_tokens(main_module.CHAT_PROMPT) + main_module.estimate_tokens(current_prompt) + 15
-	completions = RecordingCompletions()
+	summary_tokens = main_module.estimate_tokens(
+		main_module.BRANCH_SUMMARY_CONTEXT_PREFIX + "SUMMARY_OLD_ACTIVE"
+	)
+	chat_context_budget = (
+		main_module.estimate_tokens(main_module.CHAT_PROMPT)
+		+ summary_tokens
+		+ main_module.estimate_tokens(current_prompt)
+		+ 15
+	)
+	completions = BranchSummaryCompletions()
 	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
 	monkeypatch.setattr(
 		main_module,
@@ -1183,12 +1472,12 @@ def test_chat_context_builder_limits_history_by_total_context_budget(authenticat
 	conversation_id = authenticated_client.post("/api/conversations", json={"title": "Context budget"}).json()["conversation"]["id"]
 
 	with caplog.at_level("INFO", logger="uvicorn.error"):
-		for prompt in ("A" * 20, "B" * 8, "C" * 4, current_prompt):
+		for prompt in ("A" * 120, "B" * 8, "C" * 4, current_prompt):
 			authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": prompt})
 
-	selected_messages = completions.calls[-1]["messages"]
+	selected_messages = completions.stream_calls[-1]["messages"]
 	assert selected_messages[0] == {"role": "system", "content": main_module.CHAT_PROMPT}
-	assert [(message["role"], message["content"]) for message in selected_messages[1:]] == [
+	assert [(message["role"], message["content"]) for message in selected_messages[1:] if message["role"] != "system"] == [
 		("user", "C" * 4),
 		("assistant", "Привет, мир!"),
 		("user", current_prompt),
