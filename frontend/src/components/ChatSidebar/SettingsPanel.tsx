@@ -1,6 +1,7 @@
 import { useEffect, useState, type ReactNode } from 'react';
 import { useBlocker, useLocation, useNavigate } from 'react-router-dom';
 import { ACCENT_THEMES, ACCENT_THEME_LABELS, type AccentTheme } from '../../theme/accentTheme';
+import type { ContrastPreference, ThemePreference } from '../../theme/appearanceSettings';
 import type { AuthUser } from '../../types/chat';
 import {
 	CameraIcon,
@@ -22,7 +23,15 @@ type SettingsSection = 'general' | 'appearance' | 'account';
 type SettingsPanelProps = {
 	user: AuthUser;
 	accentTheme: AccentTheme;
+	theme: ThemePreference;
+	contrast: ContrastPreference;
+	compactMode: boolean;
+	animations: boolean;
 	onAccentChange: (accent: AccentTheme) => void;
+	onThemeChange: (theme: ThemePreference) => void;
+	onContrastChange: (contrast: ContrastPreference) => void;
+	onCompactModeChange: (compactMode: boolean) => void;
+	onAnimationsChange: (animations: boolean) => void;
 };
 
 type SettingRowProps = {
@@ -113,7 +122,19 @@ function SettingRow({ title, description, children }: SettingRowProps) {
 	);
 }
 
-export function SettingsPanel({ user, accentTheme, onAccentChange }: SettingsPanelProps) {
+export function SettingsPanel({
+	user,
+	accentTheme,
+	theme,
+	contrast,
+	compactMode,
+	animations,
+	onAccentChange,
+	onThemeChange,
+	onContrastChange,
+	onCompactModeChange,
+	onAnimationsChange,
+}: SettingsPanelProps) {
 	const navigate = useNavigate();
 	const location = useLocation();
 	const [section, setSection] = useState<SettingsSection>('general');
@@ -123,10 +144,6 @@ export function SettingsPanel({ user, accentTheme, onAccentChange }: SettingsPan
 	const [openNewChat, setOpenNewChat] = useState(true);
 	const [sendOnEnter, setSendOnEnter] = useState(true);
 	const [showHints, setShowHints] = useState(false);
-	const [theme, setTheme] = useState('system');
-	const [contrast, setContrast] = useState('system');
-	const [compactMode, setCompactMode] = useState(false);
-	const [animations, setAnimations] = useState(true);
 	const [login, setLogin] = useState(user.email.split('@')[0]);
 	const [backupEmail, setBackupEmail] = useState('');
 	const copy = SECTION_COPY[section];
@@ -138,10 +155,6 @@ export function SettingsPanel({ user, accentTheme, onAccentChange }: SettingsPan
 		!openNewChat ||
 		!sendOnEnter ||
 		showHints ||
-		theme !== 'system' ||
-		contrast !== 'system' ||
-		compactMode ||
-		!animations ||
 		login !== user.email.split('@')[0] ||
 		backupEmail !== '';
 	const blocker = useBlocker(() => isDirty);
@@ -305,7 +318,12 @@ export function SettingsPanel({ user, accentTheme, onAccentChange }: SettingsPan
 						{section === 'appearance' && (
 							<div className="chat-sidebar__settings-appearance">
 								<SettingRow title="Тема" description="Выберите режим отображения интерфейса">
-									<CustomSelect value={theme} options={THEME_OPTIONS} onChange={setTheme} ariaLabel="Тема" />
+									<CustomSelect
+										value={theme}
+										options={THEME_OPTIONS}
+										onChange={(value) => onThemeChange(value as ThemePreference)}
+										ariaLabel="Тема"
+									/>
 								</SettingRow>
 								<SettingRow
 									title="Акцентный цвет"
@@ -322,7 +340,7 @@ export function SettingsPanel({ user, accentTheme, onAccentChange }: SettingsPan
 									<CustomSelect
 										value={contrast}
 										options={CONTRAST_OPTIONS}
-										onChange={setContrast}
+										onChange={(value) => onContrastChange(value as ContrastPreference)}
 										ariaLabel="Контраст"
 									/>
 								</SettingRow>
@@ -330,13 +348,13 @@ export function SettingsPanel({ user, accentTheme, onAccentChange }: SettingsPan
 									title="Компактный режим интерфейса"
 									description="Уменьшает вертикальные отступы и делает интерфейс более плотным"
 								>
-									<Toggle checked={compactMode} onChange={setCompactMode} label="Компактный режим интерфейса" />
+									<Toggle checked={compactMode} onChange={onCompactModeChange} label="Компактный режим интерфейса" />
 								</SettingRow>
 								<SettingRow
 									title="Анимации интерфейса"
 									description="Показывать плавные переходы и анимации в интерфейсе"
 								>
-									<Toggle checked={animations} onChange={setAnimations} label="Анимации интерфейса" />
+									<Toggle checked={animations} onChange={onAnimationsChange} label="Анимации интерфейса" />
 								</SettingRow>
 							</div>
 						)}

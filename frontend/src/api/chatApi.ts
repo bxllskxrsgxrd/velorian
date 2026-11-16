@@ -1,4 +1,4 @@
-import type { Approach, ApproachInput, AuthUser, ChatAttachment, ChatMessage, Conversation, ConversationSummary, KnowledgeApproach, KnowledgeCreateSource, KnowledgeFilters, KnowledgeItem, KnowledgePageResult, MessageRating, SearchMode } from '../types/chat';
+import type { AiModelOption, Approach, ApproachInput, AuthUser, ChatAttachment, ChatMessage, Conversation, ConversationSummary, KnowledgeApproach, KnowledgeCreateSource, KnowledgeFilters, KnowledgeItem, KnowledgePageResult, MessageRating, SearchMode } from '../types/chat';
 import type { AttachmentLimits } from '../constants/attachmentLimits';
 import { getUserFacingError } from '../errors/userErrorMessages';
 import { reportError } from '../utils/reportError';
@@ -72,8 +72,14 @@ export async function getCurrentUser(): Promise<AuthUser> {
 	return (await requestJson<{ user: AuthUser }>('/auth/me')).user;
 }
 
-export async function getRuntimeConfig(): Promise<{ attachmentLimits: AttachmentLimits }> {
-	return requestJson<{ attachmentLimits: AttachmentLimits }>('/config');
+export type RuntimeConfig = {
+	attachmentLimits: AttachmentLimits;
+	aiModels?: AiModelOption[];
+	defaultAiModelId?: string;
+};
+
+export async function getRuntimeConfig(): Promise<RuntimeConfig> {
+	return requestJson<RuntimeConfig>('/config');
 }
 
 export type AuthCredentials =
@@ -162,6 +168,7 @@ type StreamChatOptions = {
 	prompt?: string;
 	files?: File[];
 	searchMode?: SearchMode;
+	modelId?: string;
 	retryMessageId?: string;
 	editMessageId?: string;
 	signal: AbortSignal;
@@ -172,6 +179,7 @@ async function runChatStream(options: StreamChatOptions): Promise<void> {
 	const formData = new FormData();
 	formData.append('prompt', options.prompt ?? '');
 	formData.append('search_mode', options.searchMode ?? 'none');
+	if (options.modelId) formData.append('model_id', options.modelId);
 	if (options.retryMessageId) formData.append('retry_message_id', options.retryMessageId);
 	if (options.editMessageId) formData.append('edit_message_id', options.editMessageId);
 	options.files?.forEach((file) => formData.append('files', file));

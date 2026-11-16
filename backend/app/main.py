@@ -7,6 +7,7 @@ import re
 import time
 from collections.abc import AsyncIterator
 from contextlib import asynccontextmanager, suppress
+from dataclasses import dataclass
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
@@ -17,6 +18,9 @@ from fastapi import Depends, FastAPI, File, Form, HTTPException, Request, Respon
 from fastapi.exceptions import RequestValidationError
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import JSONResponse, StreamingResponse
+from google import genai
+from google.genai import errors as genai_errors
+from google.genai import types as genai_types
 from groq import APIConnectionError, APIStatusError, APITimeoutError, AsyncGroq, RateLimitError
 from prometheus_client import CONTENT_TYPE_LATEST, Counter, Histogram, generate_latest
 from pydantic import BaseModel, Field
@@ -65,6 +69,7 @@ from .storage import build_storage_key, get_file_storage
 logger = logging.getLogger("velorian")
 ai_usage_logger = logging.getLogger("uvicorn.error")
 client = AsyncGroq(api_key=settings.groq_api_key, timeout=90.0) if settings.groq_api_key else None
+gemini_client = genai.Client(api_key=settings.gemini_api_key).aio if settings.gemini_api_key else None
 AITaskType = Literal["chat", "title", "summary", "memory", "knowledge", "file_generation"]
 AIInteractionStatus = Literal["success", "error", "cancelled"]
 TRASH_RETENTION = timedelta(days=30)
@@ -76,6 +81,66 @@ AI_REQUESTS_TOTAL = Counter("velorian_ai_requests_total", "AI requests", ["statu
 AI_DURATION = Histogram("velorian_ai_request_duration_seconds", "AI request duration")
 AI_CONTEXT_RETRIES_TOTAL = Counter("velorian_ai_context_retries_total", "AI requests retried with compact context", ["status"])
 VISION_REQUESTS_TOTAL = Counter("velorian_vision_requests_total", "Vision preprocessing requests", ["status"])
+
+
+@dataclass(frozen=True)
+class ChatModelSpec:
+	id: str
+	name: str
+	description: str
+	provider: Literal["groq", "gemini"]
+	provider_model: str
+	badge: str | None = None
+
+
+def _chat_model_specs() -> dict[str, ChatModelSpec]:
+	return {
+		"gpt-oss-120b": ChatModelSpec(
+			id="gpt-oss-120b",
+			name="GPT-OSS 120B",
+			description="Лучший баланс качества и скорости",
+			provider="groq",
+			provider_model=settings.groq_model,
+		),
+		"qwen-3.8": ChatModelSpec(
+			id="qwen-3.8",
+			name="Qwen 3.8",
+			description="Рассуждения, код и работа с изображениями",
+			provider="groq",
+			provider_model=settings.groq_qwen_model,
+			badge="Vision",
+		),
+		"gemini-3.8-flash": ChatModelSpec(
+			id="gemini-3.8-flash",
+			name="Gemini 3.8 Flash",
+			description="Быстрые ответы и большой контекст",
+			provider="gemini",
+			provider_model=settings.gemini_model,
+			badge="Google",
+		),
+	}
+
+
+def _chat_model_available(model: ChatModelSpec) -> bool:
+	return client is not None if model.provider == "groq" else gemini_client is not None
+
+
+def _default_chat_model_id() -> str:
+	models = _chat_model_specs()
+	configured = models.get(settings.default_chat_model)
+	if configured is not None and _chat_model_available(configured):
+		return configured.id
+	return next((model.id for model in models.values() if _chat_model_available(model)), "gpt-oss-120b")
+
+
+def _resolve_chat_model(model_id: str | None) -> ChatModelSpec:
+	models = _chat_model_specs()
+	resolved = models.get((model_id or "").strip() or _default_chat_model_id())
+	if resolved is None:
+		raise AppError(422, "AI_MODEL_INVALID", "Выбрана неизвестная AI-модель")
+	if not _chat_model_available(resolved):
+		raise AppError(503, "AI_MODEL_UNAVAILABLE", "Выбранная AI-модель не настроена на сервере")
+	return resolved
 
 
 def _usage_value(value, field: str):
@@ -208,6 +273,7 @@ def _message_payload(message: Message) -> dict:
 		"content": message.content,
 		"status": message.status,
 		"searchMode": message.search_mode,
+		"modelId": message.model_id,
 		"knowledgeSources": message.knowledge_sources or [],
 		"error": {
 			"code": message.error_code or "UNKNOWN_ERROR",
@@ -283,6 +349,18 @@ def _safe_ai_error(error: Exception) -> tuple[str, str]:
 		if error.status_code in {400, 413, 422}:
 			return "AI_BAD_REQUEST", "AI-сервис отклонил запрос. Возможно, превышен контекст."
 		if error.status_code >= 500:
+			return "AI_SERVICE_ERROR", "AI-сервис временно недоступен. Повторите запрос позже."
+	if isinstance(error, genai_errors.APIError):
+		status_code = int(getattr(error, "code", 0) or 0)
+		if status_code == 429:
+			return "AI_RATE_LIMITED", "AI-сервис временно перегружен. Повторите запрос позже."
+		if status_code in {401, 403}:
+			return "AI_AUTH_ERROR", "AI-сервис настроен неверно."
+		if status_code == 404:
+			return "AI_MODEL_UNAVAILABLE", "Выбранная AI-модель недоступна."
+		if status_code in {400, 413, 422}:
+			return "AI_BAD_REQUEST", "AI-сервис отклонил запрос. Возможно, превышен контекст."
+		if status_code >= 500:
 			return "AI_SERVICE_ERROR", "AI-сервис временно недоступен. Повторите запрос позже."
 	return "AI_ERROR", "Не удалось получить ответ AI-сервиса."
 
@@ -409,12 +487,16 @@ def _should_retry_with_compact_context(error: Exception) -> bool:
 EMOJI_PATTERN = re.compile(r"[\U0001F000-\U0001FAFF\u2600-\u27BF\uFE0F\u20E3]")
 FILE_BLOCK_PATTERN = re.compile(r"```file:([^\n`]+)\n([\s\S]*?)\n```", re.IGNORECASE)
 CODE_BLOCK_PATTERN = re.compile(r"```([\w#+.-]*)\n([\s\S]*?)\n```")
+RUSSIAN_FILE_NOUN_PATTERN = r"(?:файл(?:ы|а|ов|ом|ами|ах)?|документ(?:ы|а|ов|ом|ами|ах)?)"
 FILE_REQUEST_PATTERN = re.compile(
-	r"(?:создай|сделай|подготовь|сгенерируй)\s+(?:мне\s+)?(?:текстовый\s+|кодовый\s+)?(?:файл|документ)\b"
-	r"|(?:сохрани|запиши|выгрузи|экспортируй)\b.{0,80}\b(?:в|как)\s+(?:отдельный\s+)?(?:файл|документ)\b"
+	rf"(?:создай|сделай|подготовь|сгенерируй)\s+(?:мне\s+)?(?:текстов\w*\s+|кодов\w*\s+)?{RUSSIAN_FILE_NOUN_PATTERN}\b"
+	rf"|(?:сохрани|запиши|выгрузи|экспортируй)\b.{{0,80}}\b(?:в|как)\s+(?:отдельн\w*\s+)?{RUSSIAN_FILE_NOUN_PATTERN}\b"
 	r"|(?:создай|сделай|подготовь|сохрани|запиши)\b.{0,80}\b[\w.-]+\.[a-zA-Z0-9]{1,10}\b"
-	r"|\b(?:create|generate)\s+(?:a\s+)?(?:file|document)\b"
-	r"|\b(?:save|write|export)\b.{0,80}\b(?:to|as)\s+(?:a\s+)?(?:file|document)\b",
+	rf"|(?:дай|отдай|предоставь|пришли)\b.{{0,80}}\b{RUSSIAN_FILE_NOUN_PATTERN}\b"
+	rf"|(?:нужен|нужна|нужно|хочу\s+получить)\b.{{0,80}}\b{RUSSIAN_FILE_NOUN_PATTERN}\b"
+	r"|(?:сделай|подготовь|сохрани|запиши|выгрузи|экспортируй|дай|предоставь)\b.{0,80}\b(?:csv|json|markdown|md|pdf|docx|xlsx)\b"
+	r"|\b(?:create|generate)\s+(?:(?:a|the)\s+)?(?:files?|documents?)\b"
+	r"|\b(?:save|write|export)\b.{0,80}\b(?:to|as)\s+(?:(?:a|the)\s+)?(?:files?|documents?)\b",
 	re.IGNORECASE,
 )
 LANGUAGE_EXTENSIONS = {
@@ -662,50 +744,9 @@ def _branch_summary_messages(
 	]
 
 
-def _log_branch_summary_metrics(
-	completion,
-	*,
-	existing_summary: BranchSummary | None,
-	new_messages: list[Message],
-	correlation_id: str | None,
-	trigger_reason: str,
-	status: AIInteractionStatus,
-) -> None:
-	if settings.app_env != "development" or not settings.summary_debug_metrics:
-		return
-	usage = _normalize_ai_usage(completion)
-	choice = completion.choices[0] if completion is not None and completion.choices else None
-	content = _usage_value(_usage_value(choice, "message"), "content")
-	new_summary_tokens = estimate_tokens(content.strip()) if isinstance(content, str) and content.strip() else None
-	previous_summary_tokens = estimate_tokens(existing_summary.summary_text) if existing_summary is not None else 0
-	logger.info(json.dumps({
-		"event": "BRANCH_SUMMARY_METRICS",
-		"correlation_id": correlation_id,
-		"previous_summary_tokens": previous_summary_tokens,
-		"new_summary_tokens": new_summary_tokens,
-		"summary_size_delta_tokens": (
-			new_summary_tokens - previous_summary_tokens if new_summary_tokens is not None else None
-		),
-		"excluded_message_count": len(new_messages),
-		"excluded_message_tokens": sum(
-			estimate_tokens(message.content or "[Сообщение содержало только файлы]")
-			for message in new_messages
-		),
-		"summary_input_tokens": usage["input_tokens"] if usage is not None else None,
-		"summary_output_tokens": usage["output_tokens"] if usage is not None else None,
-		"finish_reason": _usage_value(choice, "finish_reason"),
-		"summarized_through_message_id": new_messages[-1].id if new_messages else None,
-		"trigger_reason": trigger_reason,
-		"status": status,
-	}, ensure_ascii=False, sort_keys=True))
-
-
 async def _generate_branch_summary(
 	existing_summary: BranchSummary | None,
 	new_messages: list[Message],
-	*,
-	correlation_id: str | None = None,
-	trigger_reason: str = "new_excluded_history",
 ) -> str | None:
 	if client is None or not new_messages:
 		return None
@@ -755,14 +796,6 @@ async def _generate_branch_summary(
 			status=status,
 			latency_ms=(time.perf_counter() - started) * 1000,
 		)
-		_log_branch_summary_metrics(
-			completion,
-			existing_summary=existing_summary,
-			new_messages=new_messages,
-			correlation_id=correlation_id,
-			trigger_reason=trigger_reason,
-			status=status,
-		)
 	content = completion.choices[0].message.content if completion.choices else ""
 	return content.strip() if isinstance(content, str) and content.strip() else None
 
@@ -791,11 +824,9 @@ async def _update_branch_summary(
 	conversation_id: str,
 	current_message: Message,
 	excluded_history: list[Message],
-	*,
-	correlation_id: str | None = None,
-) -> bool:
+) -> None:
 	if not excluded_history:
-		return False
+		return
 	conversation_messages = list(db.scalars(
 		select(Message)
 		.where(Message.conversation_id == conversation_id)
@@ -814,15 +845,10 @@ async def _update_branch_summary(
 		if path_positions.get(message.id, -1) > previous_through_position
 	]
 	if not new_messages:
-		return False
-	summary_text = await _generate_branch_summary(
-		existing_summary,
-		new_messages,
-		correlation_id=correlation_id,
-		trigger_reason="new_excluded_history",
-	)
+		return
+	summary_text = await _generate_branch_summary(existing_summary, new_messages)
 	if summary_text is None:
-		return False
+		return
 	try:
 		db.add(BranchSummary(
 			conversation_id=conversation_id,
@@ -831,11 +857,9 @@ async def _update_branch_summary(
 			summary_text=summary_text,
 		))
 		db.commit()
-		return True
 	except SQLAlchemyError as error:
 		db.rollback()
 		logger.warning("Branch summary persistence failed: error_type=%s", type(error).__name__)
-		return False
 
 
 def _parse_memory_patch(content: str) -> dict[str, dict[str, object] | list[object]]:
@@ -1005,26 +1029,54 @@ def _extract_generated_files(answer: str, prompt: str) -> tuple[str, list[tuple[
 	return _sanitize_markdown_headings(clean_answer), files
 
 
-async def _store_generated_files(db: Session, user_id: str, conversation_id: str, message: Message, files: list[tuple[str, str]]) -> None:
-	storage = get_file_storage()
-	for name, content in files[:5]:
-		attachment_id = str(uuid4())
+async def _store_generated_files(db: Session, user_id: str, conversation_id: str, message: Message, files: list[tuple[str, str]]) -> list[str]:
+	if len(files) > settings.max_files:
+		raise AppError(413, "ATTACHMENT_COUNT_LIMIT_EXCEEDED", f"Можно создать не более {settings.max_files} файлов за один ответ", {
+			"actualAttachments": len(files), "maximumAttachments": settings.max_files,
+		})
+	prepared: list[tuple[str, str, bytes, str]] = []
+	total_size = 0
+	for name, content in files:
 		data = content.encode("utf-8")
-		content_type = mimetypes.guess_type(name)[0] or "text/plain"
-		storage_key = build_storage_key(user_id, "conversations", conversation_id, message.id, attachment_id)
-		await storage.save(storage_key, data, content_type)
-		db.add(Attachment(
-			id=attachment_id,
-			conversation_id=conversation_id,
-			message_id=message.id,
-			name=name,
-			content_type=content_type,
-			size=len(data),
-			storage_path="",
-			storage_key=storage_key,
-			extracted_text=content,
-			extraction_status="generated",
-		))
+		if len(data) > settings.max_file_size:
+			raise AppError(413, "FILE_SIZE_LIMIT_EXCEEDED", f"Созданный файл {name} превышает допустимый размер", {
+				"actualSize": len(data), "maximumSize": settings.max_file_size,
+			})
+		total_size += len(data)
+		prepared.append((name, content, data, mimetypes.guess_type(name)[0] or "text/plain"))
+	if total_size > settings.max_total_file_size:
+		raise AppError(413, "ATTACHMENTS_TOTAL_SIZE_LIMIT_EXCEEDED", "Общий размер созданных файлов превышает лимит", {
+			"actualSize": total_size, "maximumSize": settings.max_total_file_size,
+		})
+
+	storage = get_file_storage()
+	stored_keys: list[str] = []
+	try:
+		for name, content, data, content_type in prepared:
+			attachment_id = str(uuid4())
+			storage_key = build_storage_key(user_id, "conversations", conversation_id, message.id)
+			await storage.save(storage_key, data, content_type)
+			stored_keys.append(storage_key)
+			db.add(Attachment(
+				id=attachment_id,
+				conversation_id=conversation_id,
+				message_id=message.id,
+				name=name,
+				content_type=content_type,
+				size=len(data),
+				storage_path="",
+				storage_key=storage_key,
+				extracted_text=content,
+				extraction_status="generated",
+			))
+	except Exception:
+		for storage_key in stored_keys:
+			try:
+				await storage.delete(storage_key)
+			except Exception:
+				logger.exception("Generated file cleanup failed: storage_key=%s", storage_key)
+		raise
+	return stored_keys
 
 
 async def _copy_message_attachments(db: Session, user_id: str, source: Message, target: Message) -> None:
@@ -1035,7 +1087,7 @@ async def _copy_message_attachments(db: Session, user_id: str, source: Message, 
 		else:
 			content = await asyncio.to_thread(Path(source_attachment.storage_path).read_bytes)
 		attachment_id = str(uuid4())
-		storage_key = build_storage_key(user_id, "conversations", target.conversation_id, target.id, attachment_id)
+		storage_key = build_storage_key(user_id, "conversations", target.conversation_id, target.id)
 		await storage.save(storage_key, content, source_attachment.content_type)
 		db.add(Attachment(
 			id=attachment_id,
@@ -1160,6 +1212,9 @@ async def lifespan(_app: FastAPI):
 		cleanup_task.cancel()
 		with suppress(asyncio.CancelledError):
 			await cleanup_task
+		close_gemini = getattr(gemini_client, "aclose", None)
+		if close_gemini is not None:
+			await close_gemini()
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
@@ -1216,7 +1271,7 @@ async def create_message_markdown_file(
 	))
 	name = unique_markdown_file_name(requested_title, owned_names)
 	attachment_id = str(uuid4())
-	storage_key = build_storage_key(user.id, "conversations", message.conversation_id, message.id, attachment_id)
+	storage_key = build_storage_key(user.id, "conversations", message.conversation_id, message.id)
 	storage = get_file_storage()
 	try:
 		await storage.save(storage_key, data, "text/markdown")
@@ -1351,12 +1406,25 @@ def api_health():
 
 @app.get(f"{settings.api_prefix}/config", tags=["configuration"])
 def public_config():
+	models = _chat_model_specs()
 	return {
 		"attachmentLimits": {
 			"maxAttachments": settings.max_files,
 			"maxFileSize": settings.max_file_size,
 			"maxTotalSize": settings.max_total_file_size,
-		}
+		},
+		"aiModels": [
+			{
+				"id": model.id,
+				"name": model.name,
+				"description": model.description,
+				"provider": model.provider,
+				"badge": model.badge,
+				"available": _chat_model_available(model),
+			}
+			for model in models.values()
+		],
+		"defaultAiModelId": _default_chat_model_id(),
 	}
 
 
@@ -1367,9 +1435,11 @@ def health_ready():
 			connection.execute(text("SELECT 1"))
 	except Exception as error:
 		raise AppError(503, "DATABASE_UNAVAILABLE", "База данных недоступна") from error
-	if client is None:
+	if client is None and gemini_client is None:
 		raise AppError(503, "AI_NOT_CONFIGURED", "AI-сервис не настроен")
-	return {"status": "ready", "model": settings.groq_model}
+	return {"status": "ready", "models": [
+		model.provider_model for model in _chat_model_specs().values() if _chat_model_available(model)
+	]}
 
 
 @app.get("/metrics", tags=["monitoring"])
@@ -1990,9 +2060,10 @@ def _chat_completion_options(
 	messages: list[dict[str, str]],
 	user_id: str,
 	web_search: bool,
+	model: ChatModelSpec,
 ) -> dict:
 	options = {
-		"model": settings.groq_model,
+		"model": model.provider_model,
 		"messages": messages,
 		"stream": True,
 		"max_completion_tokens": settings.max_output_tokens,
@@ -2005,81 +2076,23 @@ def _chat_completion_options(
 	return options
 
 
-def _log_final_ai_context(
-	messages: list[dict[str, str]],
-	*,
-	correlation_id: str | None,
-	task_type: AITaskType,
-	attempt: str,
-) -> None:
-	current_user_index = next(
-		(index for index in range(len(messages) - 1, -1, -1) if messages[index].get("role") == "user"),
-		None,
-	)
-	system_tokens = 0
-	summary_tokens = 0
-	memory_tokens = 0
-	history_tokens = 0
-	user_tokens = 0
-	for index, message in enumerate(messages):
-		content = message.get("content") or ""
-		tokens = estimate_tokens(content)
-		if message.get("role") == "system":
-			if content.startswith(BRANCH_SUMMARY_CONTEXT_PREFIX):
-				summary_tokens += tokens
-			elif content.startswith(STRUCTURED_MEMORY_CONTEXT_PREFIX):
-				memory_tokens += tokens
-			else:
-				system_tokens += tokens
-		elif index == current_user_index:
-			user_tokens += tokens
-		else:
-			history_tokens += tokens
-	input_tokens = system_tokens + summary_tokens + memory_tokens + history_tokens + user_tokens
-	ai_usage_logger.info(
-		"AI final context correlation_id=%s attempt=%s provider=groq model=%s purpose=chat task_type=%s "
-		"message_count=%s summary_present=%s system_tokens=%s summary_tokens=%s memory_tokens=%s history_tokens=%s "
-		"user_tokens=%s input_tokens=%s context_budget=%s history_budget=%s max_output_tokens=%s",
-		correlation_id or "none",
-		attempt,
-		settings.groq_model,
-		task_type,
-		len(messages),
-		str(summary_tokens > 0).lower(),
-		system_tokens,
-		summary_tokens,
-		memory_tokens,
-		history_tokens,
-		user_tokens,
-		input_tokens,
-		settings.chat_context_budget,
-		settings.history_token_budget,
-		settings.max_output_tokens,
-	)
-
-
-async def _stream_ai_deltas(
+async def _stream_groq_deltas(
 	messages: list[dict[str, str]],
 	user_id: str,
 	web_search: bool,
+	model: ChatModelSpec,
 	*,
 	task_type: AITaskType,
 	prompt_version: str,
 	correlation_id: str | None = None,
 	attempt: str = "full",
 ) -> AsyncIterator[str]:
-	kwargs = _chat_completion_options(messages, user_id, web_search)
+	kwargs = _chat_completion_options(messages, user_id, web_search, model)
 	started = time.perf_counter()
 	usage = None
 	status: AIInteractionStatus = "error"
 	stream_provider_request_id = None
 	try:
-		_log_final_ai_context(
-			messages,
-			correlation_id=correlation_id,
-			task_type=task_type,
-			attempt=attempt,
-		)
 		stream = await client.chat.completions.create(**kwargs)
 		stream_provider_request_id = provider_request_id(stream)
 		async for chunk in stream:
@@ -2101,7 +2114,7 @@ async def _stream_ai_deltas(
 			purpose="chat",
 			task_type=task_type,
 			provider="groq",
-			model=settings.groq_model,
+			model=model.provider_model,
 			latency_ms=latency_ms,
 			request_options=kwargs,
 			correlation_id=correlation_id,
@@ -2132,8 +2145,8 @@ async def _stream_ai_deltas(
 			usage,
 			purpose="chat",
 			task_type=task_type,
-			provider="groq",
-			model=settings.groq_model,
+			provider=model.provider,
+			model=model.provider_model,
 			prompt_version=prompt_version,
 			reasoning_effort=None,
 			status=status,
@@ -2149,6 +2162,120 @@ async def _stream_ai_deltas(
 			)
 
 
+def _gemini_request_parts(
+	messages: list[dict[str, str]],
+	web_search: bool,
+) -> tuple[list[genai_types.Content], genai_types.GenerateContentConfig]:
+	system_instruction = "\n\n".join(
+		message["content"] for message in messages if message.get("role") == "system" and message.get("content")
+	)
+	contents = [
+		genai_types.Content(
+			role="model" if message.get("role") == "assistant" else "user",
+			parts=[genai_types.Part.from_text(text=message.get("content") or "")],
+		)
+		for message in messages
+		if message.get("role") in {"user", "assistant"}
+	]
+	tools = [genai_types.Tool(google_search=genai_types.GoogleSearch())] if web_search else None
+	config = genai_types.GenerateContentConfig(
+		system_instruction=system_instruction or None,
+		max_output_tokens=settings.max_output_tokens,
+		tools=tools,
+	)
+	return contents, config
+
+
+def _gemini_usage(value) -> dict[str, int] | None:
+	usage = getattr(value, "usage_metadata", None)
+	if usage is None:
+		return None
+	return {
+		"input_tokens": getattr(usage, "prompt_token_count", 0) or 0,
+		"cached_tokens": getattr(usage, "cached_content_token_count", 0) or 0,
+		"output_tokens": getattr(usage, "candidates_token_count", 0) or 0,
+	}
+
+
+async def _stream_gemini_deltas(
+	messages: list[dict[str, str]],
+	web_search: bool,
+	model: ChatModelSpec,
+	*,
+	task_type: AITaskType,
+	prompt_version: str,
+) -> AsyncIterator[str]:
+	if gemini_client is None:
+		raise AppError(503, "AI_MODEL_UNAVAILABLE", "Gemini не настроена на сервере")
+	contents, config = _gemini_request_parts(messages, web_search)
+	started = time.perf_counter()
+	usage = None
+	status: AIInteractionStatus = "error"
+	try:
+		stream = await gemini_client.models.generate_content_stream(
+			model=model.provider_model,
+			contents=contents,
+			config=config,
+		)
+		async for chunk in stream:
+			chunk_usage = _gemini_usage(chunk)
+			if chunk_usage is not None:
+				usage = chunk_usage
+			content = getattr(chunk, "text", None)
+			if content:
+				yield content
+		status = "success"
+	except (asyncio.CancelledError, GeneratorExit):
+		status = "cancelled"
+		raise
+	finally:
+		_log_ai_usage(
+			usage,
+			purpose="chat",
+			task_type=task_type,
+			provider=model.provider,
+			model=model.provider_model,
+			prompt_version=prompt_version,
+			reasoning_effort=None,
+			status=status,
+			latency_ms=(time.perf_counter() - started) * 1000,
+		)
+
+
+async def _stream_ai_deltas(
+	messages: list[dict[str, str]],
+	user_id: str,
+	web_search: bool,
+	model: ChatModelSpec,
+	*,
+	task_type: AITaskType,
+	prompt_version: str,
+	correlation_id: str | None = None,
+	attempt: str = "full",
+) -> AsyncIterator[str]:
+	if model.provider == "gemini":
+		async for delta in _stream_gemini_deltas(
+			messages,
+			web_search,
+			model,
+			task_type=task_type,
+			prompt_version=prompt_version,
+		):
+			yield delta
+		return
+	async for delta in _stream_groq_deltas(
+		messages,
+		user_id,
+		web_search,
+		model,
+		task_type=task_type,
+		prompt_version=prompt_version,
+		correlation_id=correlation_id,
+		attempt=attempt,
+	):
+		yield delta
+
+
 @app.post(f"{settings.api_prefix}/conversations/{{conversation_id}}/stream", tags=["chat"])
 async def stream_chat(
 	request: Request,
@@ -2156,6 +2283,7 @@ async def stream_chat(
 	prompt: str = Form(default=""),
 	web_search: bool = Form(default=False),
 	search_mode: Literal["none", "web", "knowledge"] = Form(default="none"),
+	model_id: str = Form(default=""),
 	retry_message_id: str | None = Form(default=None),
 	edit_message_id: str | None = Form(default=None),
 	files: list[UploadFile] = File(default=[]),
@@ -2163,8 +2291,7 @@ async def stream_chat(
 	db: Session = Depends(get_db),
 ):
 	rate_limiter.check(f"chat:{user.id}")
-	if client is None:
-		raise AppError(503, "AI_NOT_CONFIGURED", "AI-сервис не настроен")
+	chat_model = _resolve_chat_model(model_id)
 	conversation = _owned_conversation(db, conversation_id, user.id)
 	if web_search and search_mode == "none":
 		search_mode = "web"
@@ -2230,6 +2357,7 @@ async def stream_chat(
 			reply_to_id=parent_ids.get(source_user_message.id),
 			is_active=True,
 			search_mode=search_mode,
+			model_id=chat_model.id,
 		)
 		db.add(user_message)
 		db.flush()
@@ -2255,6 +2383,7 @@ async def stream_chat(
 			status="done",
 			reply_to_id=active_parent_id,
 			search_mode=search_mode,
+			model_id=chat_model.id,
 		)
 		db.add(user_message)
 		db.flush()
@@ -2272,6 +2401,7 @@ async def stream_chat(
 			status="done",
 			reply_to_id=active_parent_id,
 			search_mode=search_mode,
+			model_id=chat_model.id,
 		)
 		db.add(user_message)
 		db.flush()
@@ -2351,6 +2481,7 @@ async def stream_chat(
 		content="",
 		status="streaming",
 		reply_to_id=user_message.id,
+		model_id=chat_model.id,
 	)
 	db.add(assistant_message)
 	conversation.updated_at = utc_now()
@@ -2368,23 +2499,7 @@ async def stream_chat(
 			knowledge_search=search_mode == "knowledge",
 			file_generation=file_generation,
 		)
-		summary_updated = await _update_branch_summary(
-			db,
-			conversation.id,
-			user_message,
-			excluded_history,
-			correlation_id=request_id,
-		)
-		if summary_updated:
-			ai_messages, knowledge_result, uses_knowledge_context, _ = build_chat_context(
-				db,
-				conversation.id,
-				user.id,
-				prompt,
-				user_message,
-				knowledge_search=search_mode == "knowledge",
-				file_generation=file_generation,
-			)
+		await _update_branch_summary(db, conversation.id, user_message, excluded_history)
 		if knowledge_result is not None:
 			assistant_message.knowledge_sources = [
 				{
@@ -2452,6 +2567,7 @@ async def stream_chat(
 					ai_messages,
 					user.id,
 					web_search,
+					chat_model,
 					task_type=task_type,
 					prompt_version=prompt_version,
 					correlation_id=request_id,
@@ -2473,8 +2589,8 @@ async def stream_chat(
 					logger,
 					correlation_id=request_id,
 					error=error,
-					full_request_options=_chat_completion_options(ai_messages, user.id, web_search),
-					compact_request_options=_chat_completion_options(compact_messages, user.id, web_search),
+					full_request_options=_chat_completion_options(ai_messages, user.id, web_search, chat_model),
+					compact_request_options=_chat_completion_options(compact_messages, user.id, web_search, chat_model),
 					reason="retryable_provider_status_without_partial_output",
 				)
 				AI_CONTEXT_RETRIES_TOTAL.labels("started").inc()
@@ -2483,6 +2599,7 @@ async def stream_chat(
 						compact_messages,
 						user.id,
 						web_search,
+						chat_model,
 						task_type=task_type,
 						prompt_version=prompt_version,
 						correlation_id=request_id,
@@ -2500,9 +2617,19 @@ async def stream_chat(
 			answer, generated_files = _extract_generated_files(answer, prompt)
 			assistant_message.content = answer
 			assistant_message.status = "done"
-			await _store_generated_files(db, user.id, conversation.id, assistant_message, generated_files)
+			generated_storage_keys = await _store_generated_files(db, user.id, conversation.id, assistant_message, generated_files)
 			conversation.updated_at = utc_now()
-			db.commit()
+			try:
+				db.commit()
+			except Exception:
+				db.rollback()
+				storage = get_file_storage()
+				for storage_key in generated_storage_keys:
+					try:
+						await storage.delete(storage_key)
+					except Exception:
+						logger.exception("Generated file cleanup after commit failure failed: storage_key=%s", storage_key)
+				raise
 			await _extract_and_store_memory(db, user.id, user_message.content)
 			completed_message = db.scalar(
 				select(Message).options(selectinload(Message.attachments), selectinload(Message.ratings)).where(Message.id == assistant_id)
@@ -2532,8 +2659,8 @@ async def stream_chat(
 				"requestId": request_id,
 				"chatId": conversation.id,
 				"messageId": assistant_id,
-				"provider": "groq",
-				"model": settings.groq_model,
+				"provider": chat_model.provider,
+				"model": chat_model.provider_model,
 				"errorType": type(error).__name__,
 				"providerStatus": getattr(error, "status_code", None),
 				"durationMs": round((time.perf_counter() - started) * 1000, 2),

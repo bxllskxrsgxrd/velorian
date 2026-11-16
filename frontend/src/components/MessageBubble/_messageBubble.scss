@@ -662,3 +662,16 @@
 		}
 	}
 }
+
+:root[data-compact='true'] .message--user .message__content {
+	padding: 8px 13px;
+}
+
+:root[data-compact='true'] .message--assistant {
+	gap: 6px;
+}
+
+:root[data-compact='true'] .message__assistant-actions {
+	gap: 8px;
+	min-height: 28px;
+}
