@@ -411,6 +411,17 @@ export function ChatPage() {
 							: message,
 					),
 				);
+				if (error instanceof ApiError && error.code === 'BRANCH_SUMMARY_UNAVAILABLE') {
+					try {
+						const conversation = await getConversation(conversationId);
+						localRetryPayloadsRef.current.delete(tempUserId);
+						setConversationMessages(conversationId, conversation.messages);
+					} catch (refreshError) {
+						reportError('Не удалось синхронизировать сообщения после ошибки Summary', refreshError, {
+							conversationId,
+						});
+					}
+				}
 				return;
 			}
 			const normalizedError =
