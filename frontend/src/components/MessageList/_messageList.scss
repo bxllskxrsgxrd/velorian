@@ -9,3 +9,7 @@
 	margin: 0 auto;
 	box-sizing: border-box;
 }
+
+:root[data-compact='true'] .message-list {
+	gap: 14px;
+}

@@ -6,6 +6,7 @@ import { promptMarker } from '../../constants/promptTools';
 import { usePromptStore } from '../../stores/promptStore';
 import { useFilesStore } from '../../stores/filesStore';
 import { useChatStore } from '../../stores/chatStore';
+import { useModelStore } from '../../stores/modelStore';
 
 const WEB_SEARCH_MARKER = promptMarker('web');
 
@@ -31,6 +32,21 @@ describe('PromptBar web search', () => {
 		usePromptStore.getState().reset();
 		useFilesStore.getState().reset();
 		useChatStore.getState().resetConversation();
+		useModelStore.getState().configure([
+			{ id: 'gpt-oss-120b', name: 'GPT-OSS 120B', description: 'Основная', provider: 'groq', available: true },
+			{ id: 'qwen-3.8', name: 'Qwen 3.8', description: 'Vision', provider: 'groq', available: true },
+			{ id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', description: 'Google', provider: 'gemini', available: false },
+		], 'gpt-oss-120b');
+		useModelStore.getState().selectModel('gpt-oss-120b');
+	});
+
+	it('selects an available model from the menu next to send', () => {
+		renderPromptBar();
+		fireEvent.click(screen.getByRole('button', { name: /Выбрать нейросеть/ }));
+		fireEvent.click(screen.getByRole('menuitemradio', { name: /Qwen 3.8/ }));
+
+		expect(useModelStore.getState().selectedModelId).toBe('qwen-3.8');
+		expect(screen.queryByRole('menu', { name: 'Выберите нейросеть' })).not.toBeInTheDocument();
 	});
 
 	it('moves the textarea into the multiline layout when the prompt wraps to multiple lines', async () => {

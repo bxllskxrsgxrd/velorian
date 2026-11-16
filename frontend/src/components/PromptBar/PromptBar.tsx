@@ -5,6 +5,7 @@ import type { SearchMode } from '../../types/chat';
 import { reportError } from '../../utils/reportError';
 import { createPastedTextFile } from '../../utils/pastedTextFile';
 import { SendIcon } from '../icons/AppIcons';
+import { ModelSelector } from '../ModelSelector/ModelSelector';
 import { PromptActionsMenu } from '../PromptActionsMenu/PromptActionsMenu';
 import { AutoResizeTextarea } from '../ui/AutoResizeTextarea/AutoResizeTextarea';
 import { IconButton } from '../ui/IconButton/IconButton';
@@ -153,6 +154,7 @@ export function PromptBar({
 					onPaste={handlePaste}
 				/>
 				<div className="prompt-bar__send">
+					<ModelSelector disabled={isGenerating} />
 					{isGenerating ? (
 						<IconButton onClick={onStop} aria-label="Остановить генерацию">
 							<span className="prompt-bar__stop" />

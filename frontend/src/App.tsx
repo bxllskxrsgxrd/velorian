@@ -8,6 +8,7 @@ import { reportError } from './utils/reportError';
 import { configureAttachmentLimits } from './constants/attachmentLimits';
 import { useAuthStore } from './stores/authStore';
 import { SettingsPage } from './pages/SettingsPage';
+import { useModelStore } from './stores/modelStore';
 
 const KnowledgePage = lazy(() => import('./pages/KnowledgePage'));
 const KnowledgeEditorPage = lazy(() => import('./pages/KnowledgeEditorPage').then((module) => ({ default: module.KnowledgeEditorPage })));
@@ -31,7 +32,12 @@ function App() {
 			}),
 		])
 			.then(([currentUser, config]) => {
-				if (config) configureAttachmentLimits(config.attachmentLimits);
+				if (config) {
+					configureAttachmentLimits(config.attachmentLimits);
+					if (config.aiModels?.length && config.defaultAiModelId) {
+						useModelStore.getState().configure(config.aiModels, config.defaultAiModelId);
+					}
+				}
 				setUser(currentUser);
 			})
 			.catch((error: unknown) => {

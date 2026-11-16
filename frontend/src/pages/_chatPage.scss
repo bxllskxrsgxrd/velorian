@@ -248,3 +248,16 @@
 .chat-knowledge-form > p { margin: 0; font-size: 13px; }
 .knowledge-filter-fields { display: grid; gap: 9px; }
 .knowledge-filter-fields label { display: grid; gap: 5px; color: var(--color-text-secondary); font-size: 12px; }
+
+:root[data-compact='true'] .chat-page {
+	--prompt-bottom: 10px;
+	padding-top: 18px;
+}
+
+:root[data-compact='true'] .chat-page__heading {
+	margin-block: 20px;
+}
+
+:root[data-compact='true'] .chat-page--chat .chat-page__prompt {
+	padding-block: 18px;
+}

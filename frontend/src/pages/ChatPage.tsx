@@ -41,6 +41,7 @@ import { ArrowDownIcon, BurgerIcon, CrossIcon } from '../components/icons/AppIco
 import { useChatStore } from '../stores/chatStore';
 import { useConversationsStore } from '../stores/conversationsStore';
 import { useFilesStore } from '../stores/filesStore';
+import { useModelStore } from '../stores/modelStore';
 import { useUiStore } from '../stores/uiStore';
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
@@ -81,7 +82,7 @@ export function ChatPage() {
 	const isNearBottomRef = useRef(true);
 	const loadSequenceRef = useRef(0);
 	const ratingSequenceRef = useRef(new Map<string, number>());
-	const localRetryPayloadsRef = useRef(new Map<string, { prompt: string; files: File[]; searchMode: SearchMode }>());
+	const localRetryPayloadsRef = useRef(new Map<string, { prompt: string; files: File[]; searchMode: SearchMode; modelId: string }>());
 	const conversationCreationRef = useRef<Promise<ConversationSummary> | null>(null);
 	const locallyCreatedConversationIdsRef = useRef(new Set<string>());
 	const sendOperationsRef = useRef(new Map<string, Promise<void>>());
@@ -231,6 +232,7 @@ export function ChatPage() {
 		retryMessageId?: string,
 		searchMode: SearchMode = 'none',
 		editMessageId?: string,
+		modelId?: string,
 	) {
 		if (requestControllersRef.current.has(conversationId)) return;
 		setPageError('');
@@ -243,6 +245,7 @@ export function ChatPage() {
 		const editSourceMessage = editMessageId
 			? sourceMessages.find((message) => message.id === editMessageId && message.role === CHAT_ROLES.USER)
 			: undefined;
+		const effectiveModelId = modelId ?? retrySourceMessage?.modelId ?? useModelStore.getState().selectedModelId;
 		const parentMessageId = editSourceMessage
 			? getMessageParentId(sourceMessages, editSourceMessage.id)
 			: getActiveBranchLeafAssistantId(sourceMessages);
@@ -283,6 +286,7 @@ export function ChatPage() {
 			branchGroupId: editSourceMessage ? editSourceMessage.branchGroupId || editSourceMessage.id : tempUserId,
 			replyToId: parentMessageId,
 			isActive: true,
+			modelId: effectiveModelId,
 		};
 		const optimistic: ChatMessage[] = [optimisticUser];
 		optimistic.push({
@@ -291,6 +295,7 @@ export function ChatPage() {
 			content: '',
 			status: CHAT_MESSAGE_STATUSES.PENDING,
 			replyToId: tempUserId,
+			modelId: effectiveModelId,
 		});
 		setConversationMessages(conversationId, (current) => [
 			...current.map((message) =>
@@ -309,6 +314,7 @@ export function ChatPage() {
 				prompt,
 				files: currentFiles,
 				searchMode,
+				modelId: effectiveModelId,
 				retryMessageId,
 				editMessageId,
 				signal: controller.signal,
@@ -398,6 +404,7 @@ export function ChatPage() {
 					prompt: optimisticUser.content,
 					files: [...currentFiles],
 					searchMode,
+					modelId: effectiveModelId,
 				});
 				setConversationMessages(conversationId, (current) =>
 					current.map((message) =>
@@ -446,7 +453,15 @@ export function ChatPage() {
 			const conversationId = await ensureConversation();
 			const pendingOperation = sendOperationsRef.current.get(conversationId);
 			if (pendingOperation) return pendingOperation;
-			const operation = runStream(conversationId, prompt, currentFiles, undefined, searchMode);
+			const operation = runStream(
+				conversationId,
+				prompt,
+				currentFiles,
+				undefined,
+				searchMode,
+				undefined,
+				useModelStore.getState().selectedModelId,
+			);
 			sendOperationsRef.current.set(conversationId, operation);
 			try {
 				await operation;
@@ -465,7 +480,15 @@ export function ChatPage() {
 		if (!activeConversationId) return;
 		const localPayload = localRetryPayloadsRef.current.get(userMessageId);
 		if (localPayload) {
-			void runStream(activeConversationId, localPayload.prompt, localPayload.files, undefined, localPayload.searchMode);
+			void runStream(
+				activeConversationId,
+				localPayload.prompt,
+				localPayload.files,
+				undefined,
+				localPayload.searchMode,
+				undefined,
+				localPayload.modelId,
+			);
 			return;
 		}
 		void runStream(activeConversationId, '', [], userMessageId);
