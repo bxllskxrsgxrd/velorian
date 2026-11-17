@@ -1,10 +1,11 @@
 from datetime import datetime, timezone
 from uuid import uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum as SQLAlchemyEnum, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
+from .roles import UserRole
 
 
 def utc_now() -> datetime:
@@ -17,11 +18,25 @@ def new_id() -> str:
 
 class User(Base):
 	__tablename__ = "users"
+	__table_args__ = (
+		CheckConstraint("role IN ('user', 'admin', 'owner')", name="ck_users_role"),
+	)
 
 	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
 	email: Mapped[str] = mapped_column(String(320), unique=True, index=True)
 	login: Mapped[str] = mapped_column(String(80), unique=True, index=True)
 	password_hash: Mapped[str] = mapped_column(String(255))
+	role: Mapped[UserRole] = mapped_column(
+		SQLAlchemyEnum(
+			UserRole,
+			name="user_role",
+			native_enum=False,
+			create_constraint=False,
+			values_callable=lambda roles: [role.value for role in roles],
+		),
+		default=UserRole.USER,
+		server_default=UserRole.USER.value,
+	)
 	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now)
 
 	conversations: Mapped[list["Conversation"]] = relationship(back_populates="user", cascade="all, delete-orphan")

@@ -181,6 +181,29 @@ def _add_user_logins(connection: Connection) -> None:
 		connection.execute(text("ALTER TABLE users ALTER COLUMN login SET NOT NULL"))
 
 
+def _add_user_roles(connection: Connection) -> None:
+	columns = {column["name"] for column in inspect(connection).get_columns("users")}
+	if "role" not in columns:
+		connection.execute(text(
+			"ALTER TABLE users ADD COLUMN role VARCHAR(16) NOT NULL DEFAULT 'user'"
+		))
+	connection.execute(text("UPDATE users SET role = 'user' WHERE role IS NULL"))
+	if connection.dialect.name == "postgresql":
+		constraints = {
+			constraint["name"]
+			for constraint in inspect(connection).get_check_constraints("users")
+		}
+		if "ck_users_role" not in constraints:
+			connection.execute(text(
+				"ALTER TABLE users ADD CONSTRAINT ck_users_role "
+				"CHECK (role IN ('user', 'admin', 'owner'))"
+			))
+	connection.execute(text(
+		"CREATE UNIQUE INDEX IF NOT EXISTS uq_users_single_owner "
+		"ON users (role) WHERE role = 'owner'"
+	))
+
+
 def _create_branch_summaries(connection: Connection) -> None:
 	from .database import Base
 
@@ -209,6 +232,7 @@ MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20261002_01_branch_summaries", _create_branch_summaries),
 	("20261007_01_structured_memory", _create_structured_memory),
 	("20261113_01_message_model_id", _add_message_model_id),
+	("20261117_01_user_roles", _add_user_roles),
 )
 
 

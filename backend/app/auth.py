@@ -13,6 +13,7 @@ from .config import settings
 from .database import get_db
 from .errors import AppError
 from .models import User
+from .roles import UserRole, has_minimum_role
 
 
 COOKIE_NAME = "velorian_session"
@@ -72,3 +73,16 @@ def get_current_user(
 	if user is None:
 		raise AppError(401, "INVALID_SESSION", "Сессия недействительна")
 	return user
+
+
+def require_minimum_role(required_role: UserRole):
+	def dependency(user: User = Depends(get_current_user)) -> User:
+		if not has_minimum_role(user.role, required_role):
+			raise AppError(403, "INSUFFICIENT_ROLE", "Недостаточно прав для выполнения операции")
+		return user
+
+	return dependency
+
+
+require_admin = require_minimum_role(UserRole.ADMIN)
+require_owner = require_minimum_role(UserRole.OWNER)

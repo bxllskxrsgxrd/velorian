@@ -63,6 +63,7 @@ from .models import Attachment, BranchSummary, Conversation, DocumentChunk, Know
 from .rag import chunk_text, estimate_tokens, retrieve_chunks
 from .rate_limit import rate_limiter
 from .ratings import router as ratings_router
+from .roles import UserRole, parse_user_role
 from .storage import build_storage_key, get_file_storage
 
 
@@ -2307,7 +2308,12 @@ def _set_session_cookie(response: Response, user_id: str) -> None:
 
 
 def _auth_user_payload(user: User) -> dict[str, str]:
-	return {"id": user.id, "email": user.email, "login": user.login}
+	return {
+		"id": user.id,
+		"email": user.email,
+		"login": user.login,
+		"role": parse_user_role(user.role).value,
+	}
 
 
 @app.get(f"{settings.api_prefix}/auth/csrf", tags=["auth"])
@@ -2328,7 +2334,12 @@ def register(payload: RegisterPayload, request: Request, response: Response, db:
 		raise AppError(409, "LOGIN_EXISTS", "Пользователь с таким логином уже существует", {"field": "login"})
 	if db.scalar(select(User.id).where(User.email == email)):
 		raise AppError(409, "EMAIL_EXISTS", "Пользователь с таким email уже существует", {"field": "email"})
-	user = User(login=login, email=email, password_hash=hash_password(payload.password))
+	user = User(
+		login=login,
+		email=email,
+		password_hash=hash_password(payload.password),
+		role=UserRole.USER,
+	)
 	db.add(user)
 	try:
 		db.flush()
