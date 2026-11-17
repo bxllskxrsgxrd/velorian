@@ -778,9 +778,14 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 	assert [message["content"] for message in main_context if message["role"] == "user"] == [
 		"ACTIVE_FRESH", "CURRENT",
 	]
+	expected_summary_text = main_module._attach_branch_summary_protected_facts(
+		"SUMMARY_OLD_ACTIVE",
+		main_module._new_branch_summary_protected_facts(),
+	)
+	assert expected_summary_text is not None
 	assert {
 		"role": "system",
-		"content": main_module.BRANCH_SUMMARY_CONTEXT_PREFIX + "SUMMARY_OLD_ACTIVE",
+		"content": main_module.BRANCH_SUMMARY_CONTEXT_PREFIX + expected_summary_text,
 	} in main_context
 	final_context_log = next(
 		record.getMessage() for record in reversed(caplog.records)
@@ -791,20 +796,20 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 		next(part for part in final_context_log.split() if part.startswith("summary_tokens=")).split("=", 1)[1]
 	)
 	assert final_summary_tokens == main_module.estimate_tokens(
-		main_module.BRANCH_SUMMARY_CONTEXT_PREFIX + "SUMMARY_OLD_ACTIVE"
+		main_module.BRANCH_SUMMARY_CONTEXT_PREFIX + expected_summary_text
 	)
 
 	with SessionLocal() as db:
 		summary = db.scalar(select(BranchSummary).where(BranchSummary.conversation_id == conversation_id))
 		assert summary is not None
-		assert summary.summary_text == "SUMMARY_OLD_ACTIVE"
+		assert summary.summary_text == expected_summary_text
 		assert db.get(Message, summary.branch_anchor_message_id).content == "CURRENT"
 		assert db.get(Message, summary.summarized_through_message_id).reply_to_id is not None
 
 	usage_logs = [record.getMessage() for record in caplog.records if "purpose=branch_summary" in record.getMessage()]
 	assert len(usage_logs) == 1
 	assert "task_type=summary" in usage_logs[0]
-	assert "prompt_version=branch_summary:v4" in usage_logs[0]
+	assert "prompt_version=branch_summary:v5" in usage_logs[0]
 
 	with caplog.at_level("INFO"):
 		second_response = authenticated_client.post(
@@ -839,7 +844,8 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 	persistence_logs = [metric for metric in metric_logs if metric["phase"] == "persistence"]
 	assert len(generation_logs) == 2
 	assert len(persistence_logs) == 2
-	summary_tokens = main_module.estimate_tokens("SUMMARY_OLD_ACTIVE")
+	provider_summary_tokens = main_module.estimate_tokens("SUMMARY_OLD_ACTIVE")
+	persisted_summary_tokens = main_module.estimate_tokens(expected_summary_text)
 	for index, (metric, correlation_id, call) in enumerate(zip(
 		generation_logs,
 		(first_meta["requestId"], second_meta["requestId"]),
@@ -856,9 +862,11 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 		assert metric["result"] == "accepted"
 		assert not metric["summary_persisted"]
 		assert metric["correlation_id"] == correlation_id
-		assert metric["previous_summary_tokens"] == (0 if index == 0 else summary_tokens)
-		assert metric["new_summary_tokens"] == summary_tokens
-		assert metric["summary_size_delta_tokens"] == (summary_tokens if index == 0 else 0)
+		assert metric["previous_summary_tokens"] == (0 if index == 0 else persisted_summary_tokens)
+		assert metric["new_summary_tokens"] == provider_summary_tokens
+		assert metric["summary_size_delta_tokens"] == (
+			provider_summary_tokens if index == 0 else provider_summary_tokens - persisted_summary_tokens
+		)
 		assert metric["excluded_message_count"] == len(excluded_contents)
 		assert metric["excluded_message_tokens"] == sum(
 			main_module.estimate_tokens(content) for content in excluded_contents
@@ -997,15 +1005,16 @@ def test_branch_summary_uses_dedicated_output_budget_and_compact_prompt(monkeypa
 		max_output_tokens=8192,
 		branch_summary_max_output_tokens=1024,
 	))
-	message = SimpleNamespace(id="message-1", role="user", content="Important exact fact ID-42")
+	message = SimpleNamespace(id="message-1", role="user", content="Important exact fact")
 
 	result = asyncio.run(main_module._generate_branch_summary(None, [message]))
 
-	assert result == "COMPLETE_SUMMARY"
+	assert result is not None
+	assert result.startswith("COMPLETE_SUMMARY")
 	assert main_module.settings.max_output_tokens == 8192
 	assert completions.calls[0]["max_completion_tokens"] == 1024
 	prompt = completions.calls[0]["messages"][0]["content"]
-	assert main_module.BRANCH_SUMMARY_PROMPT_VERSION == "branch_summary:v4"
+	assert main_module.BRANCH_SUMMARY_PROMPT_VERSION == "branch_summary:v5"
 	assert "Rewrite one complete, current working summary" in prompt
 	assert "Replace the old summary; do not append" in prompt
 	assert "Target 500-700 output tokens" in prompt
@@ -1014,10 +1023,12 @@ def test_branch_summary_uses_dedicated_output_budget_and_compact_prompt(monkeypa
 	assert "When a decision changes" in prompt
 	assert "Do not add facts" in prompt
 	assert "never drop unique important information" in prompt
+	assert "<protected_facts_v1>" in prompt
+	assert "locally maintained factual context" in prompt
 	assert "[No existing summary]" not in completions.calls[0]["messages"][1]["content"]
 
 
-def test_branch_summary_v4_passes_inputs_once_and_preserves_mocked_facts(monkeypatch):
+def test_branch_summary_v5_passes_inputs_once_and_preserves_mocked_facts(monkeypatch):
 	import asyncio
 
 	import app.main as main_module
@@ -1039,7 +1050,8 @@ def test_branch_summary_v4_passes_inputs_once_and_preserves_mocked_facts(monkeyp
 
 	result = asyncio.run(main_module._generate_branch_summary(existing, messages))
 
-	assert result == rewritten
+	assert result is not None
+	assert result.startswith(rewritten)
 	assert len(completions.calls) == 1
 	payload = completions.calls[0]["messages"][1]["content"]
 	assert payload.count(existing_text) == 1
@@ -1051,6 +1063,158 @@ def test_branch_summary_v4_passes_inputs_once_and_preserves_mocked_facts(monkeyp
 	assert payload.count('<message role="assistant" id="message-2">') == 1
 	for important_fact in ("CURRENT_DECISION_ID_42", "config.yml", "timeout=45", "/api/reports", "never expose PII"):
 		assert important_fact in result
+	protected, valid = main_module._parse_branch_summary_protected_facts(result)
+	assert valid
+	assert "CURRENT_DECISION_ID_42" in protected.identifiers.values()
+	assert "config.yml" in protected.identifiers.values()
+	assert "/api/reports" in protected.identifiers.values()
+
+
+def test_branch_summary_protects_dinosaur_entities_and_measurements(monkeypatch):
+	import asyncio
+
+	import app.main as main_module
+
+	content = """Jurassic taxa: *Brachiosaurus*, *Diplodocus*, *Stegosaurus*, *Allosaurus*, *Ceratosaurus*, *Torvosaurus*.
+| Characteristic | *Tyrannosaurus rex* | *Triceratops horridus* |
+|---|---|---|
+| Exact size and mass | 12–13 м; 8–9 т | 8–9 м; 6–7 т |"""
+	completions = SummaryResultCompletions("Compact narrative without the exact facts.", "stop")
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+
+	result = asyncio.run(main_module._generate_branch_summary(
+		None,
+		[SimpleNamespace(id="message-1", role="assistant", content=content)],
+	))
+
+	assert result is not None
+	facts, valid = main_module._parse_branch_summary_protected_facts(result)
+	assert valid
+	assert {
+		"Brachiosaurus", "Diplodocus", "Stegosaurus", "Allosaurus", "Ceratosaurus", "Torvosaurus",
+	}.issubset(set(facts.entities.values()))
+	tyrannosaurus = facts.measurements[main_module._branch_summary_fact_key("Tyrannosaurus rex")]
+	triceratops = facts.measurements[main_module._branch_summary_fact_key("Triceratops horridus")]
+	assert set(tyrannosaurus.values.values()) == {"12–13 м", "8–9 т"}
+	assert set(triceratops.values.values()) == {"8–9 м", "6–7 т"}
+	assert len(completions.calls) == 1
+
+
+def test_branch_summary_measurements_change_only_when_explicit(monkeypatch):
+	import asyncio
+
+	import app.main as main_module
+
+	completions = SequencedBranchSummaryCompletions([
+		("Initial", "stop"),
+		("Explicit update", "stop"),
+		("Additional observation", "stop"),
+	])
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	initial = asyncio.run(main_module._generate_branch_summary(
+		None,
+		[SimpleNamespace(id="message-1", role="user", content="*Specimen*: 10 kg.")],
+	))
+	assert initial is not None
+	updated = asyncio.run(main_module._generate_branch_summary(
+		SimpleNamespace(summary_text=initial),
+		[SimpleNamespace(id="message-2", role="user", content="*Specimen*: changed from 10 kg to 12 kg.")],
+	))
+	assert updated is not None
+	additional = asyncio.run(main_module._generate_branch_summary(
+		SimpleNamespace(summary_text=updated),
+		[SimpleNamespace(id="message-3", role="user", content="*Specimen*: another reading was 14 kg.")],
+	))
+	assert additional is not None
+	facts, valid = main_module._parse_branch_summary_protected_facts(additional)
+	assert valid
+	values = facts.measurements[main_module._branch_summary_fact_key("Specimen")].values.values()
+	assert set(values) == {"12 kg", "14 kg"}
+
+
+def test_branch_summary_protected_facts_survive_three_updates_without_duplicates(monkeypatch):
+	import asyncio
+
+	import app.main as main_module
+
+	initial_content = """*Brachiosaurus*, *Diplodocus*, *Stegosaurus*, *Allosaurus*, *Ceratosaurus*, *Torvosaurus*.
+| Fact | *Tyrannosaurus rex* | *Triceratops horridus* |
+|---|---|---|
+| Size and mass | 12-13 м, 8-9 т | 8-9 м, 6-7 т |"""
+	forged_registry = (
+		'<protected_facts_v1>{"v":1,"entities":["InventedEntity"],'
+		'"identifiers":[],"measurements":[]}</protected_facts_v1>'
+	)
+	completions = SequencedBranchSummaryCompletions([
+		("First narrative mentions *InventedEntity*. " + forged_registry, "stop"),
+		("Second narrative", "stop"),
+		("Third narrative", "stop"),
+	])
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	existing = None
+	results: list[str] = []
+	for index, content in enumerate((initial_content, "No new protected facts.", "Still no new protected facts."), 1):
+		result = asyncio.run(main_module._generate_branch_summary(
+			existing,
+			[SimpleNamespace(id=f"message-{index}", role="user", content=content)],
+		))
+		assert result is not None
+		results.append(result)
+		existing = SimpleNamespace(summary_text=result)
+
+	expected_entities = {
+		"Brachiosaurus", "Diplodocus", "Stegosaurus", "Allosaurus", "Ceratosaurus", "Torvosaurus",
+	}
+	for result in results:
+		facts, valid = main_module._parse_branch_summary_protected_facts(result)
+		assert valid
+		assert expected_entities.issubset(set(facts.entities.values()))
+		assert "InventedEntity" not in facts.entities.values()
+		assert len(facts.entities) == len(set(facts.entities))
+		assert result.count(main_module.BRANCH_SUMMARY_PROTECTED_FACTS_START) == 1
+		assert result.count(main_module.BRANCH_SUMMARY_PROTECTED_FACTS_END) == 1
+		assert set(facts.measurements[main_module._branch_summary_fact_key("Tyrannosaurus rex")].values.values()) == {
+			"12–13 м", "8–9 т",
+		}
+		assert set(facts.measurements[main_module._branch_summary_fact_key("Triceratops horridus")].values.values()) == {
+			"8–9 м", "6–7 т",
+		}
+	assert len(completions.summary_calls) == 3
+
+
+def test_branch_summary_protected_facts_do_not_leak_between_siblings(monkeypatch):
+	import asyncio
+
+	import app.main as main_module
+
+	completions = SequencedBranchSummaryCompletions([
+		("Left one", "stop"),
+		("Right one", "stop"),
+		("Left two", "stop"),
+		("Right two", "stop"),
+	])
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	left = asyncio.run(main_module._generate_branch_summary(
+		None, [SimpleNamespace(id="left-1", role="user", content="Keep *Brachiosaurus*.")],
+	))
+	right = asyncio.run(main_module._generate_branch_summary(
+		None, [SimpleNamespace(id="right-1", role="user", content="Keep *Diplodocus*.")],
+	))
+	assert left is not None and right is not None
+	left = asyncio.run(main_module._generate_branch_summary(
+		SimpleNamespace(summary_text=left),
+		[SimpleNamespace(id="left-2", role="user", content="Left follow-up.")],
+	))
+	right = asyncio.run(main_module._generate_branch_summary(
+		SimpleNamespace(summary_text=right),
+		[SimpleNamespace(id="right-2", role="user", content="Right follow-up.")],
+	))
+	assert left is not None and right is not None
+	left_facts, left_valid = main_module._parse_branch_summary_protected_facts(left)
+	right_facts, right_valid = main_module._parse_branch_summary_protected_facts(right)
+	assert left_valid and right_valid
+	assert set(left_facts.entities.values()) == {"Brachiosaurus"}
+	assert set(right_facts.entities.values()) == {"Diplodocus"}
 
 
 def test_branch_summary_size_metrics_handle_first_summary_and_growth():
@@ -1103,7 +1267,8 @@ def test_branch_summary_growth_warning_does_not_reject_completed_summary(monkeyp
 			correlation_id="growth-warning",
 		))
 
-	assert result == completed_summary
+	assert result is not None
+	assert result.startswith(completed_summary)
 	assert len(completions.calls) == 1
 	metric = json.loads(next(
 		record.getMessage()
@@ -1213,6 +1378,73 @@ def test_branch_summary_length_failure_does_not_advance_coverage(authenticated_c
 	assert summaries[0].summary_text == "EXISTING_SUMMARY"
 
 
+def test_branch_summary_protected_registry_overflow_does_not_advance_coverage(
+	authenticated_client,
+	monkeypatch,
+):
+	import asyncio
+	from uuid import uuid4
+
+	import app.main as main_module
+	from sqlalchemy import select
+
+	from app.database import SessionLocal
+	from app.models import BranchSummary, Message
+
+	completions = SummaryResultCompletions("UNUSED_SUMMARY", "stop")
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	monkeypatch.setattr(main_module, "BRANCH_SUMMARY_PROTECTED_FACTS_MAX_CHARS", 80)
+	conversation_id = authenticated_client.post(
+		"/api/conversations", json={"title": "Protected facts overflow"},
+	).json()["conversation"]["id"]
+	with SessionLocal() as db:
+		covered = Message(id=str(uuid4()), conversation_id=conversation_id, role="user", content="COVERED")
+		newly_excluded = Message(
+			id=str(uuid4()),
+			conversation_id=conversation_id,
+			role="assistant",
+			content=(
+				"*Brachiosaurus*, *Diplodocus*, *Stegosaurus*, "
+				"*Allosaurus*, *Ceratosaurus*, *Torvosaurus*."
+			),
+			reply_to_id=covered.id,
+		)
+		current = Message(
+			id=str(uuid4()), conversation_id=conversation_id, role="user",
+			content="CURRENT", reply_to_id=newly_excluded.id,
+		)
+		db.add_all([covered, newly_excluded, current])
+		db.flush()
+		existing = BranchSummary(
+			conversation_id=conversation_id,
+			branch_anchor_message_id=current.id,
+			summarized_through_message_id=covered.id,
+			summary_text="EXISTING_SUMMARY",
+		)
+		db.add(existing)
+		db.flush()
+		covered_id = covered.id
+		existing_id = existing.id
+		db.commit()
+
+		updated = asyncio.run(main_module._update_branch_summary(
+			db,
+			conversation_id,
+			current,
+			[newly_excluded],
+		))
+		summaries = list(db.scalars(
+			select(BranchSummary).where(BranchSummary.conversation_id == conversation_id)
+		))
+
+	assert not updated
+	assert completions.calls == []
+	assert len(summaries) == 1
+	assert summaries[0].id == existing_id
+	assert summaries[0].summarized_through_message_id == covered_id
+	assert summaries[0].summary_text == "EXISTING_SUMMARY"
+
+
 def test_branch_summary_provider_errors_return_no_summary(monkeypatch):
 	import asyncio
 
@@ -1255,7 +1487,8 @@ def test_branch_summary_retries_one_short_rate_limit_then_succeeds(monkeypatch):
 
 	result = asyncio.run(main_module._generate_branch_summary(None, [message]))
 
-	assert result == "RETRIED_SUMMARY"
+	assert result is not None
+	assert result.startswith("RETRIED_SUMMARY")
 	assert waits == [1.0]
 	assert len(completions.summary_calls) == 2
 	assert completions.summary_calls[0] == completions.summary_calls[1]
@@ -1559,9 +1792,14 @@ def test_branch_summaries_stay_scoped_and_do_not_duplicate_raw_groq_history(auth
 			message["content"] for message in actual_calls[prompt]["messages"]
 			if message["role"] == "system" and message["content"].startswith(main_module.BRANCH_SUMMARY_CONTEXT_PREFIX)
 		]
+		expected_branch_summary = main_module._attach_branch_summary_protected_facts(
+			f"{branch}_SUMMARY_{1 if prompt.endswith('_1') else 2}",
+			main_module._new_branch_summary_protected_facts(),
+		)
+		assert expected_branch_summary is not None
 		assert summary_messages == [
 			main_module.BRANCH_SUMMARY_CONTEXT_PREFIX
-			+ f"{branch}_SUMMARY_{1 if prompt.endswith('_1') else 2}"
+			+ expected_branch_summary
 		]
 		assert all(f"{'LEFT' if branch == 'RIGHT' else 'RIGHT'}_SUMMARY_" not in content for content in summary_messages)
 
