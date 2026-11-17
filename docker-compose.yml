@@ -21,7 +21,11 @@ services:
       APP_ENV: production
       GROQ_API_KEY: ${GROQ_API_KEY:?Set GROQ_API_KEY}
       GROQ_MODEL: ${GROQ_MODEL:-openai/gpt-oss-120b}
-      GROQ_VISION_MODEL: ${GROQ_VISION_MODEL:-qwen/qwen3.6-27b}
+      GROQ_QWEN_MODEL: ${GROQ_QWEN_MODEL:-qwen/qwen3.8-27b}
+      GROQ_VISION_MODEL: ${GROQ_VISION_MODEL:-qwen/qwen3.8-27b}
+      GEMINI_API_KEY: ${GEMINI_API_KEY:-}
+      GEMINI_MODEL: ${GEMINI_MODEL:-gemini-3.8-flash}
+      DEFAULT_CHAT_MODEL: ${DEFAULT_CHAT_MODEL:-gpt-oss-120b}
       ENABLE_VISION: ${ENABLE_VISION:-true}
       AUTH_SECRET: ${AUTH_SECRET:?Set AUTH_SECRET}
       COOKIE_SECURE: ${COOKIE_SECURE:-true}

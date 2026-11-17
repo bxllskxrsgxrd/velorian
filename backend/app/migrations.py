@@ -53,6 +53,12 @@ def _add_message_search_mode(connection: Connection) -> None:
 		connection.execute(text("ALTER TABLE messages ADD COLUMN search_mode VARCHAR(16) NOT NULL DEFAULT 'none'"))
 
 
+def _add_message_model_id(connection: Connection) -> None:
+	columns = {column["name"] for column in inspect(connection).get_columns("messages")}
+	if "model_id" not in columns:
+		connection.execute(text("ALTER TABLE messages ADD COLUMN model_id VARCHAR(64)"))
+
+
 def _add_knowledge_sources_and_indexes(connection: Connection) -> None:
 	message_columns = {column["name"] for column in inspect(connection).get_columns("messages")}
 	if "knowledge_sources" not in message_columns:
@@ -202,6 +208,7 @@ MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260928_02_user_logins", _add_user_logins),
 	("20261002_01_branch_summaries", _create_branch_summaries),
 	("20261007_01_structured_memory", _create_structured_memory),
+	("20261113_01_message_model_id", _add_message_model_id),
 )
 
 

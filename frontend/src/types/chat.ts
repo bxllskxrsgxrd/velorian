@@ -22,6 +22,15 @@ export type ChatAttachment = {
 export type ChatMessageStatus = (typeof CHAT_MESSAGE_STATUSES)[keyof typeof CHAT_MESSAGE_STATUSES];
 export type SearchMode = 'none' | 'web' | 'knowledge';
 
+export type AiModelOption = {
+	id: string;
+	name: string;
+	description: string;
+	provider: 'groq' | 'gemini';
+	badge?: string | null;
+	available: boolean;
+};
+
 export type MessageRating = {
 	id: string;
 	score: number;
@@ -92,6 +101,7 @@ export type ChatMessage = {
 	errorCode?: string;
 	requestId?: string;
 	searchMode?: SearchMode;
+	modelId?: string | null;
 	knowledgeSources?: KnowledgeSource[];
 	knowledgeItem?: Pick<KnowledgeItem, 'id' | 'deletedAt'> &
 		Partial<Pick<KnowledgeItem, 'rating' | 'updatedAt'>> | null;

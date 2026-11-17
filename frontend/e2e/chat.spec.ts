@@ -124,6 +124,34 @@ test('knowledge search is active and sent as search_mode', async ({ page }) => {
 	expect(request.postData()).toContain('knowledge');
 });
 
+test('selected AI model is sent with the chat request', async ({ page }) => {
+	await installMockApi(page);
+	await page.goto('/');
+	await page.getByRole('button', { name: /Выбрать нейросеть/ }).click();
+	await page.getByRole('menuitemradio', { name: /Qwen 3.8/ }).click();
+	const requestPromise = page.waitForRequest(
+		(request) => request.url().includes('/stream') && (request.postData() ?? '').includes('qwen-3.8'),
+	);
+	await page.getByRole('textbox', { name: 'Введите запрос' }).fill('Запрос к Qwen');
+	await page.getByRole('button', { name: 'Отправить сообщение' }).click();
+	const request = await requestPromise;
+	expect(request.postData()).toContain('model_id');
+	expect(request.postData()).toContain('qwen-3.8');
+});
+
+test('model menu fits the mobile chat viewport', async ({ page }) => {
+	await page.setViewportSize({ width: 390, height: 844 });
+	await installMockApi(page);
+	await page.goto('/');
+	await page.getByRole('button', { name: /Выбрать нейросеть/ }).click();
+	const menu = page.getByRole('menu', { name: 'Выберите нейросеть' });
+	await expect(menu).toBeVisible();
+	const box = await menu.boundingBox();
+	expect(box).not.toBeNull();
+	expect(box!.x).toBeGreaterThanOrEqual(0);
+	expect(box!.x + box!.width).toBeLessThanOrEqual(390);
+});
+
 test('reload keeps the old chat selected from the URL', async ({ page }) => {
 	await installMockApi(page, { multipleChats: true });
 	await page.goto('/chat/chat-a');

@@ -65,7 +65,15 @@ export async function installMockApi(page: Page, options: Options = {}) {
 		if (!path.startsWith('/api/')) return route.continue();
 
 		if (path === '/api/auth/csrf') return json(route, { csrfToken: 'csrf-e2e' });
-		if (path === '/api/config') return json(route, { attachmentLimits: { maxAttachments: 10, maxFileSize: 10 * 1024 * 1024, maxTotalSize: 25 * 1024 * 1024 } });
+		if (path === '/api/config') return json(route, {
+			attachmentLimits: { maxAttachments: 10, maxFileSize: 10 * 1024 * 1024, maxTotalSize: 25 * 1024 * 1024 },
+			aiModels: [
+				{ id: 'gpt-oss-120b', name: 'GPT-OSS 120B', description: 'Основная модель', provider: 'groq', available: true },
+				{ id: 'qwen-3.8', name: 'Qwen 3.8', description: 'Vision', provider: 'groq', badge: 'Vision', available: true },
+				{ id: 'gemini-3.8-flash', name: 'Gemini 3.8 Flash', description: 'Google', provider: 'gemini', badge: 'Google', available: true },
+			],
+			defaultAiModelId: 'gpt-oss-120b',
+		});
 		if (path === '/api/auth/me') return authenticated ? json(route, { user: { id: 'u1', email: 'e2e@example.com' } }) : json(route, { error: { code: 'AUTH_REQUIRED', message: 'Войдите', request_id: 'auth' } }, 401);
 		if (path === '/api/auth/login') { authenticated = true; return json(route, { user: { id: 'u1', email: 'e2e@example.com' }, csrfToken: 'csrf-login' }); }
 		if (path === '/api/auth/logout') { authenticated = false; return json(route, {}); }

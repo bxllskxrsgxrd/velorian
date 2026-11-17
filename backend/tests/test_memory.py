@@ -3,7 +3,13 @@ from sqlalchemy import create_engine, func, select
 from sqlalchemy.orm import Session
 
 from app.database import Base
-from app.memory import add_memory_decision, read_user_memory, upsert_preference_memory, upsert_project_memory
+from app.memory import (
+	add_memory_decision,
+	read_user_memory,
+	retrieve_relevant_memory,
+	upsert_preference_memory,
+	upsert_project_memory,
+)
 from app.migrations import _create_structured_memory
 from app.models import StructuredMemoryItem, User
 
@@ -72,3 +78,25 @@ def test_structured_memory_is_isolated_by_user(db: Session):
 		"preferences": {},
 		"decisions": ["second-private-decision"],
 	}
+
+
+def test_report_style_alias_is_recalled_across_languages(db: Session):
+	user = User(email="report-memory@example.com", login="report-memory", password_hash="hash")
+	db.add(user)
+	db.commit()
+
+	preference = upsert_preference_memory(db, user.id, "report_style", "brief bullet lists")
+
+	assert preference.name == "response_style"
+	assert retrieve_relevant_memory(db, user.id, "Какой формат отчётов я предпочитаю?") == [preference]
+
+	legacy = StructuredMemoryItem(
+		user_id=user.id,
+		category="preferences",
+		name="report_style",
+		value="brief bullet lists",
+	)
+	db.add(legacy)
+	db.commit()
+
+	assert legacy in retrieve_relevant_memory(db, user.id, "Какой формат отчётов я предпочитаю?")

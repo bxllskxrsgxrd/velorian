@@ -1,6 +1,10 @@
 .prompt-actions {
 	flex-shrink: 0;
 
+	> .icon-button {
+		color: var(--color-text-primary);
+	}
+
 	&__menu {
 		position: absolute;
 

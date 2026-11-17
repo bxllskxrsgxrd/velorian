@@ -1635,6 +1635,68 @@
 	}
 }
 
+:root[data-compact='true'] .chat-sidebar {
+	gap: 6px;
+	padding-block: 9px;
+}
+
+:root[data-compact='true'] .chat-sidebar__search input,
+:root[data-compact='true'] .chat-sidebar__select {
+	padding-block: 6px;
+}
+
+:root[data-compact='true'] .chat-sidebar__account-wrap {
+	padding-top: 6px;
+}
+
+:root[data-compact='true'] .chat-sidebar__account {
+	padding-block: 4px;
+}
+
+:root[data-compact='true'] .chat-sidebar__settings-sidebar {
+	padding-block: 22px;
+}
+
+:root[data-compact='true'] .chat-sidebar__settings-back,
+:root[data-compact='true'] .chat-sidebar__settings-sidebar h2 {
+	margin-bottom: 18px;
+}
+
+:root[data-compact='true'] .chat-sidebar__settings-sidebar nav {
+	gap: 5px;
+}
+
+:root[data-compact='true'] .chat-sidebar__settings-sidebar nav button {
+	padding-block: 10px;
+}
+
+:root[data-compact='true'] .chat-sidebar__settings-header {
+	padding-block: 24px 14px;
+}
+
+:root[data-compact='true'] .chat-sidebar__settings-content {
+	padding-bottom: 24px;
+}
+
+:root[data-compact='true'] .chat-sidebar__settings-group {
+	padding-block: 14px;
+}
+
+:root[data-compact='true'] .chat-sidebar__settings-row {
+	min-height: 52px;
+	padding-block: 6px;
+}
+
+:root[data-compact='true'] .chat-sidebar__settings-appearance .chat-sidebar__settings-row {
+	min-height: 84px;
+}
+
+:root[data-compact='true'] .chat-sidebar__settings-panel .custom-select__trigger,
+:root[data-compact='true'] .chat-sidebar__settings-input-row input {
+	min-height: 36px;
+	padding-block: 7px;
+}
+
 @keyframes chat-sidebar-title-marquee {
 	from {
 		transform: translateX(0);
