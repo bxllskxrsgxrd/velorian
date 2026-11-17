@@ -1,8 +1,9 @@
-import type { AuthUser } from '../types/chat';
+import { Navigate, useLocation } from 'react-router-dom';
 import { useUiStore } from '../stores/uiStore';
 import { SettingsPanel } from '../components/ChatSidebar/SettingsPanel';
 
-export function SettingsPage({ user }: { user: AuthUser }) {
+export function SettingsPage() {
+	const location = useLocation();
 	const accentTheme = useUiStore((state) => state.accent);
 	const theme = useUiStore((state) => state.theme);
 	const contrast = useUiStore((state) => state.contrast);
@@ -13,10 +14,14 @@ export function SettingsPage({ user }: { user: AuthUser }) {
 	const setContrast = useUiStore((state) => state.setContrast);
 	const setCompactMode = useUiStore((state) => state.setCompactMode);
 	const setAnimations = useUiStore((state) => state.setAnimations);
+	const params = new URLSearchParams(location.search);
+	const legacySection = params.get('section') ?? params.get('tab');
+	if (legacySection === 'account' || location.hash === '#account') {
+		return <Navigate to="/profile" replace state={location.state} />;
+	}
 
 	return (
 		<SettingsPanel
-			user={user}
 			accentTheme={accentTheme}
 			theme={theme}
 			contrast={contrast}

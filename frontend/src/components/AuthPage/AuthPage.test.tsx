@@ -22,7 +22,7 @@ function submitLogin() {
 describe('AuthPage', () => {
 	it('logs in with one email-or-login field and can reveal the password', async () => {
 		const onAuthenticated = vi.fn();
-		api.authenticate.mockResolvedValue({ id: 'user', login: 'poet', email: 'poet@example.com' });
+		api.authenticate.mockResolvedValue({ id: 'user', login: 'poet', email: 'poet@example.com', role: 'user' });
 		render(<AuthPage onAuthenticated={onAuthenticated} />);
 
 		fireEvent.change(screen.getByRole('textbox', { name: 'Email или логин' }), { target: { value: 'poet' } });

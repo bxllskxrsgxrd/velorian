@@ -29,10 +29,13 @@ const conversation = {
 	updatedAt: '',
 };
 
-function renderSidebar(isCollapsed = false) {
+function renderSidebar(isCollapsed = false, role: 'user' | 'admin' | 'owner' = 'user') {
 	const onRename = vi.fn();
 	const onDelete = vi.fn();
+	const onOpenProfile = vi.fn();
 	const onOpenSettings = vi.fn();
+	const onOpenAdmin = vi.fn();
+	const onLogout = vi.fn();
 
 	if (useUiStore.getState().isSidebarCollapsed !== isCollapsed) {
 		useUiStore.getState().toggleSidebarCollapsed();
@@ -40,19 +43,21 @@ function renderSidebar(isCollapsed = false) {
 
 	render(
 		<ChatSidebar
-			user={{ id: 'user', email: 'user@example.com', login: 'user' }}
+			user={{ id: 'user', email: 'user@example.com', login: 'user', role }}
 			activeConversationId="chat-1"
 			onSelect={vi.fn()}
 			onNew={vi.fn()}
 			onDelete={onDelete}
 			onRename={onRename}
-			onLogout={vi.fn()}
+			onLogout={onLogout}
 			onOpenKnowledge={vi.fn()}
+			onOpenProfile={onOpenProfile}
 			onOpenSettings={onOpenSettings}
+			onOpenAdmin={onOpenAdmin}
 		/>,
 	);
 
-	return { onRename, onDelete, onOpenSettings };
+	return { onRename, onDelete, onOpenProfile, onOpenSettings, onOpenAdmin, onLogout };
 }
 
 describe('ChatSidebar menus', () => {
@@ -104,8 +109,8 @@ describe('ChatSidebar menus', () => {
 		expect(onRename).toHaveBeenCalledWith(conversation, 'Новое название');
 	});
 
-	it('opens the settings route from the account menu', () => {
-		const { onOpenSettings } = renderSidebar();
+	it('opens profile and settings from the user account menu without admin access', () => {
+		const { onOpenProfile, onOpenSettings, onLogout } = renderSidebar();
 
 		fireEvent.click(
 			screen.getByRole('button', {
@@ -113,11 +118,20 @@ describe('ChatSidebar menus', () => {
 			}),
 		);
 
+		expect(screen.getByText('Личная учётная запись')).toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Профиль' })).toBeInTheDocument();
 		expect(screen.getByRole('button', { name: 'Настройки' })).toBeInTheDocument();
 
 		expect(screen.getByRole('button', { name: 'Корзина' })).toBeInTheDocument();
 
 		expect(screen.getByRole('button', { name: 'Выйти' })).toBeInTheDocument();
+		expect(screen.queryByRole('button', { name: 'Администрирование' })).not.toBeInTheDocument();
+		expect(screen.queryByText('Admin')).not.toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole('button', { name: 'Профиль' }));
+		expect(onOpenProfile).toHaveBeenCalledOnce();
+
+		fireEvent.click(screen.getByRole('button', { name: 'user' }));
 
 		fireEvent.click(
 			screen.getByRole('button', {
@@ -127,6 +141,23 @@ describe('ChatSidebar menus', () => {
 
 		expect(onOpenSettings).toHaveBeenCalledOnce();
 		expect(screen.queryByRole('dialog', { name: 'Общие' })).not.toBeInTheDocument();
+
+		fireEvent.click(screen.getByRole('button', { name: 'user' }));
+		fireEvent.click(screen.getByRole('button', { name: 'Выйти' }));
+		expect(onLogout).toHaveBeenCalledOnce();
+	});
+
+	it.each([
+		['admin', 'Admin'],
+		['owner', 'Owner'],
+	] as const)('shows administrative navigation and the %s role badge', (role, badge) => {
+		const { onOpenAdmin } = renderSidebar(false, role);
+
+		fireEvent.click(screen.getByRole('button', { name: 'user' }));
+		expect(screen.getByText(badge)).toBeInTheDocument();
+		fireEvent.click(screen.getByRole('button', { name: 'Администрирование' }));
+
+		expect(onOpenAdmin).toHaveBeenCalledOnce();
 	});
 
 	it('opens unified trash with chats and knowledge tabs', async () => {

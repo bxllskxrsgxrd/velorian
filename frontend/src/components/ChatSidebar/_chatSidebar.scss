@@ -478,6 +478,46 @@
 		box-shadow: var(--shadow-surface);
 	}
 
+	&__account-menu-header {
+		display: grid;
+		gap: 5px;
+		padding: 8px 10px 10px;
+	}
+
+	&__account-menu-header > strong {
+		overflow: hidden;
+		font-size: 14px;
+		white-space: nowrap;
+		text-overflow: ellipsis;
+	}
+
+	&__account-menu-header > div {
+		display: flex;
+		align-items: center;
+		justify-content: space-between;
+		gap: 10px;
+		color: var(--color-text-secondary);
+		font-size: 12px;
+	}
+
+	&__role-badge {
+		flex: 0 0 auto;
+		padding: 3px 7px;
+		border: 1px solid color-mix(in srgb, var(--color-accent) 36%, var(--color-border));
+		border-radius: 999px;
+		color: var(--color-accent);
+		background: var(--color-accent-soft);
+		font-size: 11px;
+		font-weight: 600;
+		line-height: 1;
+	}
+
+	&__account-menu-divider {
+		height: 1px;
+		margin: 5px 7px;
+		background: var(--color-border-subtle);
+	}
+
 	&__settings-panel {
 		width: 100%;
 		min-height: 100dvh;
@@ -985,7 +1025,7 @@
 		}
 
 		&__settings-sidebar nav {
-			grid-template-columns: repeat(3, minmax(0, 1fr));
+			grid-template-columns: repeat(auto-fit, minmax(120px, 1fr));
 			gap: 6px;
 		}
 

@@ -22,6 +22,7 @@ import {
 	UserIcon,
 	InfoIcon,
 	CrossIcon,
+	LockIcon,
 } from '../icons/AppIcons';
 import { VelorianIcon } from '../icons/VelorianIcon';
 import { ModalDialog } from '../ui/ModalDialog/ModalDialog';
@@ -96,7 +97,9 @@ type ChatSidebarProps = {
 	onRename: (conversation: ConversationSummary, title: string) => void;
 	onLogout: () => void;
 	onOpenKnowledge: () => void;
+	onOpenProfile: () => void;
 	onOpenSettings: () => void;
+	onOpenAdmin: () => void;
 	activeSection?: 'chat' | 'knowledge';
 };
 
@@ -145,6 +148,8 @@ export function ChatSidebar(props: ChatSidebarProps) {
 			? allConversations.filter((item) => item.title.toLocaleLowerCase('ru').includes(query))
 			: allConversations;
 	}, [allConversations, debouncedSearch]);
+	const administrativeAccess = props.user.role === 'admin' || props.user.role === 'owner';
+	const roleBadge = props.user.role === 'owner' ? 'Owner' : props.user.role === 'admin' ? 'Admin' : null;
 
 	useEffect(() => {
 		function handleOutsideClick(event: MouseEvent) {
@@ -450,6 +455,24 @@ export function ChatSidebar(props: ChatSidebarProps) {
 				<div className="chat-sidebar__account-wrap">
 					{accountOpen && (
 						<div className="chat-sidebar__account-menu">
+							<div className="chat-sidebar__account-menu-header">
+								<strong>{props.user.login}</strong>
+								<div>
+									<span>Личная учётная запись</span>
+									{roleBadge && <span className="chat-sidebar__role-badge">{roleBadge}</span>}
+								</div>
+							</div>
+							<div className="chat-sidebar__account-menu-divider" />
+							<button
+								type="button"
+								onClick={() => {
+									setAccountOpen(false);
+									props.onOpenProfile();
+								}}
+							>
+								<UserIcon />
+								<span>Профиль</span>
+							</button>
 							<button
 								className="chat-sidebar__settings-toggle"
 								type="button"
@@ -465,6 +488,22 @@ export function ChatSidebar(props: ChatSidebarProps) {
 								<TrashIcon />
 								<span>Корзина</span>
 							</button>
+							{administrativeAccess && (
+								<>
+									<div className="chat-sidebar__account-menu-divider" />
+									<button
+										type="button"
+										onClick={() => {
+											setAccountOpen(false);
+											props.onOpenAdmin();
+										}}
+									>
+										<LockIcon />
+										<span>Администрирование</span>
+									</button>
+								</>
+							)}
+							<div className="chat-sidebar__account-menu-divider" />
 							<button type="button" onClick={props.onLogout}>
 								<LogoutIcon />
 								<span>Выйти</span>
@@ -482,7 +521,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 							<UserIcon />
 						</span>
 						<span className="chat-sidebar__account-copy">
-							<strong>{props.user.email.split('@')[0]}</strong>
+							<strong>{props.user.login}</strong>
 						</span>
 					</button>
 				</div>

@@ -77,6 +77,13 @@ export function AppLayout({ user, onLogout }: { user: AuthUser; onLogout: () => 
 		});
 	}
 
+	function openStandaloneSection(path: '/profile' | '/settings' | '/admin') {
+		navigate(path, {
+			state: { from: `${location.pathname}${location.search}${location.hash}` },
+		});
+		setSidebarOpen(false);
+	}
+
 	async function handleDelete(id: string) {
 		await deleteConversation(id);
 		const remaining = conversations.filter((item) => item.id !== id);
@@ -136,11 +143,9 @@ export function AppLayout({ user, onLogout }: { user: AuthUser; onLogout: () => 
 					navigate('/knowledge');
 					setSidebarOpen(false);
 				}}
-				onOpenSettings={() =>
-					navigate('/settings', {
-						state: { from: `${location.pathname}${location.search}${location.hash}` },
-					})
-				}
+				onOpenProfile={() => openStandaloneSection('/profile')}
+				onOpenSettings={() => openStandaloneSection('/settings')}
+				onOpenAdmin={() => openStandaloneSection('/admin')}
 			/>
 			<Outlet context={{ onExport: handleExport }} />
 			{sidebarOpen && (

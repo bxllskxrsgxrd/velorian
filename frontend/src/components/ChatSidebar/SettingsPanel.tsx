@@ -1,27 +1,21 @@
-import { useEffect, useState, type ReactNode } from 'react';
-import { useBlocker, useLocation, useNavigate } from 'react-router-dom';
+import { useState } from 'react';
 import { ACCENT_THEMES, ACCENT_THEME_LABELS, type AccentTheme } from '../../theme/accentTheme';
 import type { ContrastPreference, ThemePreference } from '../../theme/appearanceSettings';
-import type { AuthUser } from '../../types/chat';
 import {
-	CameraIcon,
-	ChevronIcon,
 	DownloadIcon,
-	LockIcon,
-	LogoutIcon,
 	PaletteIcon,
 	SettingsIcon,
 	TrashIcon,
-	UserIcon,
 } from '../icons/AppIcons';
 import { CustomSelect, type CustomSelectOption } from '../ui/CustomSelect/CustomSelect';
-import { ModalDialog } from '../ui/ModalDialog/ModalDialog';
+import { SettingRow, SettingsToggle } from './SettingsControls';
+import { SettingsShell } from './SettingsShell';
+import { UnsavedChangesGuard } from './UnsavedChangesGuard';
 import './_chatSidebar.scss';
 
-type SettingsSection = 'general' | 'appearance' | 'account';
+type SettingsSection = 'general' | 'appearance';
 
 type SettingsPanelProps = {
-	user: AuthUser;
 	accentTheme: AccentTheme;
 	theme: ThemePreference;
 	contrast: ContrastPreference;
@@ -34,12 +28,6 @@ type SettingsPanelProps = {
 	onAnimationsChange: (animations: boolean) => void;
 };
 
-type SettingRowProps = {
-	title: string;
-	description: string;
-	children: ReactNode;
-};
-
 const SECTION_COPY: Record<SettingsSection, { title: string; description: string }> = {
 	general: {
 		title: 'Общие',
@@ -48,10 +36,6 @@ const SECTION_COPY: Record<SettingsSection, { title: string; description: string
 	appearance: {
 		title: 'Внешний вид',
 		description: 'Настройте оформление и визуальное поведение интерфейса',
-	},
-	account: {
-		title: 'Учетная запись',
-		description: 'Управляйте своим профилем и настройками безопасности',
 	},
 };
 
@@ -95,35 +79,7 @@ const ACCENT_OPTIONS: CustomSelectOption[] = ACCENT_THEMES.map((theme) => ({
 	),
 }));
 
-function Toggle({ checked, onChange, label }: { checked: boolean; onChange: (value: boolean) => void; label: string }) {
-	return (
-		<button
-			className="chat-sidebar__settings-switch"
-			type="button"
-			role="switch"
-			aria-checked={checked}
-			aria-label={label}
-			onClick={() => onChange(!checked)}
-		>
-			<span />
-		</button>
-	);
-}
-
-function SettingRow({ title, description, children }: SettingRowProps) {
-	return (
-		<div className="chat-sidebar__settings-row">
-			<div className="chat-sidebar__settings-row-copy">
-				<strong>{title}</strong>
-				<p>{description}</p>
-			</div>
-			<div className="chat-sidebar__settings-control">{children}</div>
-		</div>
-	);
-}
-
 export function SettingsPanel({
-	user,
 	accentTheme,
 	theme,
 	contrast,
@@ -135,8 +91,6 @@ export function SettingsPanel({
 	onCompactModeChange,
 	onAnimationsChange,
 }: SettingsPanelProps) {
-	const navigate = useNavigate();
-	const location = useLocation();
 	const [section, setSection] = useState<SettingsSection>('general');
 	const [language, setLanguage] = useState('auto');
 	const [dateFormat, setDateFormat] = useState('dmy');
@@ -144,47 +98,24 @@ export function SettingsPanel({
 	const [openNewChat, setOpenNewChat] = useState(true);
 	const [sendOnEnter, setSendOnEnter] = useState(true);
 	const [showHints, setShowHints] = useState(false);
-	const [login, setLogin] = useState(user.email.split('@')[0]);
-	const [backupEmail, setBackupEmail] = useState('');
 	const copy = SECTION_COPY[section];
-	const returnPath = typeof location.state?.from === 'string' ? location.state.from : null;
 	const isDirty =
 		language !== 'auto' ||
 		dateFormat !== 'dmy' ||
 		timezone !== 'auto' ||
 		!openNewChat ||
 		!sendOnEnter ||
-		showHints ||
-		login !== user.email.split('@')[0] ||
-		backupEmail !== '';
-	const blocker = useBlocker(() => isDirty);
-
-	useEffect(() => {
-		function handleBeforeUnload(event: BeforeUnloadEvent) {
-			if (!isDirty) return;
-			event.preventDefault();
-			event.returnValue = '';
-		}
-
-		window.addEventListener('beforeunload', handleBeforeUnload);
-		return () => window.removeEventListener('beforeunload', handleBeforeUnload);
-	}, [isDirty]);
-
-	function handleBack() {
-		if (returnPath) navigate(returnPath, { replace: true });
-		else navigate('/chat/new', { replace: true });
-	}
+		showHints;
 
 	return (
 		<>
-			<main className="chat-sidebar__settings-panel" aria-labelledby="chat-sidebar-settings-title">
-				<aside className="chat-sidebar__settings-sidebar">
-					<button className="chat-sidebar__settings-back" type="button" onClick={handleBack}>
-						<ChevronIcon aria-hidden="true" />
-						<span>Вернуться в приложение</span>
-					</button>
-					<h2>Настройки</h2>
-					<nav aria-label="Разделы настроек">
+			<SettingsShell
+				sidebarTitle="Настройки"
+				title={copy.title}
+				description={copy.description}
+				titleId="chat-sidebar-settings-title"
+				navigation={(
+					<>
 						<button
 							className={section === 'general' ? 'chat-sidebar__settings-nav-item--active' : undefined}
 							type="button"
@@ -203,27 +134,9 @@ export function SettingsPanel({
 							<PaletteIcon aria-hidden="true" />
 							<span>Внешний вид</span>
 						</button>
-						<button
-							className={section === 'account' ? 'chat-sidebar__settings-nav-item--active' : undefined}
-							type="button"
-							aria-current={section === 'account' ? 'page' : undefined}
-							onClick={() => setSection('account')}
-						>
-							<UserIcon aria-hidden="true" />
-							<span>Учетная запись</span>
-						</button>
-					</nav>
-				</aside>
-
-				<section className="chat-sidebar__settings-workspace">
-					<header className="chat-sidebar__settings-header">
-						<div>
-							<h2 id="chat-sidebar-settings-title">{copy.title}</h2>
-							<p>{copy.description}</p>
-						</div>
-					</header>
-
-					<div className="chat-sidebar__settings-content">
+					</>
+				)}
+			>
 						{section === 'general' && (
 							<div className="chat-sidebar__settings-sections">
 								<section className="chat-sidebar__settings-group">
@@ -266,19 +179,19 @@ export function SettingsPanel({
 										title="Открывать новый чат при запуске"
 										description="Автоматически создавать новый чат при открытии Velorian"
 									>
-										<Toggle checked={openNewChat} onChange={setOpenNewChat} label="Открывать новый чат при запуске" />
+										<SettingsToggle checked={openNewChat} onChange={setOpenNewChat} label="Открывать новый чат при запуске" />
 									</SettingRow>
 									<SettingRow
 										title="Отправка сообщения по Enter"
 										description="Отправлять сообщение в чате при нажатии клавиши Enter (вместо переноса строки)"
 									>
-										<Toggle checked={sendOnEnter} onChange={setSendOnEnter} label="Отправка сообщения по Enter" />
+										<SettingsToggle checked={sendOnEnter} onChange={setSendOnEnter} label="Отправка сообщения по Enter" />
 									</SettingRow>
 									<SettingRow
 										title="Показывать подсказки интерфейса"
 										description="Отображать полезные подсказки и советы при использовании приложения"
 									>
-										<Toggle checked={showHints} onChange={setShowHints} label="Показывать подсказки интерфейса" />
+										<SettingsToggle checked={showHints} onChange={setShowHints} label="Показывать подсказки интерфейса" />
 									</SettingRow>
 								</section>
 
@@ -348,129 +261,18 @@ export function SettingsPanel({
 									title="Компактный режим интерфейса"
 									description="Уменьшает вертикальные отступы и делает интерфейс более плотным"
 								>
-									<Toggle checked={compactMode} onChange={onCompactModeChange} label="Компактный режим интерфейса" />
+									<SettingsToggle checked={compactMode} onChange={onCompactModeChange} label="Компактный режим интерфейса" />
 								</SettingRow>
 								<SettingRow
 									title="Анимации интерфейса"
 									description="Показывать плавные переходы и анимации в интерфейсе"
 								>
-									<Toggle checked={animations} onChange={onAnimationsChange} label="Анимации интерфейса" />
+									<SettingsToggle checked={animations} onChange={onAnimationsChange} label="Анимации интерфейса" />
 								</SettingRow>
 							</div>
 						)}
-
-						{section === 'account' && (
-							<div className="chat-sidebar__settings-account">
-								<section className="chat-sidebar__settings-group">
-									<h3>Профиль</h3>
-									<div className="chat-sidebar__settings-photo">
-										<div className="chat-sidebar__settings-photo-avatar">
-											<UserIcon aria-hidden="true" />
-											<button type="button" disabled aria-label="Изменить фото профиля">
-												<CameraIcon aria-hidden="true" />
-											</button>
-										</div>
-										<div>
-											<strong>Фото профиля</strong>
-											<p>JPG, PNG или WEBP. Максимальный размер 5 МБ</p>
-											<div className="chat-sidebar__settings-photo-actions">
-												<button className="chat-sidebar__settings-button" type="button" disabled>
-													<DownloadIcon aria-hidden="true" />
-													Загрузить фото
-												</button>
-												<button
-													className="chat-sidebar__settings-button chat-sidebar__settings-button--danger"
-													type="button"
-													disabled
-												>
-													<TrashIcon aria-hidden="true" />
-													Удалить
-												</button>
-											</div>
-										</div>
-									</div>
-
-									<label className="chat-sidebar__settings-input-row">
-										<span>Логин</span>
-										<div>
-											<input value={login} onChange={(event) => setLogin(event.target.value)} autoComplete="username" />
-											<small>Используется для отображения в интерфейсе</small>
-										</div>
-									</label>
-									<label className="chat-sidebar__settings-input-row">
-										<span>Email (основной)</span>
-										<div>
-											<span className="chat-sidebar__settings-locked-input">
-												<input value={user.email} disabled />
-												<LockIcon aria-hidden="true" />
-											</span>
-											<small>Этот email используется для входа в аккаунт и не может быть изменён</small>
-										</div>
-									</label>
-									<label className="chat-sidebar__settings-input-row">
-										<span>Резервная почта</span>
-										<div>
-											<input
-												type="email"
-												value={backupEmail}
-												placeholder="example@mail.com"
-												onChange={(event) => setBackupEmail(event.target.value)}
-												autoComplete="email"
-											/>
-											<small>Используется для восстановления доступа к аккаунту</small>
-										</div>
-									</label>
-									<div className="chat-sidebar__settings-save">
-										<button
-											className="chat-sidebar__settings-button chat-sidebar__settings-button--primary"
-											type="button"
-											disabled
-										>
-											Сохранить
-										</button>
-									</div>
-								</section>
-
-								<section className="chat-sidebar__settings-group chat-sidebar__settings-security">
-									<h3>Безопасность</h3>
-									<p className="chat-sidebar__settings-group-description">Управляйте паролем и активными сеансами</p>
-									<SettingRow title="Пароль" description="Последнее изменение: данные недоступны">
-										<button className="chat-sidebar__settings-button" type="button" disabled>
-											Изменить
-										</button>
-									</SettingRow>
-									<SettingRow title="Активные сеансы" description="Количество устройств недоступно">
-										<button className="chat-sidebar__settings-button" type="button" disabled>
-											Управление
-										</button>
-									</SettingRow>
-									<button
-										className="chat-sidebar__settings-button chat-sidebar__settings-button--danger chat-sidebar__settings-logout-all"
-										type="button"
-										disabled
-									>
-										<LogoutIcon aria-hidden="true" />
-										Выйти на всех устройствах
-									</button>
-									<p className="chat-sidebar__settings-session-note">Текущий сеанс останется активным</p>
-								</section>
-							</div>
-						)}
-					</div>
-				</section>
-			</main>
-			{blocker.state === 'blocked' && (
-				<ModalDialog
-					title="Есть несохранённые изменения"
-					confirmLabel="Выйти"
-					closeLabel="Остаться"
-					danger
-					onClose={() => blocker.reset()}
-					onConfirm={() => blocker.proceed()}
-				>
-					<p>Несохранённые изменения будут потеряны</p>
-				</ModalDialog>
-			)}
+			</SettingsShell>
+			<UnsavedChangesGuard when={isDirty} />
 		</>
 	);
 }

@@ -131,6 +131,7 @@ export type AuthUser = {
 	id: string;
 	email: string;
 	login: string;
+	role: 'user' | 'admin' | 'owner';
 };
 
 export type KnowledgeItem = {

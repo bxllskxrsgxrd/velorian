@@ -9,6 +9,9 @@ import { configureAttachmentLimits } from './constants/attachmentLimits';
 import { useAuthStore } from './stores/authStore';
 import { SettingsPage } from './pages/SettingsPage';
 import { useModelStore } from './stores/modelStore';
+import { ProfilePage } from './pages/ProfilePage';
+import { AdminPage } from './pages/AdminPage';
+import { RequireAdmin } from './components/RoleGuard/RequireAdmin';
 
 const KnowledgePage = lazy(() => import('./pages/KnowledgePage'));
 const KnowledgeEditorPage = lazy(() => import('./pages/KnowledgeEditorPage').then((module) => ({ default: module.KnowledgeEditorPage })));
@@ -65,7 +68,10 @@ function App() {
 			<Route path="/knowledge/approaches/:approachId" element={<ApproachEditorPage />} />
 			<Route path="/knowledge/:knowledgeId" element={<KnowledgeEditorPage />} />
 		</Route>
-		<Route path="/settings" element={<SettingsPage user={user} />} />
+		<Route path="/profile" element={<ProfilePage user={user} />} />
+		<Route path="/settings" element={<SettingsPage />} />
+		<Route path="/settings/account" element={<Navigate to="/profile" replace state={location.state} />} />
+		<Route path="/admin" element={<RequireAdmin user={user}><AdminPage /></RequireAdmin>} />
 		<Route path="*" element={<Navigate to="/chat/new" replace />} />
 	</Routes></Suspense>;
 }

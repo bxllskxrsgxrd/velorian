@@ -74,8 +74,8 @@ export async function installMockApi(page: Page, options: Options = {}) {
 			],
 			defaultAiModelId: 'gpt-oss-120b',
 		});
-		if (path === '/api/auth/me') return authenticated ? json(route, { user: { id: 'u1', email: 'e2e@example.com' } }) : json(route, { error: { code: 'AUTH_REQUIRED', message: 'Войдите', request_id: 'auth' } }, 401);
-		if (path === '/api/auth/login') { authenticated = true; return json(route, { user: { id: 'u1', email: 'e2e@example.com' }, csrfToken: 'csrf-login' }); }
+		if (path === '/api/auth/me') return authenticated ? json(route, { user: { id: 'u1', email: 'e2e@example.com', login: 'e2e', role: 'user' } }) : json(route, { error: { code: 'AUTH_REQUIRED', message: 'Войдите', request_id: 'auth' } }, 401);
+		if (path === '/api/auth/login') { authenticated = true; return json(route, { user: { id: 'u1', email: 'e2e@example.com', login: 'e2e', role: 'user' }, csrfToken: 'csrf-login' }); }
 		if (path === '/api/auth/logout') { authenticated = false; return json(route, {}); }
 		if (path === '/api/health') return json(route, { status: 'ok' });
 		if (path === '/api/conversations' && method === 'GET') {
