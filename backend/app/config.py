@@ -36,6 +36,7 @@ class Settings:
 	groq_qwen_model: str = os.getenv("GROQ_QWEN_MODEL", "qwen/qwen3.8-27b")
 	groq_vision_model: str = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.8-27b")
 	groq_debug_errors: bool = _as_bool(os.getenv("GROQ_DEBUG_ERRORS"), False)
+	summary_debug_metrics: bool = _as_bool(os.getenv("SUMMARY_DEBUG_METRICS"), False)
 	gemini_api_key: str | None = os.getenv("GEMINI_API_KEY")
 	gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 	default_chat_model: str = os.getenv("DEFAULT_CHAT_MODEL", "gpt-oss-120b")

@@ -1,4 +1,5 @@
 import json
+import re
 from dataclasses import replace
 from types import SimpleNamespace
 
@@ -67,13 +68,16 @@ class BranchSummaryCompletions(FakeCompletions):
 	def __init__(self):
 		self.stream_calls: list[dict] = []
 		self.summary_calls: list[dict] = []
+		self.call_order: list[str] = []
 
 	async def create(self, **kwargs):
 		if kwargs.get("stream", False):
+			self.call_order.append("chat")
 			self.stream_calls.append(kwargs)
 			return await super().create(**kwargs)
 		if "response_format" in kwargs:
 			return await super().create(**kwargs)
+		self.call_order.append("summary")
 		self.summary_calls.append(kwargs)
 		return SimpleNamespace(
 			choices=[SimpleNamespace(
@@ -749,12 +753,21 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 		f"/api/conversations/{conversation_id}/stream",
 		data={"prompt": "ACTIVE_FRESH", "edit_message_id": sibling_b1["id"]},
 	)
-	monkeypatch.setattr(main_module, "settings", replace(main_module.settings, history_token_budget=15))
+	monkeypatch.setattr(main_module, "settings", replace(
+		main_module.settings,
+		app_env="development",
+		history_token_budget=15,
+		summary_debug_metrics=True,
+	))
 
-	with caplog.at_level("INFO", logger="uvicorn.error"):
-		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "CURRENT"})
+	with caplog.at_level("INFO"):
+		first_response = authenticated_client.post(
+			f"/api/conversations/{conversation_id}/stream", data={"prompt": "CURRENT"},
+		)
+	first_meta = next(json.loads(line) for line in first_response.text.splitlines() if '"type": "meta"' in line)
 
 	assert len(completions.summary_calls) == 1
+	assert completions.call_order[-2:] == ["summary", "chat"]
 	summary_input = completions.summary_calls[0]["messages"][1]["content"]
 	assert "OLD_ACTIVE_MESSAGE_" in summary_input
 	assert "SIBLING_B1" not in summary_input
@@ -765,7 +778,21 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 	assert [message["content"] for message in main_context if message["role"] == "user"] == [
 		"ACTIVE_FRESH", "CURRENT",
 	]
-	assert all("SUMMARY_OLD_ACTIVE" not in message["content"] for message in main_context)
+	assert {
+		"role": "system",
+		"content": main_module.BRANCH_SUMMARY_CONTEXT_PREFIX + "SUMMARY_OLD_ACTIVE",
+	} in main_context
+	final_context_log = next(
+		record.getMessage() for record in reversed(caplog.records)
+		if record.getMessage().startswith("AI final context ")
+	)
+	assert "summary_present=true" in final_context_log
+	final_summary_tokens = int(
+		next(part for part in final_context_log.split() if part.startswith("summary_tokens=")).split("=", 1)[1]
+	)
+	assert final_summary_tokens == main_module.estimate_tokens(
+		main_module.BRANCH_SUMMARY_CONTEXT_PREFIX + "SUMMARY_OLD_ACTIVE"
+	)
 
 	with SessionLocal() as db:
 		summary = db.scalar(select(BranchSummary).where(BranchSummary.conversation_id == conversation_id))
@@ -779,8 +806,11 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 	assert "task_type=summary" in usage_logs[0]
 	assert "prompt_version=branch_summary:v3" in usage_logs[0]
 
-	with caplog.at_level("INFO", logger="uvicorn.error"):
-		authenticated_client.post(f"/api/conversations/{conversation_id}/stream", data={"prompt": "NEXT"})
+	with caplog.at_level("INFO"):
+		second_response = authenticated_client.post(
+			f"/api/conversations/{conversation_id}/stream", data={"prompt": "NEXT"},
+		)
+	second_meta = next(json.loads(line) for line in second_response.text.splitlines() if '"type": "meta"' in line)
 
 	assert len(completions.summary_calls) == 2
 	incremental_input = completions.summary_calls[1]["messages"][1]["content"]
@@ -795,7 +825,7 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 		"CURRENT", "NEXT",
 	]
 	with SessionLocal() as db:
-		assert len(list(db.scalars(
+		summaries = list(db.scalars(
 			select(BranchSummary).where(BranchSummary.conversation_id == conversation_id)
 		))
 		assert len(summaries) == 2
