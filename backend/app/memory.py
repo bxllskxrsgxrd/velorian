@@ -62,9 +62,17 @@ _GLOBAL_PREFERENCE_NAMES = {
 	"answer_length",
 	"format",
 	"language",
+	"report_format",
+	"report_style",
 	"response_style",
 	"tone",
 	"verbosity",
+}
+
+_PREFERENCE_NAME_ALIASES = {
+	"answer_format": "format",
+	"report_format": "format",
+	"report_style": "response_style",
 }
 
 
@@ -148,6 +156,8 @@ def _upsert_named_memory(
 	normalized_name = name.strip()
 	if not normalized_name:
 		raise ValueError("Memory name must not be empty")
+	if category == "preferences":
+		normalized_name = _PREFERENCE_NAME_ALIASES.get(normalized_name.casefold(), normalized_name)
 	item = db.scalar(select(StructuredMemoryItem).where(
 		StructuredMemoryItem.user_id == user_id,
 		StructuredMemoryItem.category == category,
