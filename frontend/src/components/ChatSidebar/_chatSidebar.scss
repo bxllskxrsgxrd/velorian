@@ -500,18 +500,6 @@
 		font-size: 12px;
 	}
 
-	&__role-badge {
-		flex: 0 0 auto;
-		padding: 3px 7px;
-		border: 1px solid color-mix(in srgb, var(--color-accent) 36%, var(--color-border));
-		border-radius: 999px;
-		color: var(--color-accent);
-		background: var(--color-accent-soft);
-		font-size: 11px;
-		font-weight: 600;
-		line-height: 1;
-	}
-
 	&__account-menu-divider {
 		height: 1px;
 		margin: 5px 7px;

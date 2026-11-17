@@ -26,6 +26,7 @@ import {
 } from '../icons/AppIcons';
 import { VelorianIcon } from '../icons/VelorianIcon';
 import { ModalDialog } from '../ui/ModalDialog/ModalDialog';
+import { RoleBadge } from '../RoleBadge/RoleBadge';
 import { Checkbox } from '../ui/Checkbox/Checkbox';
 import './_chatSidebar.scss';
 import { SidebarButton } from '../ui/SidebarButton/SidebarButton';
@@ -149,7 +150,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 			: allConversations;
 	}, [allConversations, debouncedSearch]);
 	const administrativeAccess = props.user.role === 'admin' || props.user.role === 'owner';
-	const roleBadge = props.user.role === 'owner' ? 'Owner' : props.user.role === 'admin' ? 'Admin' : null;
+	const roleBadge = props.user.role === 'owner' || props.user.role === 'admin' ? props.user.role : null;
 
 	useEffect(() => {
 		function handleOutsideClick(event: MouseEvent) {
@@ -459,7 +460,7 @@ export function ChatSidebar(props: ChatSidebarProps) {
 								<strong>{props.user.login}</strong>
 								<div>
 									<span>Личная учётная запись</span>
-									{roleBadge && <span className="chat-sidebar__role-badge">{roleBadge}</span>}
+									{roleBadge && <RoleBadge role={roleBadge} />}
 								</div>
 							</div>
 							<div className="chat-sidebar__account-menu-divider" />

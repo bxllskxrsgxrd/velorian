@@ -46,6 +46,40 @@ class User(Base):
 	structured_memory_items: Mapped[list["StructuredMemoryItem"]] = relationship(back_populates="user", cascade="all, delete-orphan")
 
 
+class RoleChangeAudit(Base):
+	__tablename__ = "role_change_audits"
+	__table_args__ = (
+		CheckConstraint("old_role IN ('user', 'admin', 'owner')", name="ck_role_change_audits_old_role"),
+		CheckConstraint("new_role IN ('user', 'admin', 'owner')", name="ck_role_change_audits_new_role"),
+		Index("ix_role_change_audits_actor_created", "actor_user_id", "created_at"),
+		Index("ix_role_change_audits_target_created", "target_user_id", "created_at"),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+	actor_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+	target_user_id: Mapped[str] = mapped_column(ForeignKey("users.id"))
+	old_role: Mapped[UserRole] = mapped_column(
+		SQLAlchemyEnum(
+			UserRole,
+			name="role_change_audit_old_role",
+			native_enum=False,
+			create_constraint=False,
+			values_callable=lambda roles: [role.value for role in roles],
+		)
+	)
+	new_role: Mapped[UserRole] = mapped_column(
+		SQLAlchemyEnum(
+			UserRole,
+			name="role_change_audit_new_role",
+			native_enum=False,
+			create_constraint=False,
+			values_callable=lambda roles: [role.value for role in roles],
+		)
+	)
+	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+	correlation_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+
+
 class Conversation(Base):
 	__tablename__ = "conversations"
 

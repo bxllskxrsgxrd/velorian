@@ -12,6 +12,7 @@ import { useModelStore } from './stores/modelStore';
 import { ProfilePage } from './pages/ProfilePage';
 import { AdminPage } from './pages/AdminPage';
 import { RequireAdmin } from './components/RoleGuard/RequireAdmin';
+import { AdminUsersPage } from './pages/AdminUsersPage';
 
 const KnowledgePage = lazy(() => import('./pages/KnowledgePage'));
 const KnowledgeEditorPage = lazy(() => import('./pages/KnowledgeEditorPage').then((module) => ({ default: module.KnowledgeEditorPage })));
@@ -72,6 +73,7 @@ function App() {
 		<Route path="/settings" element={<SettingsPage />} />
 		<Route path="/settings/account" element={<Navigate to="/profile" replace state={location.state} />} />
 		<Route path="/admin" element={<RequireAdmin user={user}><AdminPage /></RequireAdmin>} />
+		<Route path="/admin/users" element={<RequireAdmin user={user}><AdminUsersPage currentUser={user} /></RequireAdmin>} />
 		<Route path="*" element={<Navigate to="/chat/new" replace />} />
 	</Routes></Suspense>;
 }

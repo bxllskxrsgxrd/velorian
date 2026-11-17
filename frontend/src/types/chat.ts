@@ -127,11 +127,25 @@ export type Conversation = ConversationSummary & {
 	messages: ChatMessage[];
 };
 
+export type UserRole = 'user' | 'admin' | 'owner';
+
 export type AuthUser = {
 	id: string;
 	email: string;
 	login: string;
-	role: 'user' | 'admin' | 'owner';
+	role: UserRole;
+};
+
+export type AdminUser = AuthUser & {
+	createdAt: string;
+};
+
+export type AdminUsersResult = {
+	users: AdminUser[];
+	page: number;
+	pageSize: number;
+	total: number;
+	totalPages: number;
 };
 
 export type KnowledgeItem = {

@@ -1,6 +1,6 @@
 from sqlalchemy import create_engine, inspect, text
 
-from app.migrations import _add_user_logins, _add_user_roles
+from app.migrations import _add_user_logins, _add_user_roles, _create_role_change_audits
 
 
 def test_add_user_logins_backfills_unique_values_for_existing_accounts(tmp_path):
@@ -55,3 +55,20 @@ def test_add_user_roles_preserves_existing_accounts_and_related_data(tmp_path):
 	assert user == ("legacy@example.com", "legacy", "preserved-hash", "user")
 	assert conversation == ("legacy", "Preserved chat")
 	assert any(index["name"] == "uq_users_single_owner" for index in inspect(engine).get_indexes("users"))
+
+
+def test_create_role_change_audits_is_idempotent(tmp_path):
+	engine = create_engine(f"sqlite:///{tmp_path / 'role-audits.db'}")
+	with engine.begin() as connection:
+		connection.execute(text(
+			"CREATE TABLE users (id VARCHAR(36) PRIMARY KEY, email VARCHAR(320) NOT NULL, "
+			"login VARCHAR(80) NOT NULL, password_hash VARCHAR(255) NOT NULL, "
+			"role VARCHAR(16) NOT NULL, created_at DATETIME NOT NULL)"
+		))
+		_create_role_change_audits(connection)
+		_create_role_change_audits(connection)
+
+	columns = {column["name"] for column in inspect(engine).get_columns("role_change_audits")}
+	assert columns == {
+		"id", "actor_user_id", "target_user_id", "old_role", "new_role", "created_at", "correlation_id",
+	}

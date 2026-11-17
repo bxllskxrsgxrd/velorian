@@ -28,8 +28,9 @@ from sqlalchemy import desc, or_, select, text
 from sqlalchemy.exc import IntegrityError, SQLAlchemyError
 from sqlalchemy.orm import Session, selectinload
 
-from .auth import COOKIE_NAME, create_session_token, get_current_user, hash_password, normalize_email, normalize_login, verify_password
+from .admin_users import router as admin_users_router
 from .approaches import router as approaches_router
+from .auth import COOKIE_NAME, create_session_token, get_current_user, hash_password, normalize_email, normalize_login, verify_password
 from .config import settings
 from .csrf import CSRF_COOKIE_NAME, issue_csrf_token, verify_csrf
 from .database import SessionLocal, engine, get_db, init_database
@@ -2066,6 +2067,7 @@ async def lifespan(_app: FastAPI):
 
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
+app.include_router(admin_users_router)
 app.include_router(ratings_router)
 app.include_router(knowledge_router)
 app.include_router(approaches_router)

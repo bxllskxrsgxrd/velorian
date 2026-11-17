@@ -216,6 +216,12 @@ def _create_structured_memory(connection: Connection) -> None:
 	Base.metadata.tables["structured_memory_items"].create(bind=connection, checkfirst=True)
 
 
+def _create_role_change_audits(connection: Connection) -> None:
+	from .database import Base
+
+	Base.metadata.tables["role_change_audits"].create(bind=connection, checkfirst=True)
+
+
 MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260825_01_ratings_and_knowledge", _create_ratings_and_knowledge),
 	("20260825_02_storage_keys", _add_storage_keys),
@@ -233,6 +239,7 @@ MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20261007_01_structured_memory", _create_structured_memory),
 	("20261113_01_message_model_id", _add_message_model_id),
 	("20261117_01_user_roles", _add_user_roles),
+	("20261117_02_role_change_audits", _create_role_change_audits),
 )
 
 
