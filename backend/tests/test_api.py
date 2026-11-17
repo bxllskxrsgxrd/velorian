@@ -804,7 +804,7 @@ def test_branch_summary_contains_only_evicted_active_history(authenticated_clien
 	usage_logs = [record.getMessage() for record in caplog.records if "purpose=branch_summary" in record.getMessage()]
 	assert len(usage_logs) == 1
 	assert "task_type=summary" in usage_logs[0]
-	assert "prompt_version=branch_summary:v3" in usage_logs[0]
+	assert "prompt_version=branch_summary:v4" in usage_logs[0]
 
 	with caplog.at_level("INFO"):
 		second_response = authenticated_client.post(
@@ -938,6 +938,11 @@ def test_branch_summary_metrics_follow_server_flags_and_log_completion_details(m
 		"previous_summary_tokens": previous_tokens,
 		"new_summary_tokens": new_tokens,
 		"summary_size_delta_tokens": new_tokens - previous_tokens,
+		"previous_summary_chars": len(existing_summary.summary_text),
+		"new_summary_chars": len("summary"),
+		"summary_growth_percent": -56.25,
+		"summary_compression_ratio": 0.2333,
+		"summary_growth_warning": False,
 		"excluded_message_count": 1,
 		"excluded_message_tokens": main_module.estimate_tokens(message.content),
 		"summary_input_tokens": 10,
@@ -973,6 +978,11 @@ def test_branch_summary_metrics_follow_server_flags_and_log_completion_details(m
 	assert failed_metric["summary_input_tokens"] is None
 	assert failed_metric["summary_output_tokens"] is None
 	assert failed_metric["finish_reason"] is None
+	assert failed_metric["previous_summary_chars"] == 0
+	assert failed_metric["new_summary_chars"] is None
+	assert failed_metric["summary_growth_percent"] is None
+	assert failed_metric["summary_compression_ratio"] is None
+	assert not failed_metric["summary_growth_warning"]
 
 
 def test_branch_summary_uses_dedicated_output_budget_and_compact_prompt(monkeypatch):
@@ -995,10 +1005,126 @@ def test_branch_summary_uses_dedicated_output_budget_and_compact_prompt(monkeypa
 	assert main_module.settings.max_output_tokens == 8192
 	assert completions.calls[0]["max_completion_tokens"] == 1024
 	prompt = completions.calls[0]["messages"][0]["content"]
-	assert "500-700 output tokens" in prompt
-	assert "Compress semantically; never truncate mechanically" in prompt
-	assert "Preserve chronology, exact facts, decisions, constraints, identifiers, important changes" in prompt
+	assert main_module.BRANCH_SUMMARY_PROMPT_VERSION == "branch_summary:v4"
+	assert "Rewrite one complete, current working summary" in prompt
+	assert "Replace the old summary; do not append" in prompt
+	assert "Target 500-700 output tokens" in prompt
+	assert "Merge repeated facts and semantically equivalent statements" in prompt
+	assert "Preserve chronology, important facts, decisions, constraints, identifiers" in prompt
+	assert "When a decision changes" in prompt
+	assert "Do not add facts" in prompt
+	assert "never drop unique important information" in prompt
 	assert "[No existing summary]" not in completions.calls[0]["messages"][1]["content"]
+
+
+def test_branch_summary_v4_passes_inputs_once_and_preserves_mocked_facts(monkeypatch):
+	import asyncio
+
+	import app.main as main_module
+
+	existing_text = "CURRENT_DECISION_ID_42 uses config.yml with timeout=30."
+	first_message_text = "Change timeout from 30 to 45 for /api/reports."
+	second_message_text = "Constraint: never expose PII; keep CURRENT_DECISION_ID_42."
+	rewritten = (
+		"CURRENT_DECISION_ID_42 uses config.yml with timeout=45 for /api/reports. "
+		"The previous value was 30. Constraint: never expose PII."
+	)
+	completions = SummaryResultCompletions(rewritten, "stop")
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	existing = SimpleNamespace(summary_text=existing_text)
+	messages = [
+		SimpleNamespace(id="message-1", role="user", content=first_message_text),
+		SimpleNamespace(id="message-2", role="assistant", content=second_message_text),
+	]
+
+	result = asyncio.run(main_module._generate_branch_summary(existing, messages))
+
+	assert result == rewritten
+	assert len(completions.calls) == 1
+	payload = completions.calls[0]["messages"][1]["content"]
+	assert payload.count(existing_text) == 1
+	assert payload.count(first_message_text) == 1
+	assert payload.count(second_message_text) == 1
+	assert payload.count("<existing_summary>") == 1
+	assert payload.count("<new_messages>") == 1
+	assert payload.count('<message role="user" id="message-1">') == 1
+	assert payload.count('<message role="assistant" id="message-2">') == 1
+	for important_fact in ("CURRENT_DECISION_ID_42", "config.yml", "timeout=45", "/api/reports", "never expose PII"):
+		assert important_fact in result
+
+
+def test_branch_summary_size_metrics_handle_first_summary_and_growth():
+	import app.main as main_module
+
+	message = SimpleNamespace(id="message-1", role="user", content="M" * 40)
+	first = main_module._branch_summary_size_metrics(None, [message], "S" * 20)
+	assert first == {
+		"previous_summary_chars": 0,
+		"new_summary_chars": 20,
+		"summary_growth_percent": None,
+		"summary_compression_ratio": 0.5,
+		"summary_growth_warning": False,
+	}
+
+	grown = main_module._branch_summary_size_metrics(
+		SimpleNamespace(summary_text="P" * 100),
+		[message],
+		"N" * 160,
+	)
+	assert grown == {
+		"previous_summary_chars": 100,
+		"new_summary_chars": 160,
+		"summary_growth_percent": 60.0,
+		"summary_compression_ratio": 1.1429,
+		"summary_growth_warning": True,
+	}
+
+
+def test_branch_summary_growth_warning_does_not_reject_completed_summary(monkeypatch, caplog):
+	import asyncio
+
+	import app.main as main_module
+
+	previous_text = "P" * 100
+	message_text = "M" * 40
+	completed_summary = "N" * 160
+	completions = SummaryResultCompletions(completed_summary, "stop")
+	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
+	monkeypatch.setattr(main_module, "settings", replace(
+		main_module.settings,
+		app_env="development",
+		summary_debug_metrics=True,
+	))
+
+	with caplog.at_level("INFO"):
+		result = asyncio.run(main_module._generate_branch_summary(
+			SimpleNamespace(summary_text=previous_text),
+			[SimpleNamespace(id="message-1", role="user", content=message_text)],
+			correlation_id="growth-warning",
+		))
+
+	assert result == completed_summary
+	assert len(completions.calls) == 1
+	metric = json.loads(next(
+		record.getMessage()
+		for record in caplog.records
+		if record.name == "uvicorn.error" and '"event": "BRANCH_SUMMARY_METRICS"' in record.getMessage()
+	))
+	assert metric["result"] == "accepted"
+	assert metric["finish_reason"] == "stop"
+	assert metric["previous_summary_chars"] == 100
+	assert metric["new_summary_chars"] == 160
+	assert metric["summary_growth_percent"] == 60.0
+	assert metric["summary_compression_ratio"] == 1.1429
+	assert metric["summary_growth_warning"] is True
+	assert any(
+		record.name == "velorian" and "Branch summary growth warning" in record.getMessage()
+		for record in caplog.records
+	)
+	all_logs = "\n".join(record.getMessage() for record in caplog.records)
+	assert previous_text not in all_logs
+	assert message_text not in all_logs
+	assert completed_summary not in all_logs
 
 
 def test_branch_summary_rejects_length_finish_reason_but_keeps_metrics(monkeypatch, caplog):
