@@ -5,6 +5,7 @@ import { ApiError } from '../../api/httpClient';
 import type { AuthUser } from '../../types/chat';
 import { reportError } from '../../utils/reportError';
 import { useAuthStore, type AuthField, type AuthFieldErrors } from '../../stores/authStore';
+import { getAuthErrorMessage } from '../../errors/userErrorMessages';
 import { EyeIcon, EyeOffIcon } from '../icons/AppIcons';
 import './_authPage.scss';
 import { Button } from '../ui/Button/Button';
@@ -161,7 +162,7 @@ export function AuthPage({ onAuthenticated }: AuthPageProps) {
 				setFieldErrors(responseFieldErrors);
 			} else {
 				reportError('Ошибка авторизации', requestError, { mode });
-				setError(requestError instanceof Error ? requestError.message : 'Не удалось войти');
+				setError(getAuthErrorMessage(requestError, mode));
 			}
 		} finally {
 			setLoading(false);

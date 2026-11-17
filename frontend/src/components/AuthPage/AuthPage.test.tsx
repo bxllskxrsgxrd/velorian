@@ -13,6 +13,12 @@ beforeEach(() => {
 	useAuthStore.getState().setMode('login');
 });
 
+function submitLogin() {
+	fireEvent.change(screen.getByRole('textbox', { name: 'Email или логин' }), { target: { value: 'poet' } });
+	fireEvent.change(screen.getByLabelText('Пароль'), { target: { value: 'strong-password' } });
+	fireEvent.click(screen.getByRole('button', { name: 'Войти' }));
+}
+
 describe('AuthPage', () => {
 	it('logs in with one email-or-login field and can reveal the password', async () => {
 		const onAuthenticated = vi.fn();
@@ -35,6 +41,39 @@ describe('AuthPage', () => {
 			}),
 		);
 		expect(onAuthenticated).toHaveBeenCalledOnce();
+	});
+
+	it.each([502, 503, 504])('shows an auth-specific message when backend returns HTTP %s', async (status) => {
+		api.authenticate.mockRejectedValueOnce(new ApiError('BACKEND_UNAVAILABLE', status, 'auth-request'));
+		render(<AuthPage onAuthenticated={vi.fn()} />);
+
+		submitLogin();
+
+		expect(await screen.findByRole('alert')).toHaveTextContent(
+			'Сервис временно недоступен. Попробуйте войти немного позже',
+		);
+		expect(screen.queryByText(/отправить сообщение/i)).not.toBeInTheDocument();
+	});
+
+	it('shows a safe connection message instead of a raw fetch error', async () => {
+		api.authenticate.mockRejectedValueOnce(new TypeError('Failed to fetch'));
+		render(<AuthPage onAuthenticated={vi.fn()} />);
+
+		submitLogin();
+
+		expect(await screen.findByRole('alert')).toHaveTextContent(
+			'Не удалось подключиться к серверу. Проверьте интернет-соединение и попробуйте снова',
+		);
+		expect(screen.queryByText(/failed to fetch|networkerror|typeerror/i)).not.toBeInTheDocument();
+	});
+
+	it('keeps the existing invalid credentials message', async () => {
+		api.authenticate.mockRejectedValueOnce(new ApiError('INVALID_CREDENTIALS', 401, 'auth-request'));
+		render(<AuthPage onAuthenticated={vi.fn()} />);
+
+		submitLogin();
+
+		expect(await screen.findByRole('alert')).toHaveTextContent('Проверьте email или логин и пароль');
 	});
 
 	it('requires matching password confirmation before registration', () => {

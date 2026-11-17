@@ -144,6 +144,78 @@ describe('ChatPage retry', () => {
 		expect(container.querySelector('.message__content--pending')).not.toBeInTheDocument();
 	});
 
+	it('reconciles persisted messages after a Summary 503 and displays the successful retry', async () => {
+		const initialMessages = [
+			{
+				id: 'user-before-summary-error', role: 'user' as const, content: 'Предыдущий запрос', status: 'done' as const,
+				attachments: [], branchGroupId: 'user-before-summary-error', replyToId: null, isActive: true,
+			},
+			{
+				id: 'assistant-before-summary-error', role: 'assistant' as const, content: 'Предыдущий ответ', status: 'done' as const,
+				attachments: [], replyToId: 'user-before-summary-error',
+			},
+		];
+		const persistedFailedMessages = [
+			...initialMessages,
+			{
+				id: 'persisted-failed-user', role: 'user' as const, content: 'Вопрос после 503', status: 'done' as const,
+				attachments: [], branchGroupId: 'persisted-failed-user', replyToId: 'assistant-before-summary-error', isActive: true,
+			},
+			{
+				id: 'persisted-failed-assistant', role: 'assistant' as const,
+				content: 'Не удалось безопасно восстановить контекст диалога', status: 'error' as const,
+				attachments: [], replyToId: 'persisted-failed-user', errorCode: 'BRANCH_SUMMARY_UNAVAILABLE',
+			},
+		];
+		api.getConversation
+			.mockResolvedValueOnce({ ...conversation, messages: initialMessages })
+			.mockResolvedValueOnce({ ...conversation, messages: persistedFailedMessages });
+		api.streamChat
+			.mockRejectedValueOnce(new ApiError('BRANCH_SUMMARY_UNAVAILABLE', 503, 'summary-503'))
+			.mockImplementationOnce(async ({ onEvent }: { onEvent: (event: StreamEvent) => void }) => {
+				onEvent({
+					type: 'meta',
+					conversationId: conversation.id,
+					conversationTitle: conversation.title,
+					userMessage: {
+						id: 'retry-user', role: 'user', content: 'Вопрос после 503', status: 'done', attachments: [],
+						branchGroupId: 'retry-user', replyToId: 'persisted-failed-assistant', isActive: true,
+					},
+					assistantMessageId: 'retry-assistant',
+					requestId: 'retry-success',
+				});
+				onEvent({ type: 'delta', content: 'Новый ответ виден без перезагрузки' });
+				onEvent({
+					type: 'done',
+					messageId: 'retry-assistant',
+					message: {
+						id: 'retry-assistant', role: 'assistant', content: 'Новый ответ виден без перезагрузки',
+						status: 'done', attachments: [], replyToId: 'retry-user',
+					},
+				});
+			});
+		renderChatPage();
+
+		fireEvent.change(await screen.findByRole('textbox', { name: /введите запрос/i }), {
+			target: { value: 'Вопрос после 503' },
+		});
+		fireEvent.click(screen.getByRole('button', { name: 'Отправить сообщение' }));
+
+		await waitFor(() => expect(api.getConversation).toHaveBeenCalledTimes(2));
+		await waitFor(() => expect(useChatStore.getState().messagesByConversation[conversation.id])
+			.toEqual(expect.arrayContaining([expect.objectContaining({ id: 'persisted-failed-user' })])));
+		fireEvent.click(await screen.findByRole('button', { name: 'Повторить' }));
+
+		expect(await screen.findByText('Новый ответ виден без перезагрузки')).toBeVisible();
+		expect(api.streamChat).toHaveBeenLastCalledWith(expect.objectContaining({ retryMessageId: 'persisted-failed-user' }));
+		expect(useChatStore.getState().messagesByConversation[conversation.id]).toEqual(
+			expect.arrayContaining([
+				expect.objectContaining({ id: 'retry-assistant', status: 'done', content: 'Новый ответ виден без перезагрузки' }),
+			]),
+		);
+		expect(screen.getByRole('complementary', { name: 'Карта запросов' })).toHaveTextContent('Вопрос после 503');
+	});
+
 	it('maps an error event after stream metadata from streaming to the dedicated error UI', async () => {
 		api.getConversation.mockResolvedValueOnce({ ...conversation, messages: [] });
 		api.streamChat.mockImplementationOnce(async ({ onEvent }: { onEvent: (event: StreamEvent) => void }) => {
