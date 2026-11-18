@@ -1,13 +1,14 @@
 import asyncio
+import hashlib
 import inspect
 import json
 import logging
 import mimetypes
 import re
 import time
-from collections.abc import AsyncIterator
+from collections.abc import AsyncIterator, Awaitable, Callable
 from contextlib import asynccontextmanager, suppress
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from datetime import datetime, timedelta
 from pathlib import Path
 from typing import Literal
@@ -43,6 +44,15 @@ from .groq_diagnostics import (
 	log_groq_api_error,
 	provider_request_id,
 )
+from .generation_runs import (
+	InvalidGenerationRunTransition,
+	finish_generation_run,
+	get_generation_run,
+	get_generation_run_by_idempotency_key,
+	get_or_create_generation_run,
+	interrupt_orphaned_generation_runs,
+	start_generation_run,
+)
 from .knowledge import (
 	ensure_default_approaches,
 	list_knowledge,
@@ -60,7 +70,19 @@ from .memory import (
 	upsert_preference_memory,
 	upsert_project_memory,
 )
-from .models import Attachment, BranchSummary, Conversation, DocumentChunk, KnowledgeItem, Message, StructuredMemoryItem, User, utc_now
+from .models import (
+	Attachment,
+	BranchSummary,
+	Conversation,
+	DocumentChunk,
+	GenerationRun,
+	GenerationRunStatus,
+	KnowledgeItem,
+	Message,
+	StructuredMemoryItem,
+	User,
+	utc_now,
+)
 from .observability import (
 	configure_observability_logging,
 	defer_activity_event,
@@ -86,6 +108,10 @@ AITaskType = Literal["chat", "title", "summary", "memory", "knowledge", "file_ge
 AIInteractionStatus = Literal["success", "error", "cancelled"]
 TRASH_RETENTION = timedelta(days=30)
 TRASH_CLEANUP_INTERVAL_SECONDS = 60
+GENERATION_EVENT_QUEUE_SIZE = 128
+GENERATION_PARTIAL_SAVE_INTERVAL_SECONDS = 0.5
+GENERATION_PARTIAL_SAVE_CHARS = 2048
+GENERATION_MAX_BUFFER_CHARS = max(32_768, settings.max_output_tokens * 16)
 
 REQUESTS_TOTAL = Counter("velorian_http_requests_total", "HTTP requests", ["method", "route", "status"])
 REQUEST_DURATION = Histogram("velorian_http_request_duration_seconds", "HTTP request duration", ["method", "route"])
@@ -103,6 +129,107 @@ class ChatModelSpec:
 	provider: Literal["groq", "gemini"]
 	provider_model: str
 	badge: str | None = None
+
+
+GenerationEvent = bytes | None
+GenerationPublisher = Callable[[bytes], None]
+GenerationWorker = Callable[[GenerationPublisher, Callable[[], GenerationRunStatus]], Awaitable[None]]
+
+
+@dataclass
+class _ManagedGeneration:
+	task: asyncio.Task[None] | None = None
+	subscribers: set[asyncio.Queue[GenerationEvent]] = field(default_factory=set)
+	cancel_status: GenerationRunStatus = GenerationRunStatus.INTERRUPTED
+
+
+class GenerationTaskManager:
+	"""In-process task ownership for the supported single-backend-worker mode."""
+
+	def __init__(self) -> None:
+		self._active: dict[str, _ManagedGeneration] = {}
+
+	@staticmethod
+	def _offer(queue: asyncio.Queue[GenerationEvent], event: GenerationEvent) -> None:
+		if queue.full():
+			with suppress(asyncio.QueueEmpty):
+				queue.get_nowait()
+		queue.put_nowait(event)
+
+	def _publish(self, run_id: str, event: GenerationEvent) -> None:
+		managed = self._active.get(run_id)
+		if managed is None:
+			return
+		for queue in tuple(managed.subscribers):
+			self._offer(queue, event)
+
+	def start(self, run_id: str, worker: GenerationWorker) -> asyncio.Queue[GenerationEvent]:
+		managed = self._active.get(run_id)
+		if managed is not None:
+			return self.subscribe(run_id)
+		managed = _ManagedGeneration()
+		queue: asyncio.Queue[GenerationEvent] = asyncio.Queue(maxsize=GENERATION_EVENT_QUEUE_SIZE)
+		managed.subscribers.add(queue)
+		self._active[run_id] = managed
+
+		async def run() -> None:
+			try:
+				await worker(
+					lambda event: self._publish(run_id, event),
+					lambda: managed.cancel_status,
+				)
+			finally:
+				self._publish(run_id, None)
+				managed.task = None
+				if not managed.subscribers:
+					self._active.pop(run_id, None)
+
+		managed.task = asyncio.create_task(run(), name=f"generation:{run_id}")
+		return queue
+
+	def subscribe(self, run_id: str) -> asyncio.Queue[GenerationEvent]:
+		managed = self._active.get(run_id)
+		if managed is None or managed.task is None:
+			raise KeyError(run_id)
+		queue: asyncio.Queue[GenerationEvent] = asyncio.Queue(maxsize=GENERATION_EVENT_QUEUE_SIZE)
+		managed.subscribers.add(queue)
+		return queue
+
+	def unsubscribe(self, run_id: str, queue: asyncio.Queue[GenerationEvent]) -> None:
+		managed = self._active.get(run_id)
+		if managed is None:
+			return
+		managed.subscribers.discard(queue)
+		if managed.task is None and not managed.subscribers:
+			self._active.pop(run_id, None)
+
+	def has_task(self, run_id: str) -> bool:
+		managed = self._active.get(run_id)
+		return managed is not None and managed.task is not None and not managed.task.done()
+
+	async def cancel(self, run_id: str, status: GenerationRunStatus) -> bool:
+		managed = self._active.get(run_id)
+		if managed is None or managed.task is None or managed.task.done():
+			return False
+		managed.cancel_status = status
+		managed.task.cancel()
+		await asyncio.gather(managed.task, return_exceptions=True)
+		return True
+
+	async def shutdown(self) -> None:
+		tasks: list[asyncio.Task[None]] = []
+		for managed in tuple(self._active.values()):
+			if managed.task is None or managed.task.done():
+				continue
+			managed.cancel_status = GenerationRunStatus.INTERRUPTED
+			managed.task.cancel()
+			tasks.append(managed.task)
+		if tasks:
+			await asyncio.gather(*tasks, return_exceptions=True)
+		self._active.clear()
+
+
+generation_task_manager = GenerationTaskManager()
 
 
 def _chat_model_specs() -> dict[str, ChatModelSpec]:
@@ -2247,10 +2374,18 @@ async def lifespan(_app: FastAPI):
 	if settings.is_production and settings.auth_secret == "velorian-development-secret-change-me":
 		raise RuntimeError("AUTH_SECRET must be changed in production")
 	init_database()
+	interrupted_run_ids = interrupt_orphaned_generation_runs()
+	if interrupted_run_ids:
+		logger.warning(
+			"Recovered unfinished generations from the previous process: count=%s",
+			len(interrupted_run_ids),
+		)
+	logger.info("Generation task manager is running in single-backend-worker mode")
 	cleanup_task = asyncio.create_task(_trash_cleanup_loop())
 	try:
 		yield
 	finally:
+		await generation_task_manager.shutdown()
 		cleanup_task.cancel()
 		with suppress(asyncio.CancelledError):
 			await cleanup_task
@@ -3535,6 +3670,394 @@ async def _stream_ai_deltas(
 		yield delta
 
 
+@dataclass(frozen=True)
+class ChatGenerationSpec:
+	run_id: str
+	user_id: str
+	conversation_id: str
+	user_message_id: str
+	user_message_content: str
+	assistant_message_id: str
+	prompt: str
+	request_id: str
+	ai_messages: list[dict[str, str]]
+	web_search: bool
+	model: ChatModelSpec
+	task_type: AITaskType
+	prompt_version: str
+
+
+def _generation_idempotency_key(request_id: str) -> str:
+	value = f"chat:{request_id}"
+	if len(value) <= 128:
+		return value
+	return f"chat:{hashlib.sha256(request_id.encode('utf-8')).hexdigest()}"
+
+
+def _persist_generation_message(
+	assistant_message_id: str,
+	*,
+	content: str,
+	status: str,
+	error_code: str | None = None,
+	request_id: str | None = None,
+) -> None:
+	with SessionLocal() as db:
+		message = db.get(Message, assistant_message_id)
+		if message is None:
+			return
+		message.content = content
+		message.status = status
+		message.error_code = error_code
+		message.request_id = request_id
+		db.commit()
+
+
+def _finish_generation_safely(
+	*,
+	user_id: str,
+	run_id: str,
+	status: GenerationRunStatus,
+	error_code: str | None = None,
+) -> GenerationRun:
+	try:
+		run, _changed = finish_generation_run(
+			user_id=user_id,
+			run_id=run_id,
+			status=status,
+			error_code=error_code,
+		)
+		return run
+	except InvalidGenerationRunTransition:
+		return get_generation_run(user_id=user_id, run_id=run_id)
+
+
+def _completed_message_payload(assistant_message_id: str) -> dict | None:
+	with SessionLocal() as db:
+		message = db.scalar(
+			select(Message)
+			.options(selectinload(Message.attachments), selectinload(Message.ratings))
+			.where(Message.id == assistant_message_id)
+		)
+		return _message_payload(message) if message is not None else None
+
+
+async def _execute_chat_generation(
+	spec: ChatGenerationSpec,
+	publish: GenerationPublisher,
+	cancel_status: Callable[[], GenerationRunStatus],
+) -> None:
+	answer_parts: list[str] = []
+	answer_chars = 0
+	last_saved_chars = 0
+	last_saved_at = 0.0
+	started = time.perf_counter()
+	final_saved = False
+	try:
+		start_generation_run(user_id=spec.user_id, run_id=spec.run_id)
+		try:
+			async for delta in _stream_ai_deltas(
+				spec.ai_messages,
+				spec.user_id,
+				spec.conversation_id,
+				spec.web_search,
+				spec.model,
+				task_type=spec.task_type,
+				prompt_version=spec.prompt_version,
+				correlation_id=spec.request_id,
+				attempt="full",
+			):
+				answer_parts.append(delta)
+				answer_chars += len(delta)
+				if answer_chars > GENERATION_MAX_BUFFER_CHARS:
+					raise AppError(502, "AI_RESPONSE_TOO_LARGE", "AI-сервис вернул слишком большой ответ")
+				now = time.monotonic()
+				if (
+					answer_chars - last_saved_chars >= GENERATION_PARTIAL_SAVE_CHARS
+					or now - last_saved_at >= GENERATION_PARTIAL_SAVE_INTERVAL_SECONDS
+				):
+					_persist_generation_message(
+						spec.assistant_message_id,
+						content="".join(answer_parts),
+						status="streaming",
+					)
+					last_saved_chars = answer_chars
+					last_saved_at = now
+				publish(_event("delta", content=delta))
+		except Exception as error:
+			compact_messages = _compact_ai_messages(spec.ai_messages)
+			if answer_parts or not _should_retry_with_compact_context(error) or compact_messages == spec.ai_messages:
+				raise
+			logger.warning(
+				"AI rejected full context; retrying with compact context: error_type=%s status=%s request_id=%s",
+				type(error).__name__,
+				getattr(error, "status_code", None),
+				spec.request_id,
+			)
+			log_compact_fallback_started(
+				logger,
+				correlation_id=spec.request_id,
+				error=error,
+				full_request_options=_chat_completion_options(spec.ai_messages, spec.user_id, spec.web_search, spec.model),
+				compact_request_options=_chat_completion_options(compact_messages, spec.user_id, spec.web_search, spec.model),
+				reason="retryable_provider_status_without_partial_output",
+			)
+			AI_CONTEXT_RETRIES_TOTAL.labels("started").inc()
+			try:
+				async for delta in _stream_ai_deltas(
+					compact_messages,
+					spec.user_id,
+					spec.conversation_id,
+					spec.web_search,
+					spec.model,
+					task_type=spec.task_type,
+					prompt_version=spec.prompt_version,
+					correlation_id=spec.request_id,
+					attempt="compact",
+				):
+					answer_parts.append(delta)
+					answer_chars += len(delta)
+					if answer_chars > GENERATION_MAX_BUFFER_CHARS:
+						raise AppError(502, "AI_RESPONSE_TOO_LARGE", "AI-сервис вернул слишком большой ответ")
+					now = time.monotonic()
+					if (
+						answer_chars - last_saved_chars >= GENERATION_PARTIAL_SAVE_CHARS
+						or now - last_saved_at >= GENERATION_PARTIAL_SAVE_INTERVAL_SECONDS
+					):
+						_persist_generation_message(
+							spec.assistant_message_id,
+							content="".join(answer_parts),
+							status="streaming",
+						)
+						last_saved_chars = answer_chars
+						last_saved_at = now
+					publish(_event("delta", content=delta))
+			except Exception:
+				AI_CONTEXT_RETRIES_TOTAL.labels("error").inc()
+				raise
+			AI_CONTEXT_RETRIES_TOTAL.labels("success").inc()
+
+		answer = "".join(answer_parts).strip()
+		if not answer:
+			raise AppError(502, "AI_EMPTY_RESPONSE", "AI-сервис вернул пустой ответ")
+		answer, generated_files = _extract_generated_files(answer, spec.prompt)
+		generated_storage_keys: list[str] = []
+		with SessionLocal() as db:
+			assistant_message = db.get(Message, spec.assistant_message_id)
+			conversation = db.get(Conversation, spec.conversation_id)
+			if assistant_message is None or conversation is None:
+				raise AppError(404, "GENERATION_TARGET_MISSING", "Сообщение генерации больше недоступно")
+			assistant_message.content = answer
+			assistant_message.status = "done"
+			generated_storage_keys = await _store_generated_files(
+				db,
+				spec.user_id,
+				spec.conversation_id,
+				assistant_message,
+				generated_files,
+			)
+			conversation.updated_at = utc_now()
+			try:
+				db.commit()
+			except Exception:
+				db.rollback()
+				storage = get_file_storage()
+				for storage_key in generated_storage_keys:
+					with suppress(Exception):
+						await storage.delete(storage_key)
+				raise
+		final_saved = True
+		if generated_files:
+			defer_activity_event(
+				user_id=spec.user_id,
+				event_type="file.generated",
+				resource_type="message",
+				resource_id=spec.assistant_message_id,
+				correlation_id=spec.request_id,
+			)
+		with SessionLocal() as memory_db:
+			await _extract_and_store_memory(
+				memory_db,
+				spec.user_id,
+				spec.user_message_content,
+				conversation_id=spec.conversation_id,
+				correlation_id=spec.request_id,
+			)
+		_finish_generation_safely(
+			user_id=spec.user_id,
+			run_id=spec.run_id,
+			status=GenerationRunStatus.COMPLETED,
+		)
+		AI_REQUESTS_TOTAL.labels("success", str(spec.web_search).lower()).inc()
+		publish(_event(
+			"done",
+			messageId=spec.assistant_message_id,
+			message=_completed_message_payload(spec.assistant_message_id),
+		))
+	except asyncio.CancelledError:
+		if final_saved:
+			_finish_generation_safely(
+				user_id=spec.user_id,
+				run_id=spec.run_id,
+				status=GenerationRunStatus.COMPLETED,
+			)
+			AI_REQUESTS_TOTAL.labels("success", str(spec.web_search).lower()).inc()
+			publish(_event(
+				"done",
+				messageId=spec.assistant_message_id,
+				message=_completed_message_payload(spec.assistant_message_id),
+			))
+			return
+		terminal_status = cancel_status()
+		if terminal_status not in {GenerationRunStatus.STOPPED, GenerationRunStatus.INTERRUPTED}:
+			terminal_status = GenerationRunStatus.INTERRUPTED
+		partial = "".join(answer_parts)
+		_persist_generation_message(spec.assistant_message_id, content=partial, status="cancelled")
+		_finish_generation_safely(
+			user_id=spec.user_id,
+			run_id=spec.run_id,
+			status=terminal_status,
+		)
+		AI_REQUESTS_TOTAL.labels("cancelled", str(spec.web_search).lower()).inc()
+		code = "GENERATION_STOPPED" if terminal_status == GenerationRunStatus.STOPPED else "GENERATION_INTERRUPTED"
+		publish(_event("error", code=code, message="Генерация остановлена", requestId=spec.request_id))
+	except AppError as error:
+		logger.warning("AI application error: code=%s request_id=%s message=%s", error.code, spec.request_id, error.message)
+		partial = "".join(answer_parts)
+		_persist_generation_message(
+			spec.assistant_message_id,
+			content=partial or error.message,
+			status="error",
+			error_code=error.code,
+			request_id=spec.request_id,
+		)
+		_finish_generation_safely(
+			user_id=spec.user_id,
+			run_id=spec.run_id,
+			status=GenerationRunStatus.FAILED,
+			error_code=error.code,
+		)
+		AI_REQUESTS_TOTAL.labels("error", str(spec.web_search).lower()).inc()
+		publish(_event("error", code=error.code, message=error.message, requestId=spec.request_id))
+	except Exception as error:
+		code, message = _safe_ai_error(error)
+		provider_status = _provider_status_code(error)
+		duration_ms = round((time.perf_counter() - started) * 1000, 2)
+		failure_diagnostic = json.dumps({
+			"event": "AI_REQUEST_FAILED",
+			"timestamp": utc_now().isoformat(),
+			"requestId": spec.request_id,
+			"chatId": spec.conversation_id,
+			"messageId": spec.assistant_message_id,
+			"provider": spec.model.provider,
+			"model": spec.model.provider_model,
+			"errorType": type(error).__name__,
+			"providerStatus": provider_status,
+			"durationMs": duration_ms,
+		}, ensure_ascii=False)
+		if is_groq_provider_error(error) or settings.is_production:
+			logger.error(failure_diagnostic)
+		else:
+			logger.exception(failure_diagnostic)
+		log_technical_event(
+			"error",
+			"AI_REQUEST_FAILED",
+			correlation_id=spec.request_id,
+			user_id=spec.user_id,
+			purpose="chat",
+			provider=spec.model.provider,
+			model=spec.model.provider_model,
+			status="error",
+			error_code=code,
+			provider_status=provider_status,
+			latency_ms=duration_ms,
+		)
+		partial = "".join(answer_parts)
+		_persist_generation_message(
+			spec.assistant_message_id,
+			content=partial or message,
+			status="error",
+			error_code=code,
+			request_id=spec.request_id,
+		)
+		_finish_generation_safely(
+			user_id=spec.user_id,
+			run_id=spec.run_id,
+			status=GenerationRunStatus.FAILED,
+			error_code=code,
+		)
+		AI_REQUESTS_TOTAL.labels("error", str(spec.web_search).lower()).inc()
+		publish(_event("error", code=code, message=message, requestId=spec.request_id))
+	finally:
+		AI_DURATION.observe(time.perf_counter() - started)
+
+
+def _generation_streaming_response(
+	*,
+	run_id: str,
+	queue: asyncio.Queue[GenerationEvent],
+	meta_event: bytes,
+) -> StreamingResponse:
+	async def events() -> AsyncIterator[bytes]:
+		yield meta_event
+		try:
+			while True:
+				event = await queue.get()
+				if event is None:
+					break
+				yield event
+		finally:
+			generation_task_manager.unsubscribe(run_id, queue)
+
+	return StreamingResponse(
+		events(),
+		media_type="application/x-ndjson",
+		headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+	)
+
+
+def _existing_generation_response(
+	*,
+	run: GenerationRun,
+	conversation: Conversation,
+	db: Session,
+) -> StreamingResponse:
+	user_message = db.scalar(
+		select(Message)
+		.options(selectinload(Message.attachments), selectinload(Message.ratings))
+		.where(Message.id == run.branch_anchor_message_id)
+	)
+	assistant_message = db.scalar(
+		select(Message)
+		.options(selectinload(Message.attachments), selectinload(Message.ratings))
+		.where(Message.id == run.assistant_message_id)
+	) if run.assistant_message_id else None
+	if user_message is None or assistant_message is None:
+		raise AppError(409, "GENERATION_STATE_INVALID", "Состояние генерации повреждено")
+	meta = _event(
+		"meta",
+		conversationId=conversation.id,
+		conversationTitle=conversation.title,
+		userMessage=_message_payload(user_message),
+		assistantMessageId=assistant_message.id,
+		requestId=run.correlation_id,
+	)
+	if generation_task_manager.has_task(run.id):
+		queue = generation_task_manager.subscribe(run.id)
+		return _generation_streaming_response(run_id=run.id, queue=queue, meta_event=meta)
+	queue: asyncio.Queue[GenerationEvent] = asyncio.Queue(maxsize=GENERATION_EVENT_QUEUE_SIZE)
+	if run.status == GenerationRunStatus.COMPLETED and assistant_message.status == "done":
+		queue.put_nowait(_event("done", messageId=assistant_message.id, message=_message_payload(assistant_message)))
+	else:
+		code = assistant_message.error_code or (
+			"GENERATION_STOPPED" if run.status == GenerationRunStatus.STOPPED else "GENERATION_INTERRUPTED"
+		)
+		message = assistant_message.content or "Генерация не была завершена"
+		queue.put_nowait(_event("error", code=code, message=message, requestId=run.correlation_id))
+	queue.put_nowait(None)
+	return _generation_streaming_response(run_id=run.id, queue=queue, meta_event=meta)
+
+
 @app.post(f"{settings.api_prefix}/conversations/{{conversation_id}}/stream", tags=["chat"])
 async def stream_chat(
 	request: Request,
@@ -3553,6 +4076,15 @@ async def stream_chat(
 	chat_model = _resolve_chat_model(model_id)
 	conversation = _owned_conversation(db, conversation_id, user.id)
 	request_id = _request_id(request)
+	idempotency_key = _generation_idempotency_key(request_id)
+	existing_run = get_generation_run_by_idempotency_key(
+		user_id=user.id,
+		idempotency_key=idempotency_key,
+	)
+	if existing_run is not None:
+		if existing_run.conversation_id != conversation.id:
+			raise AppError(409, "GENERATION_IDEMPOTENCY_CONFLICT", "Идентификатор запроса уже используется")
+		return _existing_generation_response(run=existing_run, conversation=conversation, db=db)
 	if web_search and search_mode == "none":
 		search_mode = "web"
 	web_search = search_mode == "web"
@@ -3775,6 +4307,16 @@ async def stream_chat(
 	conversation.updated_at = utc_now()
 	db.commit()
 	assistant_id = assistant_message.id
+	generation_run, _created = get_or_create_generation_run(
+		user_id=user.id,
+		conversation_id=conversation.id,
+		branch_anchor_message_id=user_message.id,
+		assistant_message_id=assistant_id,
+		idempotency_key=idempotency_key,
+		provider=chat_model.provider,
+		model=chat_model.provider_model,
+		correlation_id=request_id,
+	)
 	try:
 		file_generation = bool(FILE_REQUEST_PATTERN.search(prompt))
 		ai_messages, knowledge_result, uses_knowledge_context, excluded_history = build_chat_context(
@@ -3842,6 +4384,11 @@ async def stream_chat(
 			failed_assistant.status = "cancelled"
 			failed_assistant.request_id = request_id
 			db.commit()
+		_finish_generation_safely(
+			user_id=user.id,
+			run_id=generation_run.id,
+			status=GenerationRunStatus.INTERRUPTED,
+		)
 		raise
 	except AppError as error:
 		db.rollback()
@@ -3852,6 +4399,12 @@ async def stream_chat(
 			failed_assistant.error_code = error.code
 			failed_assistant.request_id = request_id
 			db.commit()
+		_finish_generation_safely(
+			user_id=user.id,
+			run_id=generation_run.id,
+			status=GenerationRunStatus.FAILED,
+			error_code=error.code,
+		)
 		raise
 	except Exception as error:
 		db.rollback()
@@ -3863,174 +4416,79 @@ async def stream_chat(
 			failed_assistant.error_code = code
 			failed_assistant.request_id = request_id
 			db.commit()
+		_finish_generation_safely(
+			user_id=user.id,
+			run_id=generation_run.id,
+			status=GenerationRunStatus.FAILED,
+			error_code=code,
+		)
 		raise
 
-	async def generate() -> AsyncIterator[bytes]:
-		answer_parts: list[str] = []
-		started = time.perf_counter()
-		completed = False
-		yield _event(
-			"meta",
-			conversationId=conversation.id,
-			conversationTitle=conversation.title,
-			userMessage=user_payload,
-			assistantMessageId=assistant_id,
-			requestId=request_id,
-		)
-		try:
-			try:
-				async for delta in _stream_ai_deltas(
-					ai_messages,
-					user.id,
-					conversation.id,
-					web_search,
-					chat_model,
-					task_type=task_type,
-					prompt_version=prompt_version,
-					correlation_id=request_id,
-					attempt="full",
-				):
-					answer_parts.append(delta)
-					yield _event("delta", content=delta)
-			except Exception as error:
-				compact_messages = _compact_ai_messages(ai_messages)
-				if answer_parts or not _should_retry_with_compact_context(error) or compact_messages == ai_messages:
-					raise
-				logger.warning(
-					"AI rejected full context; retrying with compact context: error_type=%s status=%s request_id=%s",
-					type(error).__name__,
-					getattr(error, "status_code", None),
-					request_id,
-				)
-				log_compact_fallback_started(
-					logger,
-					correlation_id=request_id,
-					error=error,
-					full_request_options=_chat_completion_options(ai_messages, user.id, web_search, chat_model),
-					compact_request_options=_chat_completion_options(compact_messages, user.id, web_search, chat_model),
-					reason="retryable_provider_status_without_partial_output",
-				)
-				AI_CONTEXT_RETRIES_TOTAL.labels("started").inc()
-				try:
-					async for delta in _stream_ai_deltas(
-						compact_messages,
-						user.id,
-						conversation.id,
-						web_search,
-						chat_model,
-						task_type=task_type,
-						prompt_version=prompt_version,
-						correlation_id=request_id,
-						attempt="compact",
-					):
-						answer_parts.append(delta)
-						yield _event("delta", content=delta)
-				except Exception:
-					AI_CONTEXT_RETRIES_TOTAL.labels("error").inc()
-					raise
-				AI_CONTEXT_RETRIES_TOTAL.labels("success").inc()
-			answer = "".join(answer_parts).strip()
-			if not answer:
-				raise AppError(502, "AI_EMPTY_RESPONSE", "AI-сервис вернул пустой ответ")
-			answer, generated_files = _extract_generated_files(answer, prompt)
-			assistant_message.content = answer
-			assistant_message.status = "done"
-			generated_storage_keys = await _store_generated_files(db, user.id, conversation.id, assistant_message, generated_files)
-			conversation.updated_at = utc_now()
-			try:
-				db.commit()
-			except Exception:
-				db.rollback()
-				storage = get_file_storage()
-				for storage_key in generated_storage_keys:
-					try:
-						await storage.delete(storage_key)
-					except Exception:
-						logger.exception("Generated file cleanup after commit failure failed: storage_key=%s", storage_key)
-				raise
-			if generated_files:
-				defer_activity_event(
-					user_id=user.id,
-					event_type="file.generated",
-					resource_type="message",
-					resource_id=assistant_id,
-					correlation_id=request_id,
-				)
-			await _extract_and_store_memory(
-				db,
-				user.id,
-				user_message.content,
-				conversation_id=conversation.id,
-				correlation_id=request_id,
-			)
-			completed_message = db.scalar(
-				select(Message).options(selectinload(Message.attachments), selectinload(Message.ratings)).where(Message.id == assistant_id)
-			)
-			completed = True
-			AI_REQUESTS_TOTAL.labels("success", str(web_search).lower()).inc()
-			yield _event("done", messageId=assistant_id, message=_message_payload(completed_message))
-		except asyncio.CancelledError:
-			assistant_message.content = "".join(answer_parts)
-			assistant_message.status = "cancelled"
-			db.commit()
-			AI_REQUESTS_TOTAL.labels("cancelled", str(web_search).lower()).inc()
-			raise
-		except AppError as error:
-			logger.warning("AI application error: code=%s request_id=%s message=%s", error.code, request_id, error.message)
-			assistant_message.content = error.message
-			assistant_message.status = "error"
-			assistant_message.error_code = error.code
-			assistant_message.request_id = request_id
-			db.commit()
-			AI_REQUESTS_TOTAL.labels("error", str(web_search).lower()).inc()
-			yield _event("error", code=error.code, message=error.message, requestId=request_id)
-		except Exception as error:
-			code, message = _safe_ai_error(error)
-			provider_status = _provider_status_code(error)
-			duration_ms = round((time.perf_counter() - started) * 1000, 2)
-			failure_diagnostic = json.dumps({
-				"event": "AI_REQUEST_FAILED",
-				"timestamp": utc_now().isoformat(),
-				"requestId": request_id,
-				"chatId": conversation.id,
-				"messageId": assistant_id,
-				"provider": chat_model.provider,
-				"model": chat_model.provider_model,
-				"errorType": type(error).__name__,
-				"providerStatus": provider_status,
-				"durationMs": duration_ms,
-			}, ensure_ascii=False)
-			if is_groq_provider_error(error) or settings.is_production:
-				logger.error(failure_diagnostic)
-			else:
-				logger.exception(failure_diagnostic)
-			log_technical_event(
-				"error",
-				"AI_REQUEST_FAILED",
-				correlation_id=request_id,
-				user_id=user.id,
-				purpose="chat",
-				provider=chat_model.provider,
-				model=chat_model.provider_model,
-				status="error",
-				error_code=code,
-				provider_status=provider_status,
-				latency_ms=duration_ms,
-			)
-			assistant_message.content = message
-			assistant_message.status = "error"
-			assistant_message.error_code = code
-			assistant_message.request_id = request_id
-			db.commit()
-			AI_REQUESTS_TOTAL.labels("error", str(web_search).lower()).inc()
-			yield _event("error", code=code, message=message, requestId=request_id)
-		finally:
-			AI_DURATION.observe(time.perf_counter() - started)
-			if not completed and assistant_message.status == "streaming":
-				assistant_message.status = "cancelled"
-				db.commit()
+	spec = ChatGenerationSpec(
+		run_id=generation_run.id,
+		user_id=user.id,
+		conversation_id=conversation.id,
+		user_message_id=user_message.id,
+		user_message_content=user_message.content,
+		assistant_message_id=assistant_id,
+		prompt=prompt,
+		request_id=request_id,
+		ai_messages=ai_messages,
+		web_search=web_search,
+		model=chat_model,
+		task_type=task_type,
+		prompt_version=prompt_version,
+	)
+	queue = generation_task_manager.start(
+		generation_run.id,
+		lambda publish, cancel_status: _execute_chat_generation(spec, publish, cancel_status),
+	)
+	meta = _event(
+		"meta",
+		conversationId=conversation.id,
+		conversationTitle=conversation.title,
+		userMessage=user_payload,
+		assistantMessageId=assistant_id,
+		requestId=request_id,
+	)
+	return _generation_streaming_response(run_id=generation_run.id, queue=queue, meta_event=meta)
 
-	return StreamingResponse(generate(), media_type="application/x-ndjson", headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"})
+
+@app.post(f"{settings.api_prefix}/messages/{{message_id}}/stop-generation", tags=["chat"])
+async def stop_message_generation(
+	message_id: str,
+	user: User = Depends(get_current_user),
+	db: Session = Depends(get_db),
+):
+	run = db.scalar(select(GenerationRun).where(
+		GenerationRun.assistant_message_id == message_id,
+		GenerationRun.user_id == user.id,
+	))
+	if run is None:
+		raise AppError(404, "GENERATION_NOT_FOUND", "Активная генерация не найдена")
+	if run.status in {
+		GenerationRunStatus.COMPLETED,
+		GenerationRunStatus.FAILED,
+		GenerationRunStatus.STOPPED,
+		GenerationRunStatus.INTERRUPTED,
+	}:
+		return {"generation": {"id": run.id, "status": run.status.value, "messageId": message_id}}
+
+	cancelled = await generation_task_manager.cancel(run.id, GenerationRunStatus.STOPPED)
+	if not cancelled:
+		assistant_message = db.get(Message, message_id)
+		_persist_generation_message(
+			message_id,
+			content=assistant_message.content if assistant_message is not None else "",
+			status="cancelled",
+		)
+		_finish_generation_safely(
+			user_id=user.id,
+			run_id=run.id,
+			status=GenerationRunStatus.STOPPED,
+		)
+	final_run = get_generation_run(user_id=user.id, run_id=run.id)
+	return {"generation": {"id": final_run.id, "status": final_run.status.value, "messageId": message_id}}
 
 
 @app.get("/", tags=["monitoring"])

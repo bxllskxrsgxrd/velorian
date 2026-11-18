@@ -253,6 +253,13 @@ def get_generation_run(*, user_id: str, run_id: str) -> GenerationRun:
 		return _detach(db, run)
 
 
+def get_generation_run_by_idempotency_key(*, user_id: str, idempotency_key: str) -> GenerationRun | None:
+	key = _normalize_required(idempotency_key, field="idempotency_key", maximum=128)
+	with SessionLocal() as db:
+		run = _find_by_idempotency_key(db, user_id, key)
+		return _detach(db, run) if run is not None else None
+
+
 def list_active_generation_runs(
 	*,
 	user_id: str,
@@ -276,6 +283,45 @@ def list_active_generation_runs(
 		for run in runs:
 			db.expunge(run)
 		return runs
+
+
+def interrupt_orphaned_generation_runs() -> list[str]:
+	"""Finalize runs left active by the previous single-worker process.
+
+	This recovery deliberately assumes exactly one backend worker. Without a
+	distributed lease, calling it from multiple live workers would let one worker
+	interrupt another worker's tasks.
+	"""
+	with SessionLocal() as db:
+		runs = list(db.scalars(select(GenerationRun).where(
+			GenerationRun.status.in_(ACTIVE_GENERATION_STATUSES),
+		)))
+		if not runs:
+			return []
+		now = utc_now()
+		run_ids = [run.id for run in runs]
+		assistant_ids = [run.assistant_message_id for run in runs if run.assistant_message_id]
+		db.execute(
+			update(GenerationRun)
+			.where(GenerationRun.id.in_(run_ids))
+			.values(
+				status=GenerationRunStatus.INTERRUPTED,
+				error_code=None,
+				updated_at=now,
+				finished_at=now,
+			)
+		)
+		if assistant_ids:
+			db.execute(
+				update(Message)
+				.where(
+					Message.id.in_(assistant_ids),
+					Message.status == "streaming",
+				)
+				.values(status="cancelled")
+			)
+		db.commit()
+		return run_ids
 
 
 def transition_generation_run(
