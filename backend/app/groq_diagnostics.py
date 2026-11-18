@@ -229,13 +229,30 @@ def log_groq_api_error(
 	correlation_id: str | None = None,
 	attempt: str | None = None,
 ) -> None:
-	if not groq_debug_errors_enabled() or not is_groq_diagnostic_error(error):
+	if not is_groq_diagnostic_error(error):
+		return
+	metadata = groq_error_metadata(error)
+	from .observability import log_technical_event
+	log_technical_event(
+		"error",
+		"GROQ_API_ERROR",
+		correlation_id=correlation_id,
+		purpose=purpose,
+		provider=provider,
+		model=model,
+		status=str(metadata.get("http_status") or "error"),
+		error_code=metadata.get("error_code") or metadata.get("exception_type"),
+		latency_ms=round(latency_ms, 2),
+		task_type=task_type,
+		attempt=attempt,
+	)
+	if not groq_debug_errors_enabled():
 		return
 	diagnostic: dict[str, object | None] = {
 		"event": "GROQ_API_ERROR",
 		"correlation_id": correlation_id,
 		"attempt": attempt,
-		**groq_error_metadata(error),
+		**metadata,
 		"provider": provider,
 		"model": model,
 		"purpose": purpose,

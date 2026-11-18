@@ -10,6 +10,7 @@ os.environ["DATABASE_URL"] = f"sqlite:///{TEST_DIR}/test.db"
 os.environ["UPLOAD_DIR"] = f"{TEST_DIR}/uploads"
 os.environ["GROQ_API_KEY"] = "test-key"
 os.environ["RATE_LIMIT_REQUESTS"] = "1000"
+os.environ["OBSERVABILITY_LOG_PATH"] = f"{TEST_DIR}/observability.jsonl"
 
 import pytest
 from fastapi.testclient import TestClient

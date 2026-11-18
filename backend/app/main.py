@@ -61,6 +61,15 @@ from .memory import (
 	upsert_project_memory,
 )
 from .models import Attachment, BranchSummary, Conversation, DocumentChunk, KnowledgeItem, Message, StructuredMemoryItem, User, utc_now
+from .observability import (
+	configure_observability_logging,
+	defer_activity_event,
+	defer_ai_usage_event,
+	drain_observability_writes,
+	log_technical_event,
+	record_activity_event,
+	record_ai_usage_event,
+)
 from .rag import chunk_text, estimate_tokens, retrieve_chunks
 from .rate_limit import rate_limiter
 from .ratings import router as ratings_router
@@ -158,7 +167,18 @@ def _supports_stream_options(create) -> bool:
 		return False
 
 
-def _normalize_ai_usage(value) -> dict[str, int] | None:
+def _first_token_value(*values: object) -> int | None:
+	for value in values:
+		if value is None:
+			continue
+		try:
+			return int(value)
+		except (TypeError, ValueError):
+			return None
+	return None
+
+
+def _normalize_ai_usage(value) -> dict[str, int | None] | None:
 	usage = _usage_value(value, "usage")
 	if usage is None:
 		usage = _usage_value(_usage_value(value, "x_groq"), "usage")
@@ -169,9 +189,18 @@ def _normalize_ai_usage(value) -> dict[str, int] | None:
 		return None
 	details = _usage_value(usage, "input_tokens_details") or _usage_value(usage, "prompt_tokens_details")
 	return {
-		"input_tokens": _usage_value(usage, "input_tokens") or _usage_value(usage, "prompt_tokens") or 0,
-		"cached_tokens": _usage_value(details, "cached_tokens") or _usage_value(usage, "cached_tokens") or 0,
-		"output_tokens": _usage_value(usage, "output_tokens") or _usage_value(usage, "completion_tokens") or 0,
+		"input_tokens": _first_token_value(
+			_usage_value(usage, "input_tokens"),
+			_usage_value(usage, "prompt_tokens"),
+		),
+		"cached_tokens": _first_token_value(
+			_usage_value(details, "cached_tokens"),
+			_usage_value(usage, "cached_tokens"),
+		),
+		"output_tokens": _first_token_value(
+			_usage_value(usage, "output_tokens"),
+			_usage_value(usage, "completion_tokens"),
+		),
 	}
 
 
@@ -186,6 +215,11 @@ def _log_ai_usage(
 	reasoning_effort: str | None,
 	status: AIInteractionStatus,
 	latency_ms: float,
+	event_id: str | None = None,
+	user_id: str | None = None,
+	conversation_id: str | None = None,
+	correlation_id: str | None = None,
+	defer_persistence: bool = False,
 ) -> None:
 	usage = _normalize_ai_usage(value)
 	reasoning_effort_value = reasoning_effort or "none"
@@ -201,21 +235,73 @@ def _log_ai_usage(
 			status,
 			latency_ms,
 		)
-		return
-	ai_usage_logger.info(
-		"AI usage purpose=%s task_type=%s provider=%s model=%s prompt_version=%s reasoning_effort=%s status=%s latency_ms=%.2f input_tokens=%s cached_tokens=%s output_tokens=%s",
-		purpose,
-		task_type,
-		provider,
-		model,
-		prompt_version,
-		reasoning_effort_value,
-		status,
-		latency_ms,
-		usage["input_tokens"],
-		usage["cached_tokens"],
-		usage["output_tokens"],
+	else:
+		ai_usage_logger.info(
+			"AI usage purpose=%s task_type=%s provider=%s model=%s prompt_version=%s reasoning_effort=%s status=%s latency_ms=%.2f input_tokens=%s cached_tokens=%s output_tokens=%s",
+			purpose,
+			task_type,
+			provider,
+			model,
+			prompt_version,
+			reasoning_effort_value,
+			status,
+			latency_ms,
+			usage["input_tokens"],
+			usage["cached_tokens"],
+			usage["output_tokens"],
+		)
+	input_tokens = usage["input_tokens"] if usage is not None else None
+	output_tokens = usage["output_tokens"] if usage is not None else None
+	cached_tokens = usage["cached_tokens"] if usage is not None else None
+	total_tokens = input_tokens + output_tokens if input_tokens is not None and output_tokens is not None else None
+	log_technical_event(
+		"info" if status == "success" else "warning",
+		"AI_USAGE",
+		correlation_id=correlation_id,
+		user_id=user_id,
+		purpose=purpose,
+		task_type=task_type,
+		provider=provider,
+		model=model,
+		prompt_version=prompt_version,
+		status=status,
+		latency_ms=round(latency_ms, 2),
+		input_tokens=input_tokens,
+		output_tokens=output_tokens,
+		cached_tokens=cached_tokens,
+		total_tokens=total_tokens,
 	)
+	persist = defer_ai_usage_event if defer_persistence else record_ai_usage_event
+	try:
+		persist(
+			event_id=event_id or str(uuid4()),
+			user_id=user_id,
+			conversation_id=conversation_id,
+			correlation_id=correlation_id,
+			purpose=purpose,
+			task_type=task_type,
+			provider=provider,
+			model=model,
+			prompt_version=prompt_version,
+			reasoning_effort=reasoning_effort,
+			status=status,
+			input_tokens=input_tokens,
+			output_tokens=output_tokens,
+			cached_tokens=cached_tokens,
+			latency_ms=latency_ms,
+		)
+	except Exception as error:
+		log_technical_event(
+			"error",
+			"AI_USAGE_PERSIST_FAILED",
+			correlation_id=correlation_id,
+			user_id=user_id,
+			purpose=purpose,
+			provider=provider,
+			model=model,
+			status="error",
+			error_code=type(error).__name__,
+		)
 
 
 class RegisterPayload(BaseModel):
@@ -736,7 +822,14 @@ def _title_messages(first_message: str) -> list[dict[str, str]]:
 	]
 
 
-async def _generate_chat_title(first_message: str, fallback_source: str) -> str:
+async def _generate_chat_title(
+	first_message: str,
+	fallback_source: str,
+	*,
+	user_id: str | None = None,
+	conversation_id: str | None = None,
+	correlation_id: str | None = None,
+) -> str:
 	if client is None or not first_message.strip():
 		return _clean_title(fallback_source)
 	try:
@@ -753,6 +846,7 @@ async def _generate_chat_title(first_message: str, fallback_source: str) -> str:
 			reasoning_effort = "low"
 			completion_options.update(reasoning_effort=reasoning_effort, include_reasoning=False)
 		started = time.perf_counter()
+		usage_event_id = str(uuid4())
 		completion = None
 		status: AIInteractionStatus = "error"
 		try:
@@ -786,6 +880,10 @@ async def _generate_chat_title(first_message: str, fallback_source: str) -> str:
 				reasoning_effort=reasoning_effort,
 				status=status,
 				latency_ms=(time.perf_counter() - started) * 1000,
+				event_id=usage_event_id,
+				user_id=user_id,
+				conversation_id=conversation_id,
+				correlation_id=correlation_id,
 			)
 		content = completion.choices[0].message.content if completion.choices else ""
 		ai_usage_logger.info("Semantic chat title raw=%r", content)
@@ -1330,6 +1428,19 @@ def _log_branch_summary_metrics(
 		"status": status,
 		**size_metrics,
 	}, ensure_ascii=False, sort_keys=True))
+	log_technical_event(
+		"info" if status == "success" else "warning",
+		"BRANCH_SUMMARY_METRICS",
+		correlation_id=correlation_id,
+		purpose="branch_summary",
+		provider="groq",
+		model=settings.groq_model,
+		status=status,
+		phase="generation",
+		result=result,
+		input_tokens=usage["input_tokens"] if usage is not None else None,
+		output_tokens=usage["output_tokens"] if usage is not None else None,
+	)
 	if result == "accepted" and size_metrics["summary_growth_warning"]:
 		logger.warning(
 			"Branch summary growth warning: correlation_id=%s previous_summary_chars=%s "
@@ -1382,6 +1493,15 @@ def _log_branch_summary_persistence_metrics(
 		"status": "success" if result == "persisted" else "error",
 		**size_metrics,
 	}, ensure_ascii=False, sort_keys=True))
+	log_technical_event(
+		"info" if result == "persisted" else "warning",
+		"BRANCH_SUMMARY_METRICS",
+		correlation_id=correlation_id,
+		purpose="branch_summary",
+		status="success" if result == "persisted" else "error",
+		phase="persistence",
+		result=result,
+	)
 
 
 async def _generate_branch_summary(
@@ -1391,6 +1511,8 @@ async def _generate_branch_summary(
 	correlation_id: str | None = None,
 	trigger_reason: str = "new_excluded_history",
 	coverage_complete: bool = True,
+	user_id: str | None = None,
+	conversation_id: str | None = None,
 ) -> str | None:
 	if client is None or not new_messages:
 		return None
@@ -1453,10 +1575,17 @@ async def _generate_branch_summary(
 	retry_wait_seconds = 0.0
 	try:
 		while True:
+			attempt_started = time.perf_counter()
+			attempt_completion = None
+			attempt_status: AIInteractionStatus = "error"
+			usage_event_id = str(uuid4())
+			retry_after: float | None = None
 			try:
-				completion = await client.chat.completions.create(**completion_options)
-				break
+				attempt_completion = await client.chat.completions.create(**completion_options)
+				completion = attempt_completion
+				attempt_status = "success"
 			except asyncio.CancelledError:
+				attempt_status = "cancelled"
 				raise
 			except Exception as error:
 				retry_after = _branch_summary_retry_after_seconds(error)
@@ -1464,6 +1593,23 @@ async def _generate_branch_summary(
 					raise
 				retry_count = 1
 				retry_wait_seconds = retry_after
+			finally:
+				_log_ai_usage(
+					attempt_completion,
+					purpose="branch_summary",
+					task_type=task_type,
+					provider="groq",
+					model=settings.groq_model,
+					prompt_version=BRANCH_SUMMARY_PROMPT_VERSION,
+					reasoning_effort=reasoning_effort,
+					status=attempt_status,
+					latency_ms=(time.perf_counter() - attempt_started) * 1000,
+					event_id=usage_event_id,
+					user_id=user_id,
+					conversation_id=conversation_id,
+					correlation_id=correlation_id,
+				)
+			if retry_after is not None:
 				logger.warning(
 					"Branch summary rate limited; retrying once: retry_count=%s retry_wait_seconds=%s correlation_id=%s",
 					retry_count,
@@ -1471,6 +1617,8 @@ async def _generate_branch_summary(
 					correlation_id,
 				)
 				await asyncio.sleep(retry_after)
+				continue
+			break
 		status = "success"
 		choice = completion.choices[0] if completion.choices else None
 		finish_reason = _usage_value(choice, "finish_reason")
@@ -1496,6 +1644,7 @@ async def _generate_branch_summary(
 			model=settings.groq_model,
 			latency_ms=(time.perf_counter() - started) * 1000,
 			request_options=completion_options,
+			correlation_id=correlation_id,
 		)
 		logger.warning(
 			"Branch summary generation failed: error_type=%s retry_count=%s retry_wait_seconds=%s",
@@ -1505,17 +1654,6 @@ async def _generate_branch_summary(
 		)
 		return None
 	finally:
-		_log_ai_usage(
-			completion,
-			purpose="branch_summary",
-			task_type=task_type,
-			provider="groq",
-			model=settings.groq_model,
-			prompt_version=BRANCH_SUMMARY_PROMPT_VERSION,
-			reasoning_effort=reasoning_effort,
-			status=status,
-			latency_ms=(time.perf_counter() - started) * 1000,
-		)
 		_log_branch_summary_metrics(
 			completion,
 			existing_summary=existing_summary,
@@ -1605,6 +1743,8 @@ async def _summarize_oversized_branch_message(
 	*,
 	correlation_id: str | None,
 	trigger_reason: str,
+	user_id: str | None = None,
+	conversation_id: str | None = None,
 ) -> str | None:
 	remaining = message.content or "[Сообщение содержало только файлы]"
 	working_summary: BranchSummary | BranchSummaryDraft | None = existing_summary
@@ -1617,6 +1757,8 @@ async def _summarize_oversized_branch_message(
 				correlation_id=correlation_id,
 				trigger_reason=trigger_reason,
 				coverage_complete=False,
+				user_id=user_id,
+				conversation_id=conversation_id,
 			)
 			return None
 		fragment, consumed_characters = fragment_result
@@ -1627,6 +1769,8 @@ async def _summarize_oversized_branch_message(
 			correlation_id=correlation_id,
 			trigger_reason=trigger_reason,
 			coverage_complete=is_final_fragment,
+			user_id=user_id,
+			conversation_id=conversation_id,
 		)
 		if summary_text is None:
 			return None
@@ -1644,6 +1788,7 @@ async def _update_branch_summary(
 	excluded_history: list[Message],
 	*,
 	correlation_id: str | None = None,
+	user_id: str | None = None,
 ) -> bool:
 	if not excluded_history:
 		return False
@@ -1682,6 +1827,8 @@ async def _update_branch_summary(
 				batch,
 				correlation_id=correlation_id,
 				trigger_reason=trigger_reason,
+				user_id=user_id,
+				conversation_id=conversation_id,
 			)
 		else:
 			batch = [remaining_messages[0]]
@@ -1690,6 +1837,8 @@ async def _update_branch_summary(
 				batch[0],
 				correlation_id=correlation_id,
 				trigger_reason=trigger_reason,
+				user_id=user_id,
+				conversation_id=conversation_id,
 			)
 		if summary_text is None:
 			return updated
@@ -1724,7 +1873,13 @@ def _parse_memory_patch(content: str) -> dict[str, dict[str, object] | list[obje
 	return patch
 
 
-async def _extract_memory_patch(user_message: str) -> dict[str, dict[str, object] | list[object]] | None:
+async def _extract_memory_patch(
+	user_message: str,
+	*,
+	user_id: str | None = None,
+	conversation_id: str | None = None,
+	correlation_id: str | None = None,
+) -> dict[str, dict[str, object] | list[object]] | None:
 	if client is None or not user_message.strip():
 		return None
 	task_type: AITaskType = "memory"
@@ -1744,6 +1899,7 @@ async def _extract_memory_patch(user_message: str) -> dict[str, dict[str, object
 		reasoning_effort = "low"
 		completion_options.update(reasoning_effort=reasoning_effort, include_reasoning=False)
 	started = time.perf_counter()
+	usage_event_id = str(uuid4())
 	completion = None
 	status: AIInteractionStatus = "error"
 	try:
@@ -1776,6 +1932,10 @@ async def _extract_memory_patch(user_message: str) -> dict[str, dict[str, object
 			reasoning_effort=reasoning_effort,
 			status=status,
 			latency_ms=(time.perf_counter() - started) * 1000,
+			event_id=usage_event_id,
+			user_id=user_id,
+			conversation_id=conversation_id,
+			correlation_id=correlation_id,
 		)
 	try:
 		content = completion.choices[0].message.content if completion.choices else ""
@@ -1785,10 +1945,22 @@ async def _extract_memory_patch(user_message: str) -> dict[str, dict[str, object
 		return None
 
 
-async def _extract_and_store_memory(db: Session, user_id: str, user_message: str) -> None:
+async def _extract_and_store_memory(
+	db: Session,
+	user_id: str,
+	user_message: str,
+	*,
+	conversation_id: str | None = None,
+	correlation_id: str | None = None,
+) -> None:
 	if not should_extract_memory(user_message):
 		return
-	patch = await _extract_memory_patch(user_message)
+	patch = await _extract_memory_patch(
+		user_message,
+		user_id=user_id,
+		conversation_id=conversation_id,
+		correlation_id=correlation_id,
+	)
 	if patch is None:
 		return
 	try:
@@ -2046,6 +2218,13 @@ async def _trash_cleanup_loop() -> None:
 @asynccontextmanager
 async def lifespan(_app: FastAPI):
 	settings.validate_production()
+	try:
+		configure_observability_logging()
+	except OSError as error:
+		logger.warning(
+			"Observability JSONL logging unavailable: error_type=%s",
+			type(error).__name__,
+		)
 	if settings.file_storage_driver == "local":
 		settings.upload_dir.mkdir(parents=True, exist_ok=True)
 	get_file_storage()
@@ -2061,6 +2240,7 @@ async def lifespan(_app: FastAPI):
 		cleanup_task.cancel()
 		with suppress(asyncio.CancelledError):
 			await cleanup_task
+		await drain_observability_writes()
 		close_gemini = getattr(gemini_client, "aclose", None)
 		if close_gemini is not None:
 			await close_gemini()
@@ -2082,6 +2262,7 @@ app.add_middleware(
 
 @app.post(f"{settings.api_prefix}/messages/{{message_id}}/markdown-file", tags=["messages"])
 async def create_message_markdown_file(
+	request: Request,
 	message_id: str,
 	payload: MarkdownFilePayload,
 	user: User = Depends(get_current_user),
@@ -2146,6 +2327,13 @@ async def create_message_markdown_file(
 		except Exception:
 			logger.exception("Generated Markdown cleanup failed: storage_key=%s", storage_key)
 		raise
+	record_activity_event(
+		user_id=user.id,
+		event_type="file.generated",
+		resource_type="attachment",
+		resource_id=attachment.id,
+		correlation_id=_request_id(request),
+	)
 	return {"attachment": _attachment_payload(attachment), "created": True}
 
 
@@ -2183,6 +2371,14 @@ async def observability_middleware(request: Request, call_next):
 			"statusCode": status_code,
 			"durationMs": duration_ms,
 		}, ensure_ascii=False))
+		log_technical_event(
+			"info" if status_code < 500 else "error",
+			"HTTP_REQUEST",
+			correlation_id=_request_id(request),
+			endpoint=route_path,
+			status=str(status_code),
+			latency_ms=duration_ms,
+		)
 
 
 @app.exception_handler(AppError)
@@ -2196,6 +2392,14 @@ async def app_error_handler(request: Request, error: AppError):
 	)
 	if error.details:
 		logger.warning("Application error diagnostics: code=%s details=%s", error.code, error.details)
+	log_technical_event(
+		"warning" if error.status_code < 500 else "error",
+		"APPLICATION_ERROR",
+		correlation_id=_request_id(request),
+		endpoint=request.url.path,
+		status=str(error.status_code),
+		error_code=error.code,
+	)
 	return JSONResponse(status_code=error.status_code, content=_error_payload(error.code, error.message, _request_id(request), error.details))
 
 
@@ -2232,15 +2436,27 @@ async def http_error_handler(request: Request, error: HTTPException):
 
 @app.exception_handler(Exception)
 async def unexpected_error_handler(request: Request, error: Exception):
-	logger.exception(json.dumps({
+	diagnostic = {
 		"event": "UNHANDLED_REQUEST_ERROR",
 		"timestamp": utc_now().isoformat(),
 		"requestId": _request_id(request),
 		"method": request.method,
 		"endpoint": request.url.path,
 		"errorType": type(error).__name__,
-		"cause": str(error),
-	}, ensure_ascii=False))
+	}
+	if settings.is_production:
+		logger.error(json.dumps(diagnostic, ensure_ascii=False))
+	else:
+		diagnostic["cause"] = str(error)
+		logger.exception(json.dumps(diagnostic, ensure_ascii=False))
+	log_technical_event(
+		"error",
+		"UNHANDLED_REQUEST_ERROR",
+		correlation_id=_request_id(request),
+		endpoint=request.url.path,
+		status="error",
+		error_code=type(error).__name__,
+	)
 	return JSONResponse(status_code=500, content=_error_payload("INTERNAL_ERROR", "Внутренняя ошибка сервера", _request_id(request)))
 
 
@@ -2354,6 +2570,13 @@ def register(payload: RegisterPayload, request: Request, response: Response, db:
 		raise AppError(409, "EMAIL_EXISTS", "Пользователь с таким email уже существует", {"field": "email"}) from error
 	_set_session_cookie(response, user.id)
 	csrf = issue_csrf_token(request, response, rotate=True)
+	record_activity_event(
+		user_id=user.id,
+		event_type="auth.registered",
+		resource_type="user",
+		resource_id=user.id,
+		correlation_id=_request_id(request),
+	)
 	return {"user": _auth_user_payload(user), "csrfToken": csrf}
 
 
@@ -2367,15 +2590,41 @@ def login(payload: LoginPayload, request: Request, response: Response, db: Sessi
 	)))
 	if user is None or not verify_password(payload.password, user.password_hash):
 		raise AppError(401, "INVALID_CREDENTIALS", "Неверный email, логин или пароль")
-	_set_session_cookie(response, user.id)
+	user_id = user.id
+	user_payload = _auth_user_payload(user)
+	_set_session_cookie(response, user_id)
 	csrf = issue_csrf_token(request, response, rotate=True)
-	return {"user": _auth_user_payload(user), "csrfToken": csrf}
+	db.rollback()
+	record_activity_event(
+		user_id=user_id,
+		event_type="auth.login",
+		resource_type="user",
+		resource_id=user_id,
+		correlation_id=_request_id(request),
+	)
+	return {"user": user_payload, "csrfToken": csrf}
 
 
 @app.post(f"{settings.api_prefix}/auth/logout", tags=["auth"])
-def logout(response: Response):
+def logout(request: Request, response: Response, db: Session = Depends(get_db)):
+	user_id: str | None = None
+	session_token = request.cookies.get(COOKIE_NAME)
+	if session_token:
+		try:
+			user_id = get_current_user(session_token=session_token, db=db).id
+		except AppError:
+			pass
+		db.rollback()
 	response.delete_cookie(COOKIE_NAME, path="/")
 	response.delete_cookie(CSRF_COOKIE_NAME, path="/")
+	if user_id is not None:
+		record_activity_event(
+			user_id=user_id,
+			event_type="auth.logout",
+			resource_type="user",
+			resource_id=user_id,
+			correlation_id=_request_id(request),
+		)
 	return {"ok": True}
 
 
@@ -2403,7 +2652,7 @@ def list_deleted_conversations(user: User = Depends(get_current_user), db: Sessi
 
 
 @app.post(f"{settings.api_prefix}/conversations", tags=["conversations"])
-def create_conversation(payload: ConversationPayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def create_conversation(request: Request, payload: ConversationPayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	raw_title = payload.title.strip()
 	if not raw_title:
 		raise AppError(422, "EMPTY_TITLE", "Название диалога не может быть пустым")
@@ -2411,17 +2660,31 @@ def create_conversation(payload: ConversationPayload, user: User = Depends(get_c
 	conversation = Conversation(user_id=user.id, title=title)
 	db.add(conversation)
 	db.commit()
+	record_activity_event(
+		user_id=user.id,
+		event_type="conversation.created",
+		resource_type="conversation",
+		resource_id=conversation.id,
+		correlation_id=_request_id(request),
+	)
 	return {"conversation": _conversation_payload(conversation)}
 
 
 @app.post(f"{settings.api_prefix}/conversations/trash/{{conversation_id}}/restore", tags=["conversations"])
-def restore_conversation(conversation_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def restore_conversation(request: Request, conversation_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	conversation = _owned_conversation(db, conversation_id, user.id, include_deleted=True)
 	if conversation.deleted_at is None:
 		raise AppError(409, "CONVERSATION_NOT_DELETED", "Диалог не находится в корзине")
 	conversation.deleted_at = None
 	conversation.updated_at = utc_now()
 	db.commit()
+	record_activity_event(
+		user_id=user.id,
+		event_type="conversation.restored",
+		resource_type="conversation",
+		resource_id=conversation.id,
+		correlation_id=_request_id(request),
+	)
 	return {"conversation": _conversation_payload(conversation)}
 
 
@@ -2498,11 +2761,18 @@ def activate_message_branch(message_id: str, user: User = Depends(get_current_us
 
 
 @app.delete(f"{settings.api_prefix}/conversations/{{conversation_id}}", tags=["conversations"])
-def delete_conversation(conversation_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def delete_conversation(request: Request, conversation_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	conversation = _owned_conversation(db, conversation_id, user.id)
 	conversation.deleted_at = utc_now()
 	conversation.updated_at = utc_now()
 	db.commit()
+	record_activity_event(
+		user_id=user.id,
+		event_type="conversation.deleted",
+		resource_type="conversation",
+		resource_id=conversation.id,
+		correlation_id=_request_id(request),
+	)
 	return Response(status_code=204)
 
 
@@ -2546,7 +2816,15 @@ async def _read_upload(upload: UploadFile, total_size: int) -> tuple[bytes, int]
 	return b"".join(chunks), total_size
 
 
-async def _extract_file(file_name: str, content_type: str, content: bytes) -> ExtractedFile:
+async def _extract_file(
+	file_name: str,
+	content_type: str,
+	content: bytes,
+	*,
+	user_id: str | None = None,
+	conversation_id: str | None = None,
+	correlation_id: str | None = None,
+) -> ExtractedFile:
 	local_result = await asyncio.to_thread(extract_text, file_name, content_type, content)
 	if not settings.enable_vision or client is None or not is_image_file(file_name, content_type):
 		return local_result
@@ -2568,6 +2846,7 @@ async def _extract_file(file_name: str, content_type: str, content: bytes) -> Ex
 			"stream": False,
 		}
 		started = time.perf_counter()
+		usage_event_id = str(uuid4())
 		completion = None
 		status: AIInteractionStatus = "error"
 		try:
@@ -2599,6 +2878,10 @@ async def _extract_file(file_name: str, content_type: str, content: bytes) -> Ex
 				reasoning_effort=None,
 				status=status,
 				latency_ms=(time.perf_counter() - started) * 1000,
+				event_id=usage_event_id,
+				user_id=user_id,
+				conversation_id=conversation_id,
+				correlation_id=correlation_id,
 			)
 		vision_text = completion.choices[0].message.content if completion.choices else ""
 		if not isinstance(vision_text, str) or not vision_text.strip():
@@ -2989,11 +3272,30 @@ def _log_final_ai_context(
 		settings.history_token_budget,
 		settings.max_output_tokens,
 	)
+	log_technical_event(
+		"info",
+		"AI_FINAL_CONTEXT",
+		correlation_id=correlation_id,
+		purpose="chat",
+		provider=model.provider,
+		model=model.provider_model,
+		task_type=task_type,
+		attempt=attempt,
+		status="prepared",
+		message_count=len(messages),
+		system_tokens=system_tokens,
+		summary_tokens=summary_tokens,
+		memory_tokens=memory_tokens,
+		history_tokens=history_tokens,
+		user_tokens=user_tokens,
+		input_tokens=input_tokens,
+	)
 
 
 async def _stream_groq_deltas(
 	messages: list[dict[str, str]],
 	user_id: str,
+	conversation_id: str,
 	web_search: bool,
 	model: ChatModelSpec,
 	*,
@@ -3004,6 +3306,7 @@ async def _stream_groq_deltas(
 ) -> AsyncIterator[str]:
 	kwargs = _chat_completion_options(messages, user_id, web_search, model)
 	started = time.perf_counter()
+	usage_event_id = str(uuid4())
 	usage = None
 	status: AIInteractionStatus = "error"
 	stream_provider_request_id = None
@@ -3073,6 +3376,11 @@ async def _stream_groq_deltas(
 			reasoning_effort=None,
 			status=status,
 			latency_ms=latency_ms,
+			event_id=usage_event_id,
+			user_id=user_id,
+			conversation_id=conversation_id,
+			correlation_id=correlation_id,
+			defer_persistence=True,
 		)
 		if status == "success" and attempt == "compact" and correlation_id is not None:
 			log_compact_fallback_result(
@@ -3108,29 +3416,33 @@ def _gemini_request_parts(
 	return contents, config
 
 
-def _gemini_usage(value) -> dict[str, int] | None:
+def _gemini_usage(value) -> dict[str, int | None] | None:
 	usage = getattr(value, "usage_metadata", None)
 	if usage is None:
 		return None
 	return {
-		"input_tokens": getattr(usage, "prompt_token_count", 0) or 0,
-		"cached_tokens": getattr(usage, "cached_content_token_count", 0) or 0,
-		"output_tokens": getattr(usage, "candidates_token_count", 0) or 0,
+		"input_tokens": _first_token_value(getattr(usage, "prompt_token_count", None)),
+		"cached_tokens": _first_token_value(getattr(usage, "cached_content_token_count", None)),
+		"output_tokens": _first_token_value(getattr(usage, "candidates_token_count", None)),
 	}
 
 
 async def _stream_gemini_deltas(
 	messages: list[dict[str, str]],
+	user_id: str,
+	conversation_id: str,
 	web_search: bool,
 	model: ChatModelSpec,
 	*,
 	task_type: AITaskType,
 	prompt_version: str,
+	correlation_id: str | None = None,
 ) -> AsyncIterator[str]:
 	if gemini_client is None:
 		raise AppError(503, "AI_MODEL_UNAVAILABLE", "Gemini не настроена на сервере")
 	contents, config = _gemini_request_parts(messages, web_search)
 	started = time.perf_counter()
+	usage_event_id = str(uuid4())
 	usage = None
 	status: AIInteractionStatus = "error"
 	try:
@@ -3161,12 +3473,18 @@ async def _stream_gemini_deltas(
 			reasoning_effort=None,
 			status=status,
 			latency_ms=(time.perf_counter() - started) * 1000,
+			event_id=usage_event_id,
+			user_id=user_id,
+			conversation_id=conversation_id,
+			correlation_id=correlation_id,
+			defer_persistence=True,
 		)
 
 
 async def _stream_ai_deltas(
 	messages: list[dict[str, str]],
 	user_id: str,
+	conversation_id: str,
 	web_search: bool,
 	model: ChatModelSpec,
 	*,
@@ -3178,16 +3496,20 @@ async def _stream_ai_deltas(
 	if model.provider == "gemini":
 		async for delta in _stream_gemini_deltas(
 			messages,
+			user_id,
+			conversation_id,
 			web_search,
 			model,
 			task_type=task_type,
 			prompt_version=prompt_version,
+			correlation_id=correlation_id,
 		):
 			yield delta
 		return
 	async for delta in _stream_groq_deltas(
 		messages,
 		user_id,
+		conversation_id,
 		web_search,
 		model,
 		task_type=task_type,
@@ -3215,6 +3537,7 @@ async def stream_chat(
 	rate_limiter.check(f"chat:{user.id}")
 	chat_model = _resolve_chat_model(model_id)
 	conversation = _owned_conversation(db, conversation_id, user.id)
+	request_id = _request_id(request)
 	if web_search and search_mode == "none":
 		search_mode = "web"
 	web_search = search_mode == "web"
@@ -3335,7 +3658,14 @@ async def stream_chat(
 			try:
 				content, total_size = await _read_upload(upload, total_size)
 				content_type = upload.content_type or "application/octet-stream"
-				extracted = await _extract_file(file_name, content_type, content)
+				extracted = await _extract_file(
+					file_name,
+					content_type,
+					content,
+					user_id=user.id,
+					conversation_id=conversation.id,
+					correlation_id=request_id,
+				)
 			except Exception as error:
 				if isinstance(error, AppError):
 					raise
@@ -3369,7 +3699,14 @@ async def stream_chat(
 				raise AppError(413, "ATTACHMENTS_TOTAL_SIZE_LIMIT_EXCEEDED", "Общий размер файлов превышает лимит", {
 					"actualTotalSize": total_size, "maximumTotalSize": settings.max_total_file_size,
 				})
-			extracted = await _extract_file(file_name, "text/plain", content)
+			extracted = await _extract_file(
+				file_name,
+				"text/plain",
+				content,
+				user_id=user.id,
+				conversation_id=conversation.id,
+				correlation_id=request_id,
+			)
 			attachment_id = str(uuid4())
 			storage_key = build_storage_key(user.id, "conversations", conversation.id, user_message.id)
 			await get_file_storage().save(storage_key, content, "text/plain")
@@ -3392,9 +3729,23 @@ async def stream_chat(
 
 		if conversation.title == "Новый чат" and not any(message.role == "user" for message in branch_history):
 			fallback_source = title_source or prompt or files[0].filename or "Новый чат"
-			conversation.title = await _generate_chat_title(title_source, fallback_source)
+			conversation.title = await _generate_chat_title(
+				title_source,
+				fallback_source,
+				user_id=user.id,
+				conversation_id=conversation.id,
+				correlation_id=request_id,
+			)
 		conversation.updated_at = utc_now()
 		db.commit()
+		if files or automatic_paste is not None:
+			defer_activity_event(
+				user_id=user.id,
+				event_type="file.uploaded",
+				resource_type="conversation",
+				resource_id=conversation.id,
+				correlation_id=request_id,
+			)
 		user_message = db.scalar(select(Message).options(selectinload(Message.attachments), selectinload(Message.ratings)).where(Message.id == user_message.id))
 
 	assistant_message = Message(
@@ -3408,7 +3759,6 @@ async def stream_chat(
 	db.add(assistant_message)
 	conversation.updated_at = utc_now()
 	db.commit()
-	request_id = _request_id(request)
 	assistant_id = assistant_message.id
 	try:
 		file_generation = bool(FILE_REQUEST_PATTERN.search(prompt))
@@ -3427,6 +3777,7 @@ async def stream_chat(
 			user_message,
 			excluded_history,
 			correlation_id=request_id,
+			user_id=user.id,
 		)
 		if summary_updated:
 			ai_messages, knowledge_result, uses_knowledge_context, excluded_history = build_chat_context(
@@ -3516,6 +3867,7 @@ async def stream_chat(
 				async for delta in _stream_ai_deltas(
 					ai_messages,
 					user.id,
+					conversation.id,
 					web_search,
 					chat_model,
 					task_type=task_type,
@@ -3548,6 +3900,7 @@ async def stream_chat(
 					async for delta in _stream_ai_deltas(
 						compact_messages,
 						user.id,
+						conversation.id,
 						web_search,
 						chat_model,
 						task_type=task_type,
@@ -3580,7 +3933,21 @@ async def stream_chat(
 					except Exception:
 						logger.exception("Generated file cleanup after commit failure failed: storage_key=%s", storage_key)
 				raise
-			await _extract_and_store_memory(db, user.id, user_message.content)
+			if generated_files:
+				defer_activity_event(
+					user_id=user.id,
+					event_type="file.generated",
+					resource_type="message",
+					resource_id=assistant_id,
+					correlation_id=request_id,
+				)
+			await _extract_and_store_memory(
+				db,
+				user.id,
+				user_message.content,
+				conversation_id=conversation.id,
+				correlation_id=request_id,
+			)
 			completed_message = db.scalar(
 				select(Message).options(selectinload(Message.attachments), selectinload(Message.ratings)).where(Message.id == assistant_id)
 			)
@@ -3603,6 +3970,8 @@ async def stream_chat(
 			AI_REQUESTS_TOTAL.labels("error", str(web_search).lower()).inc()
 			yield _event("error", code=error.code, message=error.message, requestId=request_id)
 		except Exception as error:
+			code, message = _safe_ai_error(error)
+			duration_ms = round((time.perf_counter() - started) * 1000, 2)
 			failure_diagnostic = json.dumps({
 				"event": "AI_REQUEST_FAILED",
 				"timestamp": utc_now().isoformat(),
@@ -3613,13 +3982,24 @@ async def stream_chat(
 				"model": chat_model.provider_model,
 				"errorType": type(error).__name__,
 				"providerStatus": getattr(error, "status_code", None),
-				"durationMs": round((time.perf_counter() - started) * 1000, 2),
+				"durationMs": duration_ms,
 			}, ensure_ascii=False)
-			if is_groq_provider_error(error):
+			if is_groq_provider_error(error) or settings.is_production:
 				logger.error(failure_diagnostic)
 			else:
 				logger.exception(failure_diagnostic)
-			code, message = _safe_ai_error(error)
+			log_technical_event(
+				"error",
+				"AI_REQUEST_FAILED",
+				correlation_id=request_id,
+				user_id=user.id,
+				purpose="chat",
+				provider=chat_model.provider,
+				model=chat_model.provider_model,
+				status="error",
+				error_code=code,
+				latency_ms=duration_ms,
+			)
 			assistant_message.content = message
 			assistant_message.status = "error"
 			assistant_message.error_code = code

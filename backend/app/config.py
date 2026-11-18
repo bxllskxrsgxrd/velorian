@@ -37,6 +37,13 @@ class Settings:
 	groq_vision_model: str = os.getenv("GROQ_VISION_MODEL", "qwen/qwen3.8-27b")
 	groq_debug_errors: bool = _as_bool(os.getenv("GROQ_DEBUG_ERRORS"), False)
 	summary_debug_metrics: bool = _as_bool(os.getenv("SUMMARY_DEBUG_METRICS"), False)
+	ai_pricing_json: str = os.getenv("AI_PRICING_JSON", "{}")
+	observability_log_path: Path = Path(os.getenv(
+		"OBSERVABILITY_LOG_PATH",
+		str(BASE_DIR / "data" / "logs" / "observability.jsonl"),
+	))
+	observability_log_max_bytes: int = int(os.getenv("OBSERVABILITY_LOG_MAX_BYTES", str(10 * 1024 * 1024)))
+	observability_log_backup_count: int = int(os.getenv("OBSERVABILITY_LOG_BACKUP_COUNT", "5"))
 	gemini_api_key: str | None = os.getenv("GEMINI_API_KEY")
 	gemini_model: str = os.getenv("GEMINI_MODEL", "gemini-3.8-flash")
 	default_chat_model: str = os.getenv("DEFAULT_CHAT_MODEL", "gpt-oss-120b")

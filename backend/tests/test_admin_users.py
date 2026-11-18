@@ -8,7 +8,7 @@ from app import admin_users
 from app.auth import hash_password
 from app.database import SessionLocal
 from app.main import app
-from app.models import RoleChangeAudit, User
+from app.models import ActivityEvent, RoleChangeAudit, User
 from app.roles import UserRole
 
 
@@ -120,6 +120,12 @@ def test_owner_changes_roles_with_audit_and_existing_session_permissions(client)
 	]
 	assert events[0].actor_user_id == owner["id"]
 	assert events[0].correlation_id == "role-change-promote"
+	with SessionLocal() as db:
+		activity = list(db.scalars(select(ActivityEvent).where(
+			ActivityEvent.event_type == "admin.role_changed",
+			ActivityEvent.user_id == owner["id"],
+		)))
+	assert {event.resource_id for event in activity} == {event.id for event in events}
 
 
 def test_owner_cannot_assign_owner_change_owner_or_unknown_user(client):

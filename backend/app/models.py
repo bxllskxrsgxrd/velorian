@@ -1,7 +1,8 @@
 from datetime import datetime, timezone
+from decimal import Decimal
 from uuid import uuid4
 
-from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum as SQLAlchemyEnum, ForeignKey, Index, Integer, JSON, String, Text, UniqueConstraint
+from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum as SQLAlchemyEnum, Float, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint
 from sqlalchemy.orm import Mapped, mapped_column, relationship
 
 from .database import Base
@@ -78,6 +79,53 @@ class RoleChangeAudit(Base):
 	)
 	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 	correlation_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+
+
+class AIUsageEvent(Base):
+	__tablename__ = "ai_usage_events"
+	__table_args__ = (
+		CheckConstraint("status IN ('success', 'error', 'cancelled')", name="ck_ai_usage_events_status"),
+		Index("ix_ai_usage_events_user_created", "user_id", "created_at"),
+		Index("ix_ai_usage_events_model_created", "provider", "model", "created_at"),
+		Index("ix_ai_usage_events_status_created", "status", "created_at"),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+	user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+	conversation_id: Mapped[str | None] = mapped_column(ForeignKey("conversations.id", ondelete="SET NULL"), nullable=True, index=True)
+	correlation_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+	purpose: Mapped[str] = mapped_column(String(64))
+	task_type: Mapped[str] = mapped_column(String(32))
+	provider: Mapped[str] = mapped_column(String(32))
+	model: Mapped[str] = mapped_column(String(160))
+	prompt_version: Mapped[str] = mapped_column(String(64))
+	reasoning_effort: Mapped[str | None] = mapped_column(String(32), nullable=True)
+	status: Mapped[str] = mapped_column(String(16))
+	input_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+	output_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+	cached_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+	total_tokens: Mapped[int | None] = mapped_column(Integer, nullable=True)
+	latency_ms: Mapped[float] = mapped_column(Float)
+	estimated_cost_usd: Mapped[Decimal | None] = mapped_column(Numeric(18, 8), nullable=True)
+	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+
+
+class ActivityEvent(Base):
+	__tablename__ = "activity_events"
+	__table_args__ = (
+		Index("ix_activity_events_user_created", "user_id", "created_at"),
+		Index("ix_activity_events_type_created", "event_type", "created_at"),
+		Index("ix_activity_events_resource", "resource_type", "resource_id"),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+	user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), nullable=True)
+	event_type: Mapped[str] = mapped_column(String(80))
+	resource_type: Mapped[str] = mapped_column(String(48))
+	resource_id: Mapped[str | None] = mapped_column(String(128), nullable=True)
+	status: Mapped[str] = mapped_column(String(24))
+	correlation_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
 
 
 class Conversation(Base):

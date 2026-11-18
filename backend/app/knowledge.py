@@ -10,7 +10,7 @@ from pathlib import Path
 from typing import Annotated, Literal
 from urllib.parse import quote
 
-from fastapi import APIRouter, Depends, File, Form, Query, Response, UploadFile
+from fastapi import APIRouter, Depends, File, Form, Query, Request, Response, UploadFile
 from pydantic import BaseModel, Field, field_validator
 from sqlalchemy import and_, asc, desc, func, or_, select
 from sqlalchemy.exc import IntegrityError
@@ -24,6 +24,7 @@ from .file_processing import extract_text, validate_file_name
 from .knowledge_retrieval import KnowledgeRetrievalResult, KnowledgeSearchOptions, knowledge_retrieval_service
 from .markdown_files import markdown_file_name, split_markdown_title
 from .models import Attachment, Conversation, KnowledgeApproach, KnowledgeItem, Message, MessageRating, User, utc_now
+from .observability import record_activity_event
 from .storage import build_storage_key, get_file_storage
 
 
@@ -356,7 +357,7 @@ def list_knowledge_items(
 
 
 @router.post("")
-async def create_manual_knowledge_item(payload: KnowledgeCreatePayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def create_manual_knowledge_item(request: Request, payload: KnowledgeCreatePayload, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	approach = optional_owned_approach(db, payload.approach_id, user.id)
 	message: Message | None = None
 	attachment: Attachment | None = None
@@ -417,6 +418,13 @@ async def create_manual_knowledge_item(payload: KnowledgeCreatePayload, user: Us
 	except IntegrityError as error:
 		db.rollback()
 		raise AppError(409, "KNOWLEDGE_SOURCE_EXISTS", "Для этого ответа уже существует запись в базе знаний") from error
+	record_activity_event(
+		user_id=user.id,
+		event_type="knowledge.created",
+		resource_type="knowledge_item",
+		resource_id=item.id,
+		correlation_id=getattr(request.state, "request_id", None),
+	)
 	return {"item": knowledge_payload(item)}
 
 
@@ -442,6 +450,7 @@ def get_message_knowledge_link(message_id: str, user: User = Depends(get_current
 
 @router.post("/files")
 async def upload_knowledge_file(
+	request: Request,
 	file: UploadFile = File(...),
 	title: str = Form(default=""),
 	content: str | None = Form(default=None, max_length=2_000_000),
@@ -502,6 +511,13 @@ async def upload_knowledge_file(
 		except Exception:
 			logger.exception("Knowledge upload cleanup failed: storage_key=%s", storage_key)
 		raise
+	record_activity_event(
+		user_id=user.id,
+		event_type="knowledge.file_uploaded",
+		resource_type="knowledge_item",
+		resource_id=item.id,
+		correlation_id=getattr(request.state, "request_id", None),
+	)
 	return {"item": knowledge_payload(item)}
 
 
@@ -624,7 +640,7 @@ async def save_attachment_to_knowledge(
 
 
 @router.post("/messages/{message_id}")
-async def save_rated_message(message_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+async def save_rated_message(request: Request, message_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	message = db.scalar(
 		select(Message)
 		.join(Conversation, Conversation.id == Message.conversation_id)
@@ -697,6 +713,13 @@ async def save_rated_message(message_id: str, user: User = Depends(get_current_u
 			except Exception:
 				logger.exception("Rated Knowledge cleanup failed: storage_key=%s", storage_key)
 		raise
+	record_activity_event(
+		user_id=user.id,
+		event_type="knowledge.saved_from_message",
+		resource_type="message",
+		resource_id=message.id,
+		correlation_id=getattr(request.state, "request_id", None),
+	)
 	return {"items": [knowledge_payload(item) for item in items]}
 
 
@@ -779,13 +802,20 @@ def list_deleted_knowledge_items(user: User = Depends(get_current_user), db: Ses
 
 
 @router.post("/trash/{item_id}/restore")
-def restore_knowledge_item(item_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def restore_knowledge_item(request: Request, item_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	item = owned_knowledge_item(db, item_id, user.id, include_deleted=True)
 	if item.deleted_at is None:
 		raise AppError(409, "KNOWLEDGE_NOT_DELETED", "Запись не находится в корзине")
 	item.deleted_at = None
 	item.updated_at = utc_now()
 	db.commit()
+	record_activity_event(
+		user_id=user.id,
+		event_type="knowledge.restored",
+		resource_type="knowledge_item",
+		resource_id=item.id,
+		correlation_id=getattr(request.state, "request_id", None),
+	)
 	return {"item": knowledge_payload(item)}
 
 
@@ -966,11 +996,18 @@ async def update_knowledge_file(
 
 
 @router.delete("/{item_id}", status_code=204)
-def delete_knowledge_item(item_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
+def delete_knowledge_item(request: Request, item_id: str, user: User = Depends(get_current_user), db: Session = Depends(get_db)):
 	item = owned_knowledge_item(db, item_id, user.id)
 	item.deleted_at = utc_now()
 	item.updated_at = utc_now()
 	db.commit()
+	record_activity_event(
+		user_id=user.id,
+		event_type="knowledge.deleted",
+		resource_type="knowledge_item",
+		resource_id=item.id,
+		correlation_id=getattr(request.state, "request_id", None),
+	)
 	return Response(status_code=204)
 
 

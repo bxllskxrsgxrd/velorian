@@ -10,6 +10,7 @@ from .config import settings
 from .database import get_db
 from .errors import AppError
 from .models import RoleChangeAudit, User
+from .observability import record_activity_event
 from .roles import UserRole, parse_user_role
 
 
@@ -86,15 +87,23 @@ def update_admin_user_role(
 
 	try:
 		target.role = new_role
-		db.add(RoleChangeAudit(
+		audit = RoleChangeAudit(
 			actor_user_id=actor.id,
 			target_user_id=target.id,
 			old_role=old_role,
 			new_role=new_role,
 			correlation_id=getattr(request.state, "request_id", None),
-		))
+		)
+		db.add(audit)
 		db.commit()
 	except Exception:
 		db.rollback()
 		raise
+	record_activity_event(
+		user_id=actor.id,
+		event_type="admin.role_changed",
+		resource_type="role_change_audit",
+		resource_id=audit.id,
+		correlation_id=getattr(request.state, "request_id", None),
+	)
 	return {"user": _user_payload(target), "changed": True}

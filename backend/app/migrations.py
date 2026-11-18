@@ -222,6 +222,13 @@ def _create_role_change_audits(connection: Connection) -> None:
 	Base.metadata.tables["role_change_audits"].create(bind=connection, checkfirst=True)
 
 
+def _create_observability_events(connection: Connection) -> None:
+	from .database import Base
+
+	for table_name in ("ai_usage_events", "activity_events"):
+		Base.metadata.tables[table_name].create(bind=connection, checkfirst=True)
+
+
 MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260825_01_ratings_and_knowledge", _create_ratings_and_knowledge),
 	("20260825_02_storage_keys", _add_storage_keys),
@@ -240,6 +247,7 @@ MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20261113_01_message_model_id", _add_message_model_id),
 	("20261117_01_user_roles", _add_user_roles),
 	("20261117_02_role_change_audits", _create_role_change_audits),
+	("20261118_01_observability_events", _create_observability_events),
 )
 
 
