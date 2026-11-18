@@ -1,6 +1,12 @@
 from sqlalchemy import create_engine, inspect, text
 
-from app.migrations import _add_user_logins, _add_user_roles, _create_observability_events, _create_role_change_audits
+from app.migrations import (
+	_add_user_logins,
+	_add_user_roles,
+	_create_generation_runs,
+	_create_observability_events,
+	_create_role_change_audits,
+)
 
 
 def test_add_user_logins_backfills_unique_values_for_existing_accounts(tmp_path):
@@ -105,4 +111,39 @@ def test_create_observability_events_is_idempotent(tmp_path):
 	assert {index["name"] for index in inspector.get_indexes("activity_events")} >= {
 		"ix_activity_events_user_created", "ix_activity_events_type_created",
 		"ix_activity_events_resource", "ix_activity_events_correlation_id",
+	}
+
+
+def test_create_generation_runs_is_idempotent(tmp_path):
+	engine = create_engine(f"sqlite:///{tmp_path / 'generation-runs.db'}")
+	with engine.begin() as connection:
+		connection.execute(text("CREATE TABLE users (id VARCHAR(36) PRIMARY KEY)"))
+		connection.execute(text(
+			"CREATE TABLE conversations (id VARCHAR(36) PRIMARY KEY, user_id VARCHAR(36) NOT NULL)"
+		))
+		connection.execute(text(
+			"CREATE TABLE messages (id VARCHAR(36) PRIMARY KEY, conversation_id VARCHAR(36) NOT NULL)"
+		))
+		_create_generation_runs(connection)
+		_create_generation_runs(connection)
+
+	inspector = inspect(engine)
+	assert {column["name"] for column in inspector.get_columns("generation_runs")} == {
+		"id", "user_id", "conversation_id", "branch_anchor_message_id", "assistant_message_id",
+		"idempotency_key", "correlation_id", "provider", "model", "status", "error_code",
+		"created_at", "updated_at", "started_at", "finished_at",
+	}
+	assert {index["name"] for index in inspector.get_indexes("generation_runs")} >= {
+		"ix_generation_runs_user_status_updated",
+		"ix_generation_runs_conversation_status_updated",
+		"ix_generation_runs_branch_updated",
+		"ix_generation_runs_correlation_id",
+		"ix_generation_runs_created_at",
+	}
+	assert {constraint["name"] for constraint in inspector.get_unique_constraints("generation_runs")} >= {
+		"uq_generation_runs_user_idempotency",
+		"uq_generation_runs_assistant_message",
+	}
+	assert {constraint["name"] for constraint in inspector.get_check_constraints("generation_runs")} >= {
+		"ck_generation_runs_status",
 	}

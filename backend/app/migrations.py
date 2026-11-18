@@ -229,6 +229,12 @@ def _create_observability_events(connection: Connection) -> None:
 		Base.metadata.tables[table_name].create(bind=connection, checkfirst=True)
 
 
+def _create_generation_runs(connection: Connection) -> None:
+	from .database import Base
+
+	Base.metadata.tables["generation_runs"].create(bind=connection, checkfirst=True)
+
+
 MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20260825_01_ratings_and_knowledge", _create_ratings_and_knowledge),
 	("20260825_02_storage_keys", _add_storage_keys),
@@ -248,6 +254,7 @@ MIGRATIONS: tuple[tuple[str, Callable[[Connection], None]], ...] = (
 	("20261117_01_user_roles", _add_user_roles),
 	("20261117_02_role_change_audits", _create_role_change_audits),
 	("20261118_01_observability_events", _create_observability_events),
+	("20261118_02_generation_runs", _create_generation_runs),
 )
 
 

@@ -1,5 +1,6 @@
 from datetime import datetime, timezone
 from decimal import Decimal
+from enum import Enum
 from uuid import uuid4
 
 from sqlalchemy import Boolean, CheckConstraint, DateTime, Enum as SQLAlchemyEnum, Float, ForeignKey, Index, Integer, JSON, Numeric, String, Text, UniqueConstraint
@@ -15,6 +16,15 @@ def utc_now() -> datetime:
 
 def new_id() -> str:
 	return str(uuid4())
+
+
+class GenerationRunStatus(str, Enum):
+	QUEUED = "queued"
+	RUNNING = "running"
+	COMPLETED = "completed"
+	FAILED = "failed"
+	STOPPED = "stopped"
+	INTERRUPTED = "interrupted"
 
 
 class User(Base):
@@ -166,6 +176,50 @@ class Message(Base):
 	attachments: Mapped[list["Attachment"]] = relationship(back_populates="message", cascade="all, delete-orphan")
 	ratings: Mapped[list["MessageRating"]] = relationship(back_populates="message", cascade="all, delete-orphan")
 	knowledge_items: Mapped[list["KnowledgeItem"]] = relationship(back_populates="source_message")
+
+
+class GenerationRun(Base):
+	__tablename__ = "generation_runs"
+	__table_args__ = (
+		CheckConstraint(
+			"status IN ('queued', 'running', 'completed', 'failed', 'stopped', 'interrupted')",
+			name="ck_generation_runs_status",
+		),
+		UniqueConstraint("user_id", "idempotency_key", name="uq_generation_runs_user_idempotency"),
+		UniqueConstraint("assistant_message_id", name="uq_generation_runs_assistant_message"),
+		Index("ix_generation_runs_user_status_updated", "user_id", "status", "updated_at"),
+		Index("ix_generation_runs_conversation_status_updated", "conversation_id", "status", "updated_at"),
+		Index("ix_generation_runs_branch_updated", "branch_anchor_message_id", "updated_at"),
+	)
+
+	id: Mapped[str] = mapped_column(String(36), primary_key=True, default=new_id)
+	user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"))
+	conversation_id: Mapped[str] = mapped_column(ForeignKey("conversations.id", ondelete="CASCADE"))
+	branch_anchor_message_id: Mapped[str] = mapped_column(ForeignKey("messages.id", ondelete="CASCADE"))
+	assistant_message_id: Mapped[str | None] = mapped_column(
+		ForeignKey("messages.id", ondelete="SET NULL"),
+		nullable=True,
+	)
+	idempotency_key: Mapped[str] = mapped_column(String(128))
+	correlation_id: Mapped[str | None] = mapped_column(String(128), nullable=True, index=True)
+	provider: Mapped[str | None] = mapped_column(String(32), nullable=True)
+	model: Mapped[str | None] = mapped_column(String(160), nullable=True)
+	status: Mapped[GenerationRunStatus] = mapped_column(
+		SQLAlchemyEnum(
+			GenerationRunStatus,
+			name="generation_run_status",
+			native_enum=False,
+			create_constraint=False,
+			values_callable=lambda statuses: [status.value for status in statuses],
+		),
+		default=GenerationRunStatus.QUEUED,
+		server_default=GenerationRunStatus.QUEUED.value,
+	)
+	error_code: Mapped[str | None] = mapped_column(String(64), nullable=True)
+	created_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, index=True)
+	updated_at: Mapped[datetime] = mapped_column(DateTime(timezone=True), default=utc_now, onupdate=utc_now)
+	started_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
+	finished_at: Mapped[datetime | None] = mapped_column(DateTime(timezone=True), nullable=True)
 
 
 class BranchSummary(Base):
