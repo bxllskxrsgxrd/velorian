@@ -422,6 +422,18 @@ def _owned_conversation(
 	return conversation
 
 
+def _provider_status_code(error: Exception) -> int | None:
+	status_code = getattr(error, "status_code", None)
+	if status_code is None and isinstance(error, genai_errors.APIError):
+		status_code = getattr(error, "code", None)
+	if status_code is None:
+		status_code = getattr(getattr(error, "response", None), "status_code", None)
+	try:
+		return int(status_code) if status_code is not None else None
+	except (TypeError, ValueError):
+		return None
+
+
 def _safe_ai_error(error: Exception) -> tuple[str, str]:
 	if isinstance(error, RateLimitError):
 		return "AI_RATE_LIMITED", "AI-сервис временно перегружен. Повторите запрос позже."
@@ -439,7 +451,7 @@ def _safe_ai_error(error: Exception) -> tuple[str, str]:
 		if error.status_code >= 500:
 			return "AI_SERVICE_ERROR", "AI-сервис временно недоступен. Повторите запрос позже."
 	if isinstance(error, genai_errors.APIError):
-		status_code = int(getattr(error, "code", 0) or 0)
+		status_code = _provider_status_code(error) or 0
 		if status_code == 429:
 			return "AI_RATE_LIMITED", "AI-сервис временно перегружен. Повторите запрос позже."
 		if status_code in {401, 403}:
@@ -884,6 +896,7 @@ async def _generate_chat_title(
 				user_id=user_id,
 				conversation_id=conversation_id,
 				correlation_id=correlation_id,
+				defer_persistence=True,
 			)
 		content = completion.choices[0].message.content if completion.choices else ""
 		ai_usage_logger.info("Semantic chat title raw=%r", content)
@@ -3971,6 +3984,7 @@ async def stream_chat(
 			yield _event("error", code=error.code, message=error.message, requestId=request_id)
 		except Exception as error:
 			code, message = _safe_ai_error(error)
+			provider_status = _provider_status_code(error)
 			duration_ms = round((time.perf_counter() - started) * 1000, 2)
 			failure_diagnostic = json.dumps({
 				"event": "AI_REQUEST_FAILED",
@@ -3981,7 +3995,7 @@ async def stream_chat(
 				"provider": chat_model.provider,
 				"model": chat_model.provider_model,
 				"errorType": type(error).__name__,
-				"providerStatus": getattr(error, "status_code", None),
+				"providerStatus": provider_status,
 				"durationMs": duration_ms,
 			}, ensure_ascii=False)
 			if is_groq_provider_error(error) or settings.is_production:
@@ -3998,6 +4012,7 @@ async def stream_chat(
 				model=chat_model.provider_model,
 				status="error",
 				error_code=code,
+				provider_status=provider_status,
 				latency_ms=duration_ms,
 			)
 			assistant_message.content = message

@@ -5,6 +5,7 @@ from types import SimpleNamespace
 from uuid import uuid4
 
 import httpx
+from google.genai import errors as genai_errors
 from groq import RateLimitError
 from sqlalchemy import select
 
@@ -12,7 +13,7 @@ import app.main as main_module
 import app.observability as observability
 from app.auth import hash_password
 from app.database import SessionLocal
-from app.models import AIUsageEvent, ActivityEvent, Conversation, User
+from app.models import AIUsageEvent, ActivityEvent, Conversation, Message, User
 from app.observability import (
 	configure_observability_logging,
 	drain_observability_writes,
@@ -168,6 +169,92 @@ class _Completions:
 class _FakeGroq:
 	def __init__(self, completions):
 		self.chat = SimpleNamespace(completions=completions)
+
+
+def test_successful_title_usage_persists_once_after_request_transaction(client, monkeypatch):
+	user, conversation = _identity()
+	completion = SimpleNamespace(
+		usage=SimpleNamespace(prompt_tokens=362, completion_tokens=22),
+		choices=[SimpleNamespace(message=SimpleNamespace(content="Диагностический заголовок"))],
+	)
+	completions = _Completions(completion)
+	monkeypatch.setattr(main_module, "client", _FakeGroq(completions))
+
+	async def generate_title() -> str:
+		with SessionLocal() as db:
+			stored_conversation = db.get(Conversation, conversation.id)
+			assert stored_conversation is not None
+			db.add(Message(
+				conversation_id=conversation.id,
+				role="user",
+				content="Создай заголовок",
+			))
+			db.flush()
+			title = await main_module._generate_chat_title(
+				"Создай заголовок",
+				"Резервный заголовок",
+				user_id=user.id,
+				conversation_id=conversation.id,
+				correlation_id="title-usage",
+			)
+			stored_conversation.title = title
+			db.commit()
+		await drain_observability_writes()
+		return title
+
+	assert asyncio.run(generate_title()) == "Диагностический заголовок"
+	with SessionLocal() as db:
+		events = list(db.scalars(select(AIUsageEvent).where(
+			AIUsageEvent.correlation_id == "title-usage",
+		)))
+	assert len(events) == 1
+	event = events[0]
+	assert event.user_id == user.id
+	assert event.conversation_id == conversation.id
+	assert event.purpose == "title"
+	assert event.task_type == "title"
+	assert (event.provider, event.model) == ("groq", main_module.settings.groq_model)
+	assert (event.input_tokens, event.output_tokens, event.total_tokens) == (362, 22, 384)
+	assert event.status == "success"
+	assert event.created_at is not None
+	assert completions.calls == 1
+
+
+def test_gemini_server_error_status_is_in_failure_diagnostics(authenticated_client, monkeypatch, caplog):
+	error = genai_errors.ServerError(503, {
+		"error": {"code": 503, "message": "Service unavailable", "status": "UNAVAILABLE"},
+	})
+	assert main_module._provider_status_code(error) == 503
+
+	class FailingGeminiModels:
+		async def generate_content_stream(self, **_kwargs):
+			raise error
+
+	monkeypatch.setattr(
+		main_module,
+		"gemini_client",
+		SimpleNamespace(models=FailingGeminiModels()),
+	)
+	conversation_id = authenticated_client.post(
+		"/api/conversations",
+		json={"title": "Gemini failure diagnostics"},
+	).json()["conversation"]["id"]
+	caplog.set_level("ERROR")
+	response = authenticated_client.post(
+		f"/api/conversations/{conversation_id}/stream",
+		data={"prompt": "Проверка ошибки", "model_id": "gemini-3.8-flash"},
+	)
+	assert '"type": "error"' in response.text
+	diagnostics = []
+	for record in caplog.records:
+		try:
+			payload = json.loads(record.getMessage())
+		except json.JSONDecodeError:
+			continue
+		if payload.get("event") == "AI_REQUEST_FAILED":
+			diagnostics.append(payload)
+	assert any(payload.get("providerStatus") == 503 for payload in diagnostics)
+	assert any(payload.get("provider_status") == 503 for payload in diagnostics)
 
 
 def test_chat_and_each_branch_summary_call_store_separate_actual_usage(client, monkeypatch):
