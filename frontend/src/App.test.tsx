@@ -37,4 +37,12 @@ describe('App role routing', () => {
 		resolveUser({ id: 'admin', email: 'admin@example.com', login: 'admin', role: 'admin' });
 		expect(await screen.findByRole('main', { name: 'Администрирование' })).toBeInTheDocument();
 	});
+
+	it('does not mount a direct personal analytics route without a session', async () => {
+		api.getCurrentUser.mockRejectedValue(new Error('unauthorized'));
+		render(<MemoryRouter initialEntries={['/profile/usage']}><App /></MemoryRouter>);
+
+		expect(await screen.findByRole('heading', { name: 'С возвращением' })).toBeInTheDocument();
+		expect(screen.queryByRole('heading', { name: 'Использование AI' })).not.toBeInTheDocument();
+	});
 });

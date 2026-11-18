@@ -13,6 +13,9 @@ import { ProfilePage } from './pages/ProfilePage';
 import { AdminPage } from './pages/AdminPage';
 import { RequireAdmin } from './components/RoleGuard/RequireAdmin';
 import { AdminUsersPage } from './pages/AdminUsersPage';
+import { ProfileUsagePage } from './pages/ProfileUsagePage';
+import { ProfileActivityPage } from './pages/ProfileActivityPage';
+import { ProfileSecurityPage } from './pages/ProfileSecurityPage';
 
 const KnowledgePage = lazy(() => import('./pages/KnowledgePage'));
 const KnowledgeEditorPage = lazy(() => import('./pages/KnowledgeEditorPage').then((module) => ({ default: module.KnowledgeEditorPage })));
@@ -70,6 +73,9 @@ function App() {
 			<Route path="/knowledge/:knowledgeId" element={<KnowledgeEditorPage />} />
 		</Route>
 		<Route path="/profile" element={<ProfilePage user={user} />} />
+		<Route path="/profile/usage" element={<ProfileUsagePage />} />
+		<Route path="/profile/activity" element={<ProfileActivityPage />} />
+		<Route path="/profile/security" element={<ProfileSecurityPage />} />
 		<Route path="/settings" element={<SettingsPage />} />
 		<Route path="/settings/account" element={<Navigate to="/profile" replace state={location.state} />} />
 		<Route path="/admin" element={<RequireAdmin user={user}><AdminPage /></RequireAdmin>} />

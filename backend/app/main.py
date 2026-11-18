@@ -70,6 +70,7 @@ from .observability import (
 	record_activity_event,
 	record_ai_usage_event,
 )
+from .profile import router as profile_router
 from .rag import chunk_text, estimate_tokens, retrieve_chunks
 from .rate_limit import rate_limiter
 from .ratings import router as ratings_router
@@ -2261,6 +2262,7 @@ async def lifespan(_app: FastAPI):
 
 app = FastAPI(title=settings.app_name, lifespan=lifespan)
 app.include_router(admin_users_router)
+app.include_router(profile_router)
 app.include_router(ratings_router)
 app.include_router(knowledge_router)
 app.include_router(approaches_router)

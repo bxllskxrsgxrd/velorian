@@ -10,7 +10,7 @@ from logging.handlers import RotatingFileHandler
 from pathlib import Path
 from typing import Any
 
-from sqlalchemy import func, select
+from sqlalchemy import case, func, select
 from sqlalchemy.exc import IntegrityError
 from sqlalchemy.orm import Session
 
@@ -285,6 +285,154 @@ def summarize_ai_usage(
 		"output_tokens": row[2],
 		"estimated_cost_usd": row[3],
 	}
+
+
+def _known_sum(value: object, request_count: int) -> object:
+	return value if value is not None else (0 if request_count == 0 else None)
+
+
+def aggregate_ai_usage(
+	db: Session,
+	*,
+	user_id: str,
+	start: datetime | None = None,
+) -> dict[str, object]:
+	filters = [AIUsageEvent.user_id == user_id]
+	if start is not None:
+		filters.append(AIUsageEvent.created_at >= start)
+	row = db.execute(select(
+		func.count(AIUsageEvent.id),
+		func.sum(case((AIUsageEvent.status == "success", 1), else_=0)),
+		func.sum(case((AIUsageEvent.status == "error", 1), else_=0)),
+		func.sum(case((AIUsageEvent.status == "cancelled", 1), else_=0)),
+		func.sum(AIUsageEvent.input_tokens),
+		func.sum(AIUsageEvent.output_tokens),
+		func.sum(AIUsageEvent.cached_tokens),
+		func.sum(AIUsageEvent.total_tokens),
+		func.sum(AIUsageEvent.estimated_cost_usd),
+		func.sum(case((AIUsageEvent.estimated_cost_usd.is_(None), 1), else_=0)),
+		func.sum(case((AIUsageEvent.total_tokens.is_(None), 1), else_=0)),
+	).where(*filters)).one()
+	request_count = int(row[0] or 0)
+	totals = {
+		"request_count": request_count,
+		"success_count": int(row[1] or 0),
+		"error_count": int(row[2] or 0),
+		"cancelled_count": int(row[3] or 0),
+		"input_tokens": _known_sum(row[4], request_count),
+		"output_tokens": _known_sum(row[5], request_count),
+		"cached_tokens": _known_sum(row[6], request_count),
+		"total_tokens": _known_sum(row[7], request_count),
+		"estimated_cost_usd": row[8],
+		"unknown_cost_count": int(row[9] or 0),
+		"unknown_token_count": int(row[10] or 0),
+	}
+
+	def grouped(*columns) -> list[dict[str, object]]:
+		rows = db.execute(select(
+			*columns,
+			func.count(AIUsageEvent.id),
+			func.sum(AIUsageEvent.total_tokens),
+			func.sum(AIUsageEvent.estimated_cost_usd),
+			func.sum(case((AIUsageEvent.estimated_cost_usd.is_(None), 1), else_=0)),
+		).where(*filters).group_by(*columns).order_by(
+			func.count(AIUsageEvent.id).desc(),
+			*columns,
+		)).all()
+		return [{
+			"keys": tuple(row[:len(columns)]),
+			"request_count": int(row[len(columns)] or 0),
+			"total_tokens": row[len(columns) + 1],
+			"estimated_cost_usd": row[len(columns) + 2],
+			"unknown_cost_count": int(row[len(columns) + 3] or 0),
+		} for row in rows]
+
+	return {
+		"totals": totals,
+		"models": grouped(AIUsageEvent.provider, AIUsageEvent.model),
+		"purposes": grouped(AIUsageEvent.purpose),
+	}
+
+
+def paginate_ai_usage_events(
+	db: Session,
+	*,
+	user_id: str,
+	page: int,
+	page_size: int,
+	start: datetime | None = None,
+	model: str | None = None,
+	purpose: str | None = None,
+	status: str | None = None,
+) -> tuple[list[AIUsageEvent], int]:
+	filters = [AIUsageEvent.user_id == user_id]
+	if start is not None:
+		filters.append(AIUsageEvent.created_at >= start)
+	if model:
+		filters.append(AIUsageEvent.model == model)
+	if purpose:
+		filters.append(AIUsageEvent.purpose == purpose)
+	if status:
+		filters.append(AIUsageEvent.status == status)
+	total = int(db.scalar(select(func.count(AIUsageEvent.id)).where(*filters)) or 0)
+	events = list(db.scalars(
+		select(AIUsageEvent)
+		.where(*filters)
+		.order_by(AIUsageEvent.created_at.desc(), AIUsageEvent.id.desc())
+		.offset((page - 1) * page_size)
+		.limit(page_size)
+	))
+	return events, total
+
+
+def paginate_activity_events(
+	db: Session,
+	*,
+	user_id: str,
+	page: int,
+	page_size: int,
+	start: datetime | None = None,
+	event_type: str | None = None,
+) -> tuple[list[ActivityEvent], int]:
+	filters = [ActivityEvent.user_id == user_id]
+	if start is not None:
+		filters.append(ActivityEvent.created_at >= start)
+	if event_type:
+		filters.append(ActivityEvent.event_type == event_type)
+	total = int(db.scalar(select(func.count(ActivityEvent.id)).where(*filters)) or 0)
+	events = list(db.scalars(
+		select(ActivityEvent)
+		.where(*filters)
+		.order_by(ActivityEvent.created_at.desc(), ActivityEvent.id.desc())
+		.offset((page - 1) * page_size)
+		.limit(page_size)
+	))
+	return events, total
+
+
+def list_auth_activity(db: Session, user_id: str, *, limit: int = 20) -> list[ActivityEvent]:
+	return list(db.scalars(
+		select(ActivityEvent)
+		.where(
+			ActivityEvent.user_id == user_id,
+			ActivityEvent.event_type.in_(("auth.login", "auth.logout")),
+		)
+		.order_by(ActivityEvent.created_at.desc(), ActivityEvent.id.desc())
+		.limit(min(max(limit, 1), 100))
+	))
+
+
+def latest_successful_login(db: Session, user_id: str) -> datetime | None:
+	return db.scalar(
+		select(ActivityEvent.created_at)
+		.where(
+			ActivityEvent.user_id == user_id,
+			ActivityEvent.event_type == "auth.login",
+			ActivityEvent.status == "success",
+		)
+		.order_by(ActivityEvent.created_at.desc(), ActivityEvent.id.desc())
+		.limit(1)
+	)
 
 
 def list_activity_history(db: Session, user_id: str, *, limit: int = 100) -> list[ActivityEvent]:
