@@ -133,6 +133,26 @@ def _find_by_idempotency_key(db: Session, user_id: str, idempotency_key: str) ->
 	))
 
 
+def _find_conflicting_active_run(
+	db: Session,
+	*,
+	user_id: str,
+	conversation_id: str,
+	branch_anchor_message_id: str,
+) -> GenerationRun | None:
+	branch_anchor = db.get(Message, branch_anchor_message_id)
+	parent_assistant_id = branch_anchor.reply_to_id if branch_anchor is not None else None
+	branch_conflict = GenerationRun.branch_anchor_message_id == branch_anchor_message_id
+	if parent_assistant_id is not None:
+		branch_conflict = branch_conflict | (GenerationRun.assistant_message_id == parent_assistant_id)
+	return db.scalar(select(GenerationRun).where(
+		GenerationRun.user_id == user_id,
+		GenerationRun.conversation_id == conversation_id,
+		GenerationRun.status.in_(ACTIVE_GENERATION_STATUSES),
+		branch_conflict,
+	))
+
+
 def _validate_idempotent_scope(
 	run: GenerationRun,
 	*,
@@ -172,6 +192,13 @@ def create_generation_run(
 				branch_anchor_message_id=branch_anchor_message_id,
 				assistant_message_id=assistant_message_id,
 			)
+			if _find_conflicting_active_run(
+				db,
+				user_id=user_id,
+				conversation_id=conversation_id,
+				branch_anchor_message_id=branch_anchor_message_id,
+			) is not None:
+				raise GenerationRunConflict("An active GenerationRun already exists for this branch")
 			run = GenerationRun(
 				user_id=user_id,
 				conversation_id=conversation_id,
@@ -324,11 +351,8 @@ def interrupt_orphaned_generation_runs() -> list[str]:
 		if assistant_ids:
 			db.execute(
 				update(Message)
-				.where(
-					Message.id.in_(assistant_ids),
-					Message.status == "streaming",
-				)
-				.values(status="cancelled")
+				.where(Message.id.in_(assistant_ids))
+				.values(status="cancelled", error_code=None)
 			)
 		db.commit()
 		return run_ids
@@ -423,3 +447,130 @@ def finish_generation_run(
 		status=target,
 		error_code=error_code,
 	)
+
+
+def _finalize_generation_run_in_session(
+	db: Session,
+	*,
+	user_id: str,
+	run_id: str,
+	status: GenerationRunStatus,
+	assistant_content: str,
+	error_code: str | None,
+	request_id: str | None,
+) -> tuple[GenerationRun, bool]:
+	if status not in TERMINAL_GENERATION_STATUSES:
+		raise ValueError("finalize_generation_run requires a terminal status")
+	if status != GenerationRunStatus.FAILED and error_code is not None:
+		raise ValueError("error_code is only valid for failed generations")
+	safe_error_code = _normalize_error_code(error_code) if status == GenerationRunStatus.FAILED else None
+
+	current = db.scalar(select(GenerationRun).where(
+		GenerationRun.id == run_id,
+		GenerationRun.user_id == user_id,
+	))
+	if current is None:
+		db.rollback()
+		raise GenerationRunNotFound("GenerationRun was not found for this user")
+	if current.status == status:
+		db.rollback()
+		current = db.scalar(select(GenerationRun).where(
+			GenerationRun.id == run_id,
+			GenerationRun.user_id == user_id,
+		))
+		if current is None:
+			raise GenerationRunNotFound("GenerationRun disappeared during finalization")
+		return _detach(db, current), False
+	if status not in ALLOWED_GENERATION_TRANSITIONS[current.status]:
+		db.rollback()
+		raise InvalidGenerationRunTransition(f"Cannot transition {current.status.value} to {status.value}")
+	assistant = db.scalar(select(Message).where(
+		Message.id == current.assistant_message_id,
+		Message.conversation_id == current.conversation_id,
+	)) if current.assistant_message_id is not None else None
+	if status == GenerationRunStatus.COMPLETED and (assistant is None or assistant.role != "assistant"):
+		db.rollback()
+		raise GenerationRunScopeError("GenerationRun assistant message is unavailable")
+
+	now = utc_now()
+	result = db.execute(
+		update(GenerationRun)
+		.where(
+			GenerationRun.id == run_id,
+			GenerationRun.user_id == user_id,
+			GenerationRun.status == current.status,
+		)
+		.values(
+			status=status,
+			error_code=safe_error_code,
+			updated_at=now,
+			finished_at=now,
+		)
+	)
+	if result.rowcount != 1:
+		db.rollback()
+		latest = db.scalar(select(GenerationRun).where(
+			GenerationRun.id == run_id,
+			GenerationRun.user_id == user_id,
+		))
+		if latest is None:
+			raise GenerationRunNotFound("GenerationRun was not found after concurrent finalization")
+		if latest.status == status:
+			return _detach(db, latest), False
+		raise InvalidGenerationRunTransition(
+			f"GenerationRun already transitioned to {latest.status.value}",
+		)
+
+	if assistant is not None and assistant.role == "assistant":
+		assistant.content = assistant_content
+		assistant.status = {
+			GenerationRunStatus.COMPLETED: "done",
+			GenerationRunStatus.FAILED: "error",
+			GenerationRunStatus.STOPPED: "cancelled",
+			GenerationRunStatus.INTERRUPTED: "cancelled",
+		}[status]
+		assistant.error_code = safe_error_code
+		assistant.request_id = request_id
+	db.commit()
+	updated = db.scalar(select(GenerationRun).where(GenerationRun.id == run_id))
+	if updated is None:
+		raise GenerationRunNotFound("GenerationRun disappeared after finalization")
+	return _detach(db, updated), True
+
+
+def finalize_generation_run(
+	*,
+	user_id: str,
+	run_id: str,
+	status: GenerationRunStatus | str,
+	assistant_content: str,
+	error_code: str | None = None,
+	request_id: str | None = None,
+	db: Session | None = None,
+) -> tuple[GenerationRun, bool]:
+	"""Atomically finalize a run and its assistant message.
+
+	When ``db`` is supplied, pending response attachments are committed in the
+	same transaction. The caller must not share that session with another task.
+	"""
+	target = GenerationRunStatus(status)
+	if db is not None:
+		return _finalize_generation_run_in_session(
+			db,
+			user_id=user_id,
+			run_id=run_id,
+			status=target,
+			assistant_content=assistant_content,
+			error_code=error_code,
+			request_id=request_id,
+		)
+	with SessionLocal() as owned_db:
+		return _finalize_generation_run_in_session(
+			owned_db,
+			user_id=user_id,
+			run_id=run_id,
+			status=target,
+			assistant_content=assistant_content,
+			error_code=error_code,
+			request_id=request_id,
+		)

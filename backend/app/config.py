@@ -62,6 +62,10 @@ class Settings:
 	chat_context_budget: int = int(os.getenv("CHAT_CONTEXT_BUDGET", "100000"))
 	history_token_budget: int = int(os.getenv("HISTORY_TOKEN_BUDGET", "72000"))
 	max_output_tokens: int = int(os.getenv("MAX_OUTPUT_TOKENS", "4096"))
+	ai_provider_max_retries: int = int(os.getenv("AI_PROVIDER_MAX_RETRIES", "2"))
+	generation_total_timeout_seconds: float = float(os.getenv("GENERATION_TOTAL_TIMEOUT_SECONDS", "600"))
+	generation_first_chunk_timeout_seconds: float = float(os.getenv("GENERATION_FIRST_CHUNK_TIMEOUT_SECONDS", "180"))
+	generation_idle_timeout_seconds: float = float(os.getenv("GENERATION_IDLE_TIMEOUT_SECONDS", "120"))
 	branch_summary_max_output_tokens: int = int(os.getenv("BRANCH_SUMMARY_MAX_OUTPUT_TOKENS", "1024"))
 	branch_summary_request_token_budget: int = int(os.getenv("BRANCH_SUMMARY_REQUEST_TOKEN_BUDGET", "8000"))
 	rate_limit_requests: int = int(os.getenv("RATE_LIMIT_REQUESTS", "60"))
@@ -81,6 +85,18 @@ class Settings:
 	@property
 	def is_production(self) -> bool:
 		return self.app_env == "production"
+
+	def validate_generation_timeouts(self) -> None:
+		values = {
+			"GENERATION_TOTAL_TIMEOUT_SECONDS": self.generation_total_timeout_seconds,
+			"GENERATION_FIRST_CHUNK_TIMEOUT_SECONDS": self.generation_first_chunk_timeout_seconds,
+			"GENERATION_IDLE_TIMEOUT_SECONDS": self.generation_idle_timeout_seconds,
+		}
+		invalid = [name for name, value in values.items() if value <= 0]
+		if invalid:
+			raise RuntimeError(f"Generation timeouts must be positive: {', '.join(invalid)}")
+		if self.ai_provider_max_retries < 0:
+			raise RuntimeError("AI_PROVIDER_MAX_RETRIES must not be negative")
 
 	def validate_production(self) -> None:
 		if not self.is_production:
