@@ -149,6 +149,16 @@ const ERROR_MESSAGES: Record<string, ErrorDefinition> = {
 		description: 'При выполнении запроса произошла ошибка. Попробуйте повторить его',
 		retryable: true,
 	},
+	GENERATION_STOPPED: {
+		title: 'Генерация остановлена',
+		description: 'Ответ остановлен по вашему запросу. При необходимости запустите генерацию повторно',
+		retryable: true,
+	},
+	GENERATION_INTERRUPTED: {
+		title: 'Генерация прервана',
+		description: 'Сервер был перезапущен до завершения ответа. Запустите генерацию повторно',
+		retryable: true,
+	},
 };
 
 function attachmentErrorDefinition(code: string): ErrorDefinition | undefined {

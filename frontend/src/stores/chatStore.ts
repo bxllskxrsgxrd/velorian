@@ -6,8 +6,11 @@ import { resolveStateValue, type StateValue } from './storeTypes';
 export type KnowledgeSaveState = 'idle' | 'loading' | 'success' | 'error';
 
 export type ChatGenerationState = {
-	status: 'streaming';
+	status: 'running';
+	connection: 'connected' | 'reconnecting';
+	runId?: string;
 	assistantMessageId: string;
+	sequence: number;
 };
 
 type KnowledgeLinkUpdate = Pick<KnowledgeItem, 'id' | 'deletedAt'> &

@@ -260,6 +260,16 @@ def get_generation_run_by_idempotency_key(*, user_id: str, idempotency_key: str)
 		return _detach(db, run) if run is not None else None
 
 
+def get_generation_run_by_assistant_message(*, user_id: str, assistant_message_id: str) -> GenerationRun | None:
+	message_id = _normalize_required(assistant_message_id, field="assistant_message_id", maximum=36)
+	with SessionLocal() as db:
+		run = db.scalar(select(GenerationRun).where(
+			GenerationRun.user_id == user_id,
+			GenerationRun.assistant_message_id == message_id,
+		))
+		return _detach(db, run) if run is not None else None
+
+
 def list_active_generation_runs(
 	*,
 	user_id: str,

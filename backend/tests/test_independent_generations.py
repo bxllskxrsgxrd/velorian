@@ -1,4 +1,5 @@
 import asyncio
+import json
 from types import SimpleNamespace
 
 from sqlalchemy import func, select
@@ -8,6 +9,8 @@ from app.generation_runs import (
 	get_generation_run,
 	get_or_create_generation_run,
 	interrupt_orphaned_generation_runs,
+	start_generation_run,
+	finish_generation_run,
 )
 from app.models import AIUsageEvent, Conversation, GenerationRun, GenerationRunStatus, Message
 from app.observability import drain_observability_writes
@@ -326,3 +329,158 @@ def test_stop_endpoint_is_user_scoped_and_stops_unattached_queued_run(authentica
 	)
 	client.headers.update({"X-CSRF-Token": registered.json()["csrfToken"]})
 	assert client.post(f"/api/messages/{ids['assistant_message_id']}/stop-generation").status_code == 404
+	assert client.get(
+		f"/api/generation-runs/{ids['run_id']}",
+		params={"conversation_id": ids["conversation_id"], "assistant_message_id": ids["assistant_message_id"]},
+	).status_code == 404
+
+
+def test_reconnect_snapshot_then_new_deltas_supports_multiple_subscribers(authenticated_client, monkeypatch):
+	import app.main as main_module
+
+	ids = _seed_generation(authenticated_client)
+	first_delta_sent = asyncio.Event()
+	release = asyncio.Event()
+	provider_calls = 0
+
+	async def controlled_deltas(*_args, **_kwargs):
+		nonlocal provider_calls
+		provider_calls += 1
+		yield "Alpha"
+		first_delta_sent.set()
+		await release.wait()
+		yield "Beta"
+
+	monkeypatch.setattr(main_module, "_stream_ai_deltas", controlled_deltas)
+
+	async def collect_until_closed(queue):
+		events = []
+		while True:
+			value = await asyncio.wait_for(queue.get(), timeout=1)
+			if value is None:
+				return events
+			events.append(json.loads(value))
+
+	async def scenario():
+		spec = _spec(main_module, ids)
+		original = main_module.generation_task_manager.start(
+			spec.run_id,
+			lambda publish, cancel_status: main_module._execute_chat_generation(spec, publish, cancel_status),
+			assistant_message_id=spec.assistant_message_id,
+		)
+		await asyncio.wait_for(first_delta_sent.wait(), timeout=1)
+		first_queue, first_snapshot_raw = main_module.generation_task_manager.subscribe_with_snapshot(spec.run_id)
+		second_queue, second_snapshot_raw = main_module.generation_task_manager.subscribe_with_snapshot(spec.run_id)
+		first_snapshot = json.loads(first_snapshot_raw)
+		second_snapshot = json.loads(second_snapshot_raw)
+		assert first_snapshot == second_snapshot
+		assert first_snapshot["content"] == "Alpha"
+		assert first_snapshot["sequence"] == 1
+		release.set()
+		first_events, second_events = await asyncio.gather(
+			collect_until_closed(first_queue),
+			collect_until_closed(second_queue),
+		)
+		for events in (first_events, second_events):
+			deltas = [event for event in events if event["type"] == "delta"]
+			assert [(event["content"], event["sequence"]) for event in deltas] == [("Beta", 2)]
+			assert events[-1]["type"] == "done"
+		main_module.generation_task_manager.unsubscribe(spec.run_id, original)
+		main_module.generation_task_manager.unsubscribe(spec.run_id, first_queue)
+		main_module.generation_task_manager.unsubscribe(spec.run_id, second_queue)
+
+	asyncio.run(scenario())
+	assert provider_calls == 1
+
+
+def test_queue_overflow_replaces_missing_events_with_fresh_snapshot(monkeypatch):
+	import app.main as main_module
+
+	monkeypatch.setattr(main_module, "GENERATION_EVENT_QUEUE_SIZE", 2)
+	manager = main_module.GenerationTaskManager()
+
+	async def worker(publish, _cancel_status):
+		for part in ("A", "B", "C", "D", "E"):
+			publish(main_module._event("delta", content=part))
+		publish(main_module._event("done", messageId="assistant", message={"content": "ABCDE"}))
+
+	async def scenario():
+		queue = manager.start("overflow-run", worker, assistant_message_id="assistant")
+		for _ in range(100):
+			if not manager.has_task("overflow-run"):
+				break
+			await asyncio.sleep(0.01)
+		events = []
+		while True:
+			value = queue.get_nowait()
+			if value is None:
+				break
+			events.append(json.loads(value))
+		assert events == [{
+			"type": "snapshot",
+			"generationRunId": "overflow-run",
+			"assistantMessageId": "assistant",
+			"sequence": 5,
+			"status": "completed",
+			"content": "ABCDE",
+			"errorCode": None,
+			"requestId": None,
+		}]
+		manager.unsubscribe("overflow-run", queue)
+
+	asyncio.run(scenario())
+
+
+def test_completed_generation_state_and_reconnect_return_persisted_result(authenticated_client):
+	ids = _seed_generation(authenticated_client)
+	start_generation_run(user_id=ids["user_id"], run_id=ids["run_id"])
+	finish_generation_run(
+		user_id=ids["user_id"],
+		run_id=ids["run_id"],
+		status=GenerationRunStatus.COMPLETED,
+	)
+	with SessionLocal() as db:
+		message = db.get(Message, ids["assistant_message_id"])
+		message.content = "Persisted final"
+		message.status = "done"
+		db.commit()
+
+	state = authenticated_client.get(f"/api/conversations/{ids['conversation_id']}/generation")
+	assert state.status_code == 200
+	generation = state.json()["generation"]
+	assert generation["runId"] == ids["run_id"]
+	assert generation["assistantMessageId"] == ids["assistant_message_id"]
+	assert generation["status"] == "completed"
+	assert generation["content"] == "Persisted final"
+	reconnected = authenticated_client.get(
+		f"/api/generation-runs/{ids['run_id']}/stream",
+		params={"conversation_id": ids["conversation_id"], "assistant_message_id": ids["assistant_message_id"]},
+	)
+	assert reconnected.status_code == 200
+	event = json.loads(reconnected.text)
+	assert (event["type"], event["status"], event["content"]) == ("snapshot", "completed", "Persisted final")
+
+
+def test_reconnect_rejects_generation_from_inactive_sibling_branch(authenticated_client):
+	ids = _seed_generation(authenticated_client)
+	with SessionLocal() as db:
+		original_user = db.get(Message, ids["user_message_id"])
+		original_user.is_active = False
+		sibling_user = Message(
+			conversation_id=ids["conversation_id"], role="user", content="Sibling", status="done",
+			branch_group_id=original_user.branch_group_id, reply_to_id=original_user.reply_to_id, is_active=True,
+		)
+		db.add(sibling_user)
+		db.flush()
+		db.add(Message(
+			conversation_id=ids["conversation_id"], role="assistant", content="Sibling answer", status="done",
+			reply_to_id=sibling_user.id,
+		))
+		db.commit()
+
+	response = authenticated_client.get(
+		f"/api/generation-runs/{ids['run_id']}/stream",
+		params={"conversation_id": ids["conversation_id"], "assistant_message_id": ids["assistant_message_id"]},
+	)
+	assert response.status_code == 409
+	assert response.json()["error"]["code"] == "GENERATION_BRANCH_INACTIVE"

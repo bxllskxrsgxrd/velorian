@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from 'vitest';
-import { createConversation, loadAttachmentFile, streamChat } from './chatApi';
+import { createConversation, loadAttachmentFile, resumeGeneration, stopGeneration, streamChat } from './chatApi';
 import { setCsrfToken } from './httpClient';
 
 afterEach(() => vi.restoreAllMocks());
@@ -43,6 +43,42 @@ describe('streamChat', () => {
 		const body = fetchMock.mock.calls[0][1]?.body as FormData;
 		expect(body.get('search_mode')).toBe('knowledge');
 		expect(body.has('userId')).toBe(false);
+	});
+});
+
+describe('resumable generation API', () => {
+	it('parses a reconnect snapshot followed by sequenced deltas', async () => {
+		const encoder = new TextEncoder();
+		const body = new ReadableStream({
+			start(controller) {
+				controller.enqueue(encoder.encode(
+					'{"type":"snapshot","generationRunId":"run","assistantMessageId":"assistant","sequence":3,"status":"running","content":"Part"}\n' +
+					'{"type":"delta","generationRunId":"run","sequence":4,"content":"ial"}\n',
+				));
+				controller.close();
+			},
+		});
+		vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(body, { status: 200 }));
+		const events: string[] = [];
+		await resumeGeneration({
+			runId: 'run', conversationId: 'conversation', assistantMessageId: 'assistant',
+			signal: new AbortController().signal,
+			onEvent: (event) => events.push(`${event.type}:${'sequence' in event ? event.sequence : ''}`),
+		});
+		expect(events).toEqual(['snapshot:3', 'delta:4']);
+	});
+
+	it('sends an authenticated mutation for explicit Stop', async () => {
+		setCsrfToken('stop-csrf');
+		const fetchMock = vi.spyOn(globalThis, 'fetch').mockResolvedValue(new Response(
+			JSON.stringify({ generation: { status: 'stopped' } }),
+			{ status: 200, headers: { 'Content-Type': 'application/json' } },
+		));
+		expect(await stopGeneration('assistant')).toBe('stopped');
+		expect(fetchMock).toHaveBeenCalledWith('/api/messages/assistant/stop-generation', expect.objectContaining({
+			method: 'POST',
+			headers: expect.objectContaining({ 'X-CSRF-Token': 'stop-csrf' }),
+		}));
 	});
 });
 

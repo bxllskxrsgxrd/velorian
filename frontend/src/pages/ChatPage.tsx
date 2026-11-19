@@ -5,14 +5,18 @@ import {
 	createMessageMarkdownFile,
 	createConversation,
 	getConversation,
+	getConversationGeneration,
 	getMessageKnowledgeLink,
 	listConversations,
 	loadAttachmentFile,
 	removeMessageRating,
 	restoreKnowledgeItem,
 	setMessageRating,
+	resumeGeneration,
+	stopGeneration,
 	streamChat,
 } from '../api/chatApi';
+import type { GenerationSnapshot, StreamEvent } from '../api/chatApi';
 import { ApiError } from '../api/httpClient';
 import { MessageList } from '../components/MessageList/MessageList';
 import { PromptBar } from '../components/PromptBar/PromptBar';
@@ -45,6 +49,16 @@ import { useModelStore } from '../stores/modelStore';
 import { useUiStore } from '../stores/uiStore';
 
 const EMPTY_MESSAGES: ChatMessage[] = [];
+const RECONNECT_DELAYS_MS = [0, 750, 2_000, 4_000];
+
+function terminalGenerationError(status: GenerationSnapshot['status'], errorCode?: string | null, requestId?: string | null) {
+	const code = status === 'stopped'
+		? 'GENERATION_STOPPED'
+		: status === 'interrupted'
+			? 'GENERATION_INTERRUPTED'
+			: (errorCode || 'HISTORICAL_MESSAGE_ERROR');
+	return getUserFacingError(code, 0, requestId ?? undefined);
+}
 
 export function ChatPage() {
 	const { showToast } = useToast();
@@ -59,9 +73,10 @@ export function ChatPage() {
 	const messages = useChatStore((state) =>
 		activeConversationId ? (state.messagesByConversation[activeConversationId] ?? EMPTY_MESSAGES) : EMPTY_MESSAGES,
 	);
-	const isGenerating = useChatStore((state) =>
-		activeConversationId ? Boolean(state.generationByConversation[activeConversationId]) : false,
+	const generation = useChatStore((state) =>
+		activeConversationId ? state.generationByConversation[activeConversationId] : undefined,
 	);
+	const isGenerating = Boolean(generation);
 	const setConversationMessages = useChatStore((state) => state.setConversationMessages);
 	const syncKnowledgeLink = useChatStore((state) => state.syncKnowledgeLink);
 	const setConversationGeneration = useChatStore((state) => state.setConversationGeneration);
@@ -87,15 +102,193 @@ export function ChatPage() {
 	const locallyCreatedConversationIdsRef = useRef(new Set<string>());
 	const sendOperationsRef = useRef(new Map<string, Promise<void>>());
 	const previousConversationIdRef = useRef<string | null>(activeConversationId);
+	const reconnectSequenceRef = useRef(new Map<string, number>());
+	const isMountedRef = useRef(true);
 	const [knowledgeRestore, setKnowledgeRestore] = useState<{ messageId: string; itemId: string } | null>(null);
 	const { addFiles } = useDragAndDrop(activeConversationId);
 
 	const hasMessages = messages.length > 0;
+
+	function applyGenerationSnapshot(conversationId: string, snapshot: GenerationSnapshot) {
+		if (!isMountedRef.current || previousConversationIdRef.current !== conversationId) return;
+		const running = snapshot.status === 'queued' || snapshot.status === 'running';
+		const nextMessage: ChatMessage = {
+			...snapshot.message,
+			content: snapshot.content,
+			status: running
+				? CHAT_MESSAGE_STATUSES.STREAMING
+				: snapshot.status === 'completed'
+					? CHAT_MESSAGE_STATUSES.DONE
+					: CHAT_MESSAGE_STATUSES.ERROR,
+			error: running || snapshot.status === 'completed'
+				? undefined
+				: terminalGenerationError(snapshot.status, snapshot.errorCode, snapshot.requestId),
+		};
+		setConversationMessages(conversationId, (current) => {
+			const exists = current.some((message) => message.id === snapshot.assistantMessageId);
+			return exists
+				? current.map((message) => message.id === snapshot.assistantMessageId ? nextMessage : message)
+				: [...current, nextMessage];
+		});
+		if (running) {
+			setConversationGeneration(conversationId, {
+				status: 'running',
+				connection: 'reconnecting',
+				runId: snapshot.runId,
+				assistantMessageId: snapshot.assistantMessageId,
+				sequence: snapshot.sequence,
+			});
+		} else {
+			clearConversationGeneration(conversationId);
+		}
+	}
+
+	function applyReconnectEvent(
+		conversationId: string,
+		runId: string,
+		assistantMessageId: string,
+		event: StreamEvent,
+	): boolean {
+		if (!isMountedRef.current || previousConversationIdRef.current !== conversationId) return false;
+		const currentGeneration = useChatStore.getState().generationByConversation[conversationId];
+		if (!currentGeneration) return false;
+		if (currentGeneration?.runId && currentGeneration.runId !== runId) return false;
+		if (event.type === 'snapshot') {
+			if (event.generationRunId !== runId || event.assistantMessageId !== assistantMessageId) return false;
+			const running = event.status === 'queued' || event.status === 'running';
+			setConversationMessages(conversationId, (current) => current.map((message) =>
+				message.id === assistantMessageId
+					? {
+						...message,
+						...(event.message ?? {}),
+						content: event.content,
+						status: running
+							? CHAT_MESSAGE_STATUSES.STREAMING
+							: event.status === 'completed'
+								? CHAT_MESSAGE_STATUSES.DONE
+								: CHAT_MESSAGE_STATUSES.ERROR,
+						error: running || event.status === 'completed'
+							? undefined
+							: terminalGenerationError(event.status, event.errorCode, event.requestId),
+					}
+					: message,
+			));
+			if (running) {
+				setConversationGeneration(conversationId, {
+					status: 'running', connection: 'connected', runId,
+					assistantMessageId, sequence: event.sequence,
+				});
+				return false;
+			}
+			clearConversationGeneration(conversationId);
+			return true;
+		}
+		if (event.type === 'delta') {
+			if (event.generationRunId && event.generationRunId !== runId) return false;
+			const sequence = event.sequence ?? ((currentGeneration?.sequence ?? 0) + 1);
+			if (sequence <= (currentGeneration?.sequence ?? 0)) return false;
+			setConversationMessages(conversationId, (current) => current.map((message) =>
+				message.id === assistantMessageId
+					? { ...message, content: message.content + event.content, status: CHAT_MESSAGE_STATUSES.STREAMING }
+					: message,
+			));
+			setConversationGeneration(conversationId, {
+				status: 'running', connection: 'connected', runId, assistantMessageId, sequence,
+			});
+			return false;
+		}
+		if (event.type === 'done') {
+			setConversationMessages(conversationId, (current) => current.map((message) =>
+				message.id === assistantMessageId
+					? (event.message ?? { ...message, status: CHAT_MESSAGE_STATUSES.DONE })
+					: message,
+			));
+			clearConversationGeneration(conversationId);
+			return true;
+		}
+		if (event.type === 'error') {
+			setConversationMessages(conversationId, (current) => current.map((message) =>
+				message.id === assistantMessageId
+					? {
+						...message,
+						status: CHAT_MESSAGE_STATUSES.ERROR,
+						error: getUserFacingError(event.code, 0, event.requestId),
+					}
+					: message,
+			));
+			clearConversationGeneration(conversationId);
+			return true;
+		}
+		return false;
+	}
+
+	async function reconnectGeneration(conversationId: string, initialSnapshot?: GenerationSnapshot) {
+		const reconnectSequence = (reconnectSequenceRef.current.get(conversationId) ?? 0) + 1;
+		reconnectSequenceRef.current.set(conversationId, reconnectSequence);
+		let snapshot = initialSnapshot;
+		for (let attempt = 0; attempt < RECONNECT_DELAYS_MS.length; attempt += 1) {
+			let subscriptionController: AbortController | undefined;
+			let terminalReceivedDuringAttempt = false;
+			if (
+				!isMountedRef.current || previousConversationIdRef.current !== conversationId ||
+				reconnectSequenceRef.current.get(conversationId) !== reconnectSequence
+			) return;
+			if (RECONNECT_DELAYS_MS[attempt] > 0)
+				await new Promise((resolve) => window.setTimeout(resolve, RECONNECT_DELAYS_MS[attempt]));
+			if (!isMountedRef.current || previousConversationIdRef.current !== conversationId) return;
+			try {
+				snapshot = snapshot ?? await getConversationGeneration(conversationId) ?? undefined;
+				if (!snapshot) {
+					clearConversationGeneration(conversationId);
+					return;
+				}
+				applyGenerationSnapshot(conversationId, snapshot);
+				if (snapshot.status !== 'queued' && snapshot.status !== 'running') return;
+				setConversationGeneration(conversationId, {
+					status: 'running', connection: 'reconnecting',
+					runId: snapshot.runId, assistantMessageId: snapshot.assistantMessageId, sequence: snapshot.sequence,
+				});
+				const controller = new AbortController();
+				subscriptionController = controller;
+				requestControllersRef.current.set(conversationId, controller);
+				try {
+					await resumeGeneration({
+						runId: snapshot.runId,
+						conversationId,
+						assistantMessageId: snapshot.assistantMessageId,
+						signal: controller.signal,
+						onEvent: (event) => {
+							terminalReceivedDuringAttempt = applyReconnectEvent(
+								conversationId, snapshot!.runId, snapshot!.assistantMessageId, event,
+							) || terminalReceivedDuringAttempt;
+						},
+					});
+				} finally {
+					if (requestControllersRef.current.get(conversationId) === controller)
+						requestControllersRef.current.delete(conversationId);
+				}
+				if (terminalReceivedDuringAttempt || controller.signal.aborted) return;
+				snapshot = undefined;
+			} catch (error) {
+				if (subscriptionController?.signal.aborted || previousConversationIdRef.current !== conversationId) return;
+				if (terminalReceivedDuringAttempt) return;
+				if (attempt === RECONNECT_DELAYS_MS.length - 1)
+					reportError('Не удалось восстановить поток генерации', error, { conversationId });
+				snapshot = undefined;
+			}
+			const current = useChatStore.getState().generationByConversation[conversationId];
+			if (current) setConversationGeneration(conversationId, { ...current, connection: 'reconnecting' });
+		}
+	}
 	useEffect(() => {
 		const previousId = previousConversationIdRef.current;
-		if (previousId && previousId !== activeConversationId) requestControllersRef.current.get(previousId)?.abort();
+		if (previousId && previousId !== activeConversationId) {
+			requestControllersRef.current.get(previousId)?.abort();
+			reconnectSequenceRef.current.set(previousId, (reconnectSequenceRef.current.get(previousId) ?? 0) + 1);
+			clearConversationGeneration(previousId);
+		}
 		previousConversationIdRef.current = activeConversationId;
-	}, [activeConversationId]);
+	}, [activeConversationId, clearConversationGeneration]);
 
 	useEffect(() => {
 		const frameId = requestAnimationFrame(() => {
@@ -127,9 +320,23 @@ export function ChatPage() {
 		setPageError('');
 		setIsLoadingConversation(true);
 		getConversation(activeConversationId)
-			.then((conversation) => {
+			.then(async (conversation) => {
 				if (sequence === loadSequenceRef.current && canApplyLoadedConversation()) {
 					setConversationMessages(activeConversationId, conversation.messages);
+					try {
+						const snapshot = await getConversationGeneration(activeConversationId);
+						const currentGeneration = useChatStore.getState().generationByConversation[activeConversationId];
+						if (
+							sequence === loadSequenceRef.current && snapshot &&
+							(!currentGeneration || (currentGeneration.runId && currentGeneration.runId === snapshot.runId))
+						) {
+							applyGenerationSnapshot(activeConversationId, snapshot);
+							if (snapshot.status === 'queued' || snapshot.status === 'running')
+								void reconnectGeneration(activeConversationId, snapshot);
+						}
+					} catch (error) {
+						reportError('Не удалось проверить состояние генерации', error, { conversationId: activeConversationId });
+					}
 				}
 			})
 			.catch((error: unknown) => {
@@ -148,6 +355,8 @@ export function ChatPage() {
 			.finally(() => {
 				if (sequence === loadSequenceRef.current) setIsLoadingConversation(false);
 			});
+	// Restore is route-scoped; generation callbacks intentionally use the render that started this load.
+	// eslint-disable-next-line react-hooks/exhaustive-deps
 	}, [activeConversationId, setConversationMessages, setIsLoadingConversation, setPageError]);
 
 	useEffect(() => {
@@ -162,9 +371,11 @@ export function ChatPage() {
 	}, [messages, hasMessages, isGenerating]);
 
 	useEffect(() => {
+		isMountedRef.current = true;
 		const attachmentUrls = attachmentUrlsRef.current;
 		const requestControllers = requestControllersRef.current;
 		return () => {
+			isMountedRef.current = false;
 			requestControllers.forEach((controller) => controller.abort());
 			attachmentUrls.forEach((url) => URL.revokeObjectURL(url));
 		};
@@ -254,11 +465,16 @@ export function ChatPage() {
 		tempAttachments.forEach((attachment) => attachmentUrlsRef.current.add(attachment.url));
 		const tempAssistantId = crypto.randomUUID();
 		let currentAssistantId: string = tempAssistantId;
+		let currentRunId: string | undefined;
+		let terminalReceived = false;
+		let shouldReconnect = false;
 		const controller = new AbortController();
 		requestControllersRef.current.set(conversationId, controller);
 		setConversationGeneration(conversationId, {
-			status: CHAT_MESSAGE_STATUSES.STREAMING,
+			status: 'running',
+			connection: 'connected',
 			assistantMessageId: tempAssistantId,
+			sequence: 0,
 		});
 		let receivedMeta = false;
 		let pendingDelta = '';
@@ -321,11 +537,15 @@ export function ChatPage() {
 				onEvent: (event) => {
 					if (event.type === 'meta') {
 						receivedMeta = true;
+						currentRunId = event.generationRunId;
 						localRetryPayloadsRef.current.delete(tempUserId);
 						currentAssistantId = event.assistantMessageId;
 						setConversationGeneration(conversationId, {
-							status: CHAT_MESSAGE_STATUSES.STREAMING,
+							status: 'running',
+							connection: 'connected',
+							runId: event.generationRunId,
 							assistantMessageId: event.assistantMessageId,
+							sequence: 0,
 						});
 						tempAttachments.forEach((attachment) => {
 							URL.revokeObjectURL(attachment.url);
@@ -345,10 +565,25 @@ export function ChatPage() {
 							}),
 						);
 						updateConversationSummary(event.conversationId, event.conversationTitle);
+					} else if (event.type === 'snapshot') {
+						if (deltaFrame !== null) cancelAnimationFrame(deltaFrame);
+						flushDelta();
+						currentRunId = event.generationRunId;
+						currentAssistantId = event.assistantMessageId;
+						terminalReceived = applyReconnectEvent(
+							conversationId, event.generationRunId, event.assistantMessageId, event,
+						) || terminalReceived;
 					} else if (event.type === 'delta') {
+						const currentGeneration = useChatStore.getState().generationByConversation[conversationId];
+						if (event.sequence !== undefined && event.sequence <= (currentGeneration?.sequence ?? 0)) return;
 						pendingDelta += event.content;
+						if (currentGeneration) setConversationGeneration(conversationId, {
+							...currentGeneration,
+							sequence: event.sequence ?? currentGeneration.sequence + 1,
+						});
 						if (deltaFrame === null) deltaFrame = requestAnimationFrame(flushDelta);
 					} else if (event.type === 'done') {
+						terminalReceived = true;
 						if (deltaFrame !== null) cancelAnimationFrame(deltaFrame);
 						flushDelta();
 						setConversationMessages(conversationId, (current) =>
@@ -359,6 +594,7 @@ export function ChatPage() {
 							),
 						);
 					} else {
+						terminalReceived = true;
 						setConversationMessages(conversationId, (current) =>
 							current.map((message) =>
 								message.id === currentAssistantId
@@ -374,28 +610,20 @@ export function ChatPage() {
 					}
 				},
 			});
+			if (receivedMeta && currentRunId && !terminalReceived) shouldReconnect = true;
 		} catch (error) {
 			if (deltaFrame !== null) cancelAnimationFrame(deltaFrame);
 			flushDelta();
-			const wasStopped = controller.signal.aborted;
-			if (!wasStopped) reportError('Ошибка генерации ответа', error, { conversationId });
-			const messageText = wasStopped ? 'Генерация остановлена' : '';
+			const wasDisconnected = controller.signal.aborted;
+			if (wasDisconnected) return;
+			if (receivedMeta && currentRunId && !terminalReceived) {
+				shouldReconnect = true;
+				const current = useChatStore.getState().generationByConversation[conversationId];
+				if (current) setConversationGeneration(conversationId, { ...current, connection: 'reconnecting' });
+				return;
+			}
+			reportError('Ошибка генерации ответа', error, { conversationId });
 			if (!receivedMeta) {
-				if (wasStopped) {
-					setConversationMessages(conversationId, (current) =>
-						current.map((message) =>
-							message.id === tempAssistantId
-								? {
-										...message,
-										content: message.content || messageText,
-										error: undefined,
-										status: CHAT_MESSAGE_STATUSES.CANCELLED,
-									}
-								: message,
-						),
-					);
-					return;
-				}
 				const normalizedError =
 					error instanceof ApiError
 						? getUserFacingError(error.code, error.status, error.requestId)
@@ -440,9 +668,9 @@ export function ChatPage() {
 					message.id === currentAssistantId || message.id === tempAssistantId
 						? {
 								...message,
-								content: wasStopped ? message.content || messageText : '',
-								error: wasStopped ? undefined : (message.error ?? normalizedError),
-								status: wasStopped ? CHAT_MESSAGE_STATUSES.CANCELLED : CHAT_MESSAGE_STATUSES.ERROR,
+								content: '',
+								error: message.error ?? normalizedError,
+								status: CHAT_MESSAGE_STATUSES.ERROR,
 							}
 						: message,
 				),
@@ -451,8 +679,10 @@ export function ChatPage() {
 			if (deltaFrame !== null) cancelAnimationFrame(deltaFrame);
 			if (requestControllersRef.current.get(conversationId) === controller) {
 				requestControllersRef.current.delete(conversationId);
-				clearConversationGeneration(conversationId);
+				if (!shouldReconnect) clearConversationGeneration(conversationId);
 			}
+			if (shouldReconnect && currentRunId && previousConversationIdRef.current === conversationId)
+				void reconnectGeneration(conversationId);
 			listConversations()
 				.then(setConversations)
 				.catch((error: unknown) => reportError('Не удалось обновить историю диалогов', error));
@@ -487,6 +717,48 @@ export function ChatPage() {
 		}
 	}
 
+	async function handleStopGeneration() {
+		if (!activeConversationId) return;
+		const conversationId = activeConversationId;
+		let current = useChatStore.getState().generationByConversation[conversationId];
+		let snapshot: GenerationSnapshot | null = null;
+		if (!current?.runId) {
+			for (const delay of [0, 100, 300]) {
+				if (delay) await new Promise((resolve) => window.setTimeout(resolve, delay));
+				snapshot = await getConversationGeneration(conversationId);
+				if (snapshot && (snapshot.status === 'queued' || snapshot.status === 'running')) break;
+			}
+			if (snapshot && (snapshot.status === 'queued' || snapshot.status === 'running')) {
+				applyGenerationSnapshot(conversationId, snapshot);
+				current = useChatStore.getState().generationByConversation[conversationId];
+			}
+		}
+		if (!current) return;
+		try {
+			const status = await stopGeneration(current.assistantMessageId);
+			requestControllersRef.current.get(conversationId)?.abort();
+			reconnectSequenceRef.current.set(conversationId, (reconnectSequenceRef.current.get(conversationId) ?? 0) + 1);
+			if (status === 'completed') {
+				const loaded = await getConversation(conversationId);
+				setConversationMessages(conversationId, loaded.messages);
+			} else {
+				setConversationMessages(conversationId, (messages) => messages.map((message) =>
+					message.id === current!.assistantMessageId
+						? {
+							...message,
+							status: CHAT_MESSAGE_STATUSES.ERROR,
+							error: terminalGenerationError(status),
+						}
+						: message,
+				));
+			}
+			clearConversationGeneration(conversationId);
+		} catch (error) {
+			reportError('Не удалось остановить генерацию', error, { conversationId });
+			showToast(error instanceof Error ? error.message : 'Не удалось остановить генерацию', 'error');
+		}
+	}
+
 	function handleRetry(userMessageId: string) {
 		if (!activeConversationId) return;
 		const localPayload = localRetryPayloadsRef.current.get(userMessageId);
@@ -512,6 +784,9 @@ export function ChatPage() {
 	async function handleActivateBranch(messageId: string) {
 		if (!activeConversationId) return;
 		const conversationId = activeConversationId;
+		requestControllersRef.current.get(conversationId)?.abort();
+		reconnectSequenceRef.current.set(conversationId, (reconnectSequenceRef.current.get(conversationId) ?? 0) + 1);
+		clearConversationGeneration(conversationId);
 		const active = await activateMessageBranch(messageId);
 		const groupId = active.branchGroupId || active.id;
 		setConversationMessages(conversationId, (current) =>
@@ -736,6 +1011,9 @@ export function ChatPage() {
 						)}
 					</main>
 					<div className="chat-page__prompt">
+						{generation?.connection === 'reconnecting' && (
+							<div className="chat-page__loading" role="status">Восстанавливаем подключение…</div>
+						)}
 						{showScrollButton && (
 							<button
 								className="chat-page__scroll-bottom"
@@ -749,9 +1027,7 @@ export function ChatPage() {
 						<PromptBar
 							onSendMessage={handleSendMessage}
 							onExport={onExport}
-							onStop={() => {
-								if (activeConversationId) requestControllersRef.current.get(activeConversationId)?.abort();
-							}}
+							onStop={() => void handleStopGeneration()}
 							onOpenFile={openPromptFile}
 							isGenerating={isGenerating || isCreatingConversation}
 							submissionKey={activeConversationId ?? 'new'}

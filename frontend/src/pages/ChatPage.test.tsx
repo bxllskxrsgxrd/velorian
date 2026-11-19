@@ -25,11 +25,15 @@ const api = vi.hoisted(() => ({
 	restoreConversation: vi.fn(),
 	restoreKnowledgeItem: vi.fn(),
 	getConversation: vi.fn(),
+	getConversationGeneration: vi.fn(),
+	getGenerationRun: vi.fn(),
 	getMessageKnowledgeLink: vi.fn(),
 	listConversations: vi.fn(),
 	loadAttachmentFile: vi.fn(),
 	renameConversation: vi.fn(),
 	streamChat: vi.fn(),
+	resumeGeneration: vi.fn(),
+	stopGeneration: vi.fn(),
 	activateMessageBranch: vi.fn(),
 	createMessageMarkdownFile: vi.fn(),
 	removeMessageRating: vi.fn(),
@@ -74,6 +78,9 @@ beforeEach(() => {
 	useFilesStore.getState().reset();
 	useConversationsStore.getState().reset();
 	useMessageUiStore.getState().reset();
+	api.getConversationGeneration.mockResolvedValue(null);
+	api.resumeGeneration.mockResolvedValue(undefined);
+	api.stopGeneration.mockResolvedValue('stopped');
 });
 
 describe('ChatPage retry', () => {
@@ -477,5 +484,139 @@ describe('ChatPage linked knowledge restore', () => {
 		expect(screen.getByRole('img', { name: 'Оценка ответа: 4 из 5' })).toBeVisible();
 		expect(screen.queryByRole('button', { name: 'Поставить рейтинг 4 из 5' })).not.toBeInTheDocument();
 		expect(useChatStore.getState().messagesByConversation[conversation.id][0].rating?.score).toBe(4);
+	});
+});
+
+describe('ChatPage resumable generations', () => {
+	const userMessage = {
+		id: 'resume-user', role: 'user' as const, content: 'Продолжи', status: 'done' as const,
+		attachments: [], branchGroupId: 'resume-user', replyToId: null, isActive: true,
+	};
+	const assistantMessage = {
+		id: 'resume-assistant', role: 'assistant' as const, content: 'Частичный', status: 'streaming' as const,
+		attachments: [], replyToId: 'resume-user',
+	};
+	const snapshot = {
+		runId: 'resume-run',
+		conversationId: conversation.id,
+		branchAnchorMessageId: userMessage.id,
+		assistantMessageId: assistantMessage.id,
+		status: 'running' as const,
+		content: 'Частичный',
+		sequence: 1,
+		errorCode: null,
+		requestId: 'resume-request',
+		message: assistantMessage,
+	};
+
+	beforeEach(() => {
+		vi.clearAllMocks();
+		api.listConversations.mockResolvedValue([conversation]);
+		api.getConversation.mockResolvedValue({ ...conversation, messages: [userMessage, assistantMessage] });
+		api.getConversationGeneration.mockResolvedValue(snapshot);
+	});
+
+	it('restores a running answer after page load without starting another AI request', async () => {
+		api.resumeGeneration.mockImplementation(async ({ onEvent }: { onEvent: (event: StreamEvent) => void }) => {
+			onEvent({
+				type: 'snapshot', generationRunId: snapshot.runId, assistantMessageId: snapshot.assistantMessageId,
+				sequence: 1, status: 'running', content: 'Частичный', message: assistantMessage,
+			});
+			onEvent({ type: 'delta', generationRunId: snapshot.runId, sequence: 2, content: ' ответ' });
+			onEvent({
+				type: 'done', generationRunId: snapshot.runId, sequence: 2, messageId: snapshot.assistantMessageId,
+				message: { ...assistantMessage, content: 'Частичный ответ', status: 'done' },
+			});
+		});
+
+		renderChatPage();
+
+		expect(await screen.findByText('Частичный ответ')).toBeVisible();
+		expect(api.resumeGeneration).toHaveBeenCalledWith(expect.objectContaining({
+			runId: snapshot.runId,
+			conversationId: conversation.id,
+			assistantMessageId: snapshot.assistantMessageId,
+		}));
+		expect(api.streamChat).not.toHaveBeenCalled();
+		expect(useChatStore.getState().messagesByConversation[conversation.id]).toHaveLength(2);
+	});
+
+	it('recovers after a temporary stream failure and ignores a duplicate sequence', async () => {
+		api.resumeGeneration
+			.mockRejectedValueOnce(new ApiError('NETWORK_ERROR', 0, 'lost-connection'))
+			.mockImplementationOnce(async ({ onEvent }: { onEvent: (event: StreamEvent) => void }) => {
+				onEvent({
+					type: 'snapshot', generationRunId: snapshot.runId, assistantMessageId: snapshot.assistantMessageId,
+					sequence: 1, status: 'running', content: 'Частичный', message: assistantMessage,
+				});
+				onEvent({ type: 'delta', generationRunId: snapshot.runId, sequence: 1, content: ' ДУБЛЬ' });
+				onEvent({ type: 'delta', generationRunId: snapshot.runId, sequence: 2, content: ' ответ' });
+				onEvent({ type: 'done', generationRunId: snapshot.runId, sequence: 2, messageId: snapshot.assistantMessageId });
+			});
+
+		renderChatPage();
+
+		expect(await screen.findByText('Частичный ответ')).toBeVisible();
+		expect(screen.queryByText(/ДУБЛЬ/)).not.toBeInTheDocument();
+		expect(api.resumeGeneration).toHaveBeenCalledTimes(2);
+		expect(useChatStore.getState().messagesByConversation[conversation.id]).toHaveLength(2);
+	});
+
+	it('calls the backend Stop endpoint and shows the stopped state', async () => {
+		api.resumeGeneration.mockImplementation(({ signal }: { signal: AbortSignal }) => new Promise<void>((_resolve, reject) => {
+			signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+		}));
+		api.stopGeneration.mockResolvedValue('stopped');
+		renderChatPage();
+
+		await waitFor(() => expect(api.resumeGeneration).toHaveBeenCalled());
+		fireEvent.click(screen.getByRole('button', { name: 'Остановить генерацию' }));
+
+		await waitFor(() => expect(api.stopGeneration).toHaveBeenCalledWith(snapshot.assistantMessageId));
+		expect(await screen.findByText('Генерация остановлена')).toBeVisible();
+		expect(screen.getByRole('button', { name: 'Повторить' })).toBeVisible();
+	});
+
+	it('shows an interrupted run after server restart without waiting forever', async () => {
+		api.getConversationGeneration.mockResolvedValue({
+			...snapshot,
+			status: 'interrupted',
+			content: 'Сохранённая часть',
+			message: { ...assistantMessage, content: 'Сохранённая часть', status: 'cancelled' },
+		});
+
+		renderChatPage();
+
+		expect(await screen.findByText('Генерация прервана')).toBeVisible();
+		expect(screen.getByRole('button', { name: 'Повторить' })).toBeVisible();
+		expect(api.resumeGeneration).not.toHaveBeenCalled();
+	});
+
+	it('aborts only the subscription when switching chats and does not send Stop', async () => {
+		const secondConversation = { ...conversation, id: 'conversation-2', title: 'Второй чат' };
+		api.listConversations.mockResolvedValue([conversation, secondConversation]);
+		api.getConversation.mockImplementation(async (id: string) => ({
+			...(id === conversation.id ? conversation : secondConversation),
+			messages: id === conversation.id ? [userMessage, assistantMessage] : [],
+		}));
+		api.getConversationGeneration.mockImplementation(async (id: string) => id === conversation.id ? snapshot : null);
+		let subscriptionSignal: AbortSignal | undefined;
+		api.resumeGeneration.mockImplementation(({ signal }: { signal: AbortSignal }) => {
+			subscriptionSignal = signal;
+			return new Promise<void>((_resolve, reject) => {
+				signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+			});
+		});
+		renderChatPage();
+		await waitFor(() => expect(subscriptionSignal).toBeDefined());
+
+		fireEvent.click(await screen.findByRole('button', { name: secondConversation.title }));
+
+		await waitFor(() => expect(subscriptionSignal?.aborted).toBe(true));
+		expect(api.stopGeneration).not.toHaveBeenCalled();
+
+		fireEvent.click(await screen.findByRole('button', { name: conversation.title }));
+		await waitFor(() => expect(api.resumeGeneration).toHaveBeenCalledTimes(2));
+		expect(api.stopGeneration).not.toHaveBeenCalled();
 	});
 });

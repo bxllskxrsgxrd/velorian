@@ -157,11 +157,38 @@ export type StreamEvent =
 			conversationTitle: string;
 			userMessage: ChatMessage;
 			assistantMessageId: string;
+			generationRunId?: string;
 			requestId: string;
 	  }
-	| { type: 'delta'; content: string }
-	| { type: 'done'; messageId: string; message?: ChatMessage }
-	| { type: 'error'; code: string; message: string; requestId?: string };
+	| {
+			type: 'snapshot';
+			generationRunId: string;
+			assistantMessageId: string;
+			sequence: number;
+			status: GenerationRunStatus;
+			content: string;
+			errorCode?: string | null;
+			requestId?: string | null;
+			message?: ChatMessage;
+	  }
+	| { type: 'delta'; content: string; sequence?: number; generationRunId?: string }
+	| { type: 'done'; messageId: string; message?: ChatMessage; sequence?: number; generationRunId?: string }
+	| { type: 'error'; code: string; message: string; requestId?: string; sequence?: number; generationRunId?: string };
+
+export type GenerationRunStatus = 'queued' | 'running' | 'completed' | 'failed' | 'stopped' | 'interrupted';
+
+export type GenerationSnapshot = {
+	runId: string;
+	conversationId: string;
+	branchAnchorMessageId: string;
+	assistantMessageId: string;
+	status: GenerationRunStatus;
+	content: string;
+	sequence: number;
+	errorCode?: string | null;
+	requestId?: string | null;
+	message: ChatMessage;
+};
 
 type StreamChatOptions = {
 	conversationId: string;
@@ -174,6 +201,33 @@ type StreamChatOptions = {
 	signal: AbortSignal;
 	onEvent: (event: StreamEvent) => void;
 };
+
+async function consumeEventStream(response: Response, onEvent: (event: StreamEvent) => void): Promise<void> {
+	if (!response.body) throw new ApiError('STREAM_UNAVAILABLE', 0, undefined, 'ReadableStream is unavailable');
+	const reader = response.body.getReader();
+	const decoder = new TextDecoder();
+	let buffer = '';
+
+	const emit = (line: string) => {
+		if (!line.trim()) return;
+		const event = parseStreamEvent(line);
+		if (event.type === 'meta') event.userMessage = normalizeMessage(event.userMessage);
+		if ((event.type === 'done' || event.type === 'snapshot') && event.message)
+			event.message = normalizeMessage(event.message);
+		onEvent(event);
+		if (event.type === 'error') throw new ApiError(event.code, 200, event.requestId, event.message);
+	};
+
+	while (true) {
+		const { value, done } = await reader.read();
+		buffer += decoder.decode(value, { stream: !done });
+		const lines = buffer.split('\n');
+		buffer = lines.pop() ?? '';
+		for (const line of lines) emit(line);
+		if (done) break;
+	}
+	if (buffer.trim()) emit(buffer);
+}
 
 async function runChatStream(options: StreamChatOptions): Promise<void> {
 	const formData = new FormData();
@@ -189,34 +243,46 @@ async function runChatStream(options: StreamChatOptions): Promise<void> {
 		body: formData,
 		signal: options.signal,
 	});
-	if (!response.body) throw new ApiError('STREAM_UNAVAILABLE', 0, undefined, 'ReadableStream is unavailable');
+	await consumeEventStream(response, options.onEvent);
+}
 
-	const reader = response.body.getReader();
-	const decoder = new TextDecoder();
-	let buffer = '';
+export async function getConversationGeneration(conversationId: string): Promise<GenerationSnapshot | null> {
+	const result = await requestJson<{ generation: GenerationSnapshot | null }>(`/conversations/${conversationId}/generation`);
+	return result.generation ? { ...result.generation, message: normalizeMessage(result.generation.message) } : null;
+}
 
-	while (true) {
-		const { value, done } = await reader.read();
-		buffer += decoder.decode(value, { stream: !done });
-		const lines = buffer.split('\n');
-		buffer = lines.pop() ?? '';
-		for (const line of lines) {
-			if (!line.trim()) continue;
-			const event = parseStreamEvent(line);
-			if (event.type === 'meta') event.userMessage = normalizeMessage(event.userMessage);
-			if (event.type === 'done' && event.message) event.message = normalizeMessage(event.message);
-			options.onEvent(event);
-			if (event.type === 'error') throw new ApiError(event.code, 200, event.requestId, event.message);
-		}
-		if (done) break;
-	}
-	if (buffer.trim()) {
-		const event = parseStreamEvent(buffer);
-		if (event.type === 'meta') event.userMessage = normalizeMessage(event.userMessage);
-		if (event.type === 'done' && event.message) event.message = normalizeMessage(event.message);
-		options.onEvent(event);
-		if (event.type === 'error') throw new ApiError(event.code, 200, event.requestId, event.message);
-	}
+export async function getGenerationRun(
+	runId: string,
+	conversationId: string,
+	assistantMessageId?: string,
+): Promise<GenerationSnapshot> {
+	const query = new URLSearchParams({ conversation_id: conversationId });
+	if (assistantMessageId) query.set('assistant_message_id', assistantMessageId);
+	const result = await requestJson<{ generation: GenerationSnapshot }>(`/generation-runs/${runId}?${query}`);
+	return { ...result.generation, message: normalizeMessage(result.generation.message) };
+}
+
+export async function resumeGeneration(options: {
+	runId: string;
+	conversationId: string;
+	assistantMessageId: string;
+	signal: AbortSignal;
+	onEvent: (event: StreamEvent) => void;
+}): Promise<void> {
+	const query = new URLSearchParams({
+		conversation_id: options.conversationId,
+		assistant_message_id: options.assistantMessageId,
+	});
+	const response = await apiFetch(`/generation-runs/${options.runId}/stream?${query}`, { signal: options.signal });
+	await consumeEventStream(response, options.onEvent);
+}
+
+export async function stopGeneration(messageId: string): Promise<'completed' | 'failed' | 'stopped' | 'interrupted'> {
+	const result = await requestJson<{ generation: { status: 'completed' | 'failed' | 'stopped' | 'interrupted' } }>(
+		`/messages/${messageId}/stop-generation`,
+		{ method: 'POST' },
+	);
+	return result.generation.status;
 }
 
 export async function setMessageRating(messageId: string, score: number, comment?: string): Promise<MessageRating> {

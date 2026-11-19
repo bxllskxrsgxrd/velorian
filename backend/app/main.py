@@ -48,6 +48,7 @@ from .generation_runs import (
 	InvalidGenerationRunTransition,
 	finish_generation_run,
 	get_generation_run,
+	get_generation_run_by_assistant_message,
 	get_generation_run_by_idempotency_key,
 	get_or_create_generation_run,
 	interrupt_orphaned_generation_runs,
@@ -141,6 +142,12 @@ class _ManagedGeneration:
 	task: asyncio.Task[None] | None = None
 	subscribers: set[asyncio.Queue[GenerationEvent]] = field(default_factory=set)
 	cancel_status: GenerationRunStatus = GenerationRunStatus.INTERRUPTED
+	assistant_message_id: str | None = None
+	sequence: int = 0
+	content: str = ""
+	status: GenerationRunStatus = GenerationRunStatus.RUNNING
+	error_code: str | None = None
+	request_id: str | None = None
 
 
 class GenerationTaskManager:
@@ -150,24 +157,99 @@ class GenerationTaskManager:
 		self._active: dict[str, _ManagedGeneration] = {}
 
 	@staticmethod
-	def _offer(queue: asyncio.Queue[GenerationEvent], event: GenerationEvent) -> None:
-		if queue.full():
+	def _event_payload(event: bytes) -> dict[str, object] | None:
+		try:
+			payload = json.loads(event)
+		except (TypeError, json.JSONDecodeError):
+			return None
+		return payload if isinstance(payload, dict) else None
+
+	@staticmethod
+	def _event_bytes(payload: dict[str, object]) -> bytes:
+		return (json.dumps(payload, ensure_ascii=False) + "\n").encode("utf-8")
+
+	@staticmethod
+	def _clear_queue(queue: asyncio.Queue[GenerationEvent]) -> None:
+		while not queue.empty():
 			with suppress(asyncio.QueueEmpty):
 				queue.get_nowait()
-		queue.put_nowait(event)
+
+	def _snapshot_payload(self, run_id: str, managed: _ManagedGeneration) -> dict[str, object]:
+		return {
+			"type": "snapshot",
+			"generationRunId": run_id,
+			"assistantMessageId": managed.assistant_message_id,
+			"sequence": managed.sequence,
+			"status": managed.status.value,
+			"content": managed.content,
+			"errorCode": managed.error_code,
+			"requestId": managed.request_id,
+		}
+
+	def snapshot(self, run_id: str) -> dict[str, object] | None:
+		managed = self._active.get(run_id)
+		return self._snapshot_payload(run_id, managed) if managed is not None else None
 
 	def _publish(self, run_id: str, event: GenerationEvent) -> None:
 		managed = self._active.get(run_id)
 		if managed is None:
 			return
+		if event is None:
+			for queue in tuple(managed.subscribers):
+				if queue.full():
+					self._clear_queue(queue)
+					queue.put_nowait(self._event_bytes(self._snapshot_payload(run_id, managed)))
+				queue.put_nowait(None)
+			return
+		payload = self._event_payload(event)
+		if payload is not None:
+			event_type = payload.get("type")
+			if event_type == "delta" and isinstance(payload.get("content"), str):
+				managed.sequence += 1
+				managed.content += str(payload["content"])
+				payload["sequence"] = managed.sequence
+				payload["generationRunId"] = run_id
+				event = self._event_bytes(payload)
+			elif event_type == "done":
+				managed.status = GenerationRunStatus.COMPLETED
+				message = payload.get("message")
+				if isinstance(message, dict) and isinstance(message.get("content"), str):
+					managed.content = str(message["content"])
+				payload["sequence"] = managed.sequence
+				payload["generationRunId"] = run_id
+				event = self._event_bytes(payload)
+			elif event_type == "error":
+				code = payload.get("code")
+				managed.error_code = str(code) if isinstance(code, str) else None
+				request_id = payload.get("requestId")
+				managed.request_id = str(request_id) if isinstance(request_id, str) else None
+				managed.status = (
+					GenerationRunStatus.STOPPED if code == "GENERATION_STOPPED"
+					else GenerationRunStatus.INTERRUPTED if code == "GENERATION_INTERRUPTED"
+					else GenerationRunStatus.FAILED
+				)
+				payload["sequence"] = managed.sequence
+				payload["generationRunId"] = run_id
+				event = self._event_bytes(payload)
 		for queue in tuple(managed.subscribers):
-			self._offer(queue, event)
+			if queue.full():
+				self._clear_queue(queue)
+				queue.put_nowait(self._event_bytes(self._snapshot_payload(run_id, managed)))
+				if payload is not None and payload.get("type") == "delta":
+					continue
+			queue.put_nowait(event)
 
-	def start(self, run_id: str, worker: GenerationWorker) -> asyncio.Queue[GenerationEvent]:
+	def start(
+		self,
+		run_id: str,
+		worker: GenerationWorker,
+		*,
+		assistant_message_id: str | None = None,
+	) -> asyncio.Queue[GenerationEvent]:
 		managed = self._active.get(run_id)
 		if managed is not None:
 			return self.subscribe(run_id)
-		managed = _ManagedGeneration()
+		managed = _ManagedGeneration(assistant_message_id=assistant_message_id)
 		queue: asyncio.Queue[GenerationEvent] = asyncio.Queue(maxsize=GENERATION_EVENT_QUEUE_SIZE)
 		managed.subscribers.add(queue)
 		self._active[run_id] = managed
@@ -194,6 +276,14 @@ class GenerationTaskManager:
 		queue: asyncio.Queue[GenerationEvent] = asyncio.Queue(maxsize=GENERATION_EVENT_QUEUE_SIZE)
 		managed.subscribers.add(queue)
 		return queue
+
+	def subscribe_with_snapshot(self, run_id: str) -> tuple[asyncio.Queue[GenerationEvent], bytes]:
+		managed = self._active.get(run_id)
+		if managed is None or managed.task is None:
+			raise KeyError(run_id)
+		queue: asyncio.Queue[GenerationEvent] = asyncio.Queue(maxsize=GENERATION_EVENT_QUEUE_SIZE)
+		managed.subscribers.add(queue)
+		return queue, self._event_bytes(self._snapshot_payload(run_id, managed))
 
 	def unsubscribe(self, run_id: str, queue: asyncio.Queue[GenerationEvent]) -> None:
 		managed = self._active.get(run_id)
@@ -4040,6 +4130,7 @@ def _existing_generation_response(
 		conversationTitle=conversation.title,
 		userMessage=_message_payload(user_message),
 		assistantMessageId=assistant_message.id,
+		generationRunId=run.id,
 		requestId=run.correlation_id,
 	)
 	if generation_task_manager.has_task(run.id):
@@ -4056,6 +4147,151 @@ def _existing_generation_response(
 		queue.put_nowait(_event("error", code=code, message=message, requestId=run.correlation_id))
 	queue.put_nowait(None)
 	return _generation_streaming_response(run_id=run.id, queue=queue, meta_event=meta)
+
+
+def _generation_scope(
+	db: Session,
+	*,
+	user_id: str,
+	conversation_id: str,
+	run_id: str,
+	assistant_message_id: str | None = None,
+) -> tuple[GenerationRun, Message]:
+	run = db.scalar(select(GenerationRun).where(
+		GenerationRun.id == run_id,
+		GenerationRun.user_id == user_id,
+		GenerationRun.conversation_id == conversation_id,
+	))
+	if run is None or run.assistant_message_id is None:
+		raise AppError(404, "GENERATION_NOT_FOUND", "Генерация не найдена")
+	if assistant_message_id is not None and run.assistant_message_id != assistant_message_id:
+		raise AppError(404, "GENERATION_NOT_FOUND", "Генерация не найдена")
+	messages = list(db.scalars(
+		select(Message)
+		.where(Message.conversation_id == conversation_id)
+		.order_by(Message.created_at, Message.id)
+	))
+	active_ids = {message.id for message in _active_branch_messages(messages)}
+	if run.branch_anchor_message_id not in active_ids or run.assistant_message_id not in active_ids:
+		raise AppError(409, "GENERATION_BRANCH_INACTIVE", "Генерация относится к другой ветке диалога")
+	assistant_message = next((message for message in messages if message.id == run.assistant_message_id), None)
+	if assistant_message is None:
+		raise AppError(404, "GENERATION_NOT_FOUND", "Сообщение генерации не найдено")
+	return run, assistant_message
+
+
+def _generation_state_payload(run: GenerationRun, assistant_message: Message) -> dict[str, object]:
+	managed = generation_task_manager.snapshot(run.id)
+	status = str(managed["status"]) if managed is not None else run.status.value
+	content = str(managed["content"]) if managed is not None else assistant_message.content
+	sequence = int(managed["sequence"]) if managed is not None else 0
+	message = _message_payload(assistant_message)
+	message["content"] = content
+	if status in {GenerationRunStatus.QUEUED.value, GenerationRunStatus.RUNNING.value}:
+		message["status"] = "streaming"
+	return {
+		"runId": run.id,
+		"conversationId": run.conversation_id,
+		"branchAnchorMessageId": run.branch_anchor_message_id,
+		"assistantMessageId": assistant_message.id,
+		"status": status,
+		"content": content,
+		"sequence": sequence,
+		"errorCode": run.error_code,
+		"requestId": run.correlation_id,
+		"message": message,
+	}
+
+
+@app.get(f"{settings.api_prefix}/conversations/{{conversation_id}}/generation", tags=["chat"])
+def get_conversation_generation(
+	conversation_id: str,
+	user: User = Depends(get_current_user),
+	db: Session = Depends(get_db),
+):
+	_owned_conversation(db, conversation_id, user.id)
+	messages = list(db.scalars(
+		select(Message)
+		.where(Message.conversation_id == conversation_id)
+		.order_by(Message.created_at, Message.id)
+	))
+	latest_user = next((message for message in reversed(_active_branch_messages(messages)) if message.role == "user"), None)
+	if latest_user is None:
+		return {"generation": None}
+	run = db.scalar(
+		select(GenerationRun)
+		.where(
+			GenerationRun.user_id == user.id,
+			GenerationRun.conversation_id == conversation_id,
+			GenerationRun.branch_anchor_message_id == latest_user.id,
+		)
+		.order_by(GenerationRun.created_at.desc(), GenerationRun.id.desc())
+	)
+	if run is None or run.assistant_message_id is None:
+		return {"generation": None}
+	assistant_message = next((message for message in messages if message.id == run.assistant_message_id), None)
+	if assistant_message is None:
+		return {"generation": None}
+	return {"generation": _generation_state_payload(run, assistant_message)}
+
+
+@app.get(f"{settings.api_prefix}/generation-runs/{{run_id}}", tags=["chat"])
+def get_generation_state(
+	run_id: str,
+	conversation_id: str,
+	assistant_message_id: str | None = None,
+	user: User = Depends(get_current_user),
+	db: Session = Depends(get_db),
+):
+	run, assistant_message = _generation_scope(
+		db,
+		user_id=user.id,
+		conversation_id=conversation_id,
+		run_id=run_id,
+		assistant_message_id=assistant_message_id,
+	)
+	return {"generation": _generation_state_payload(run, assistant_message)}
+
+
+@app.get(f"{settings.api_prefix}/generation-runs/{{run_id}}/stream", tags=["chat"])
+def reconnect_generation_stream(
+	run_id: str,
+	conversation_id: str,
+	assistant_message_id: str,
+	user: User = Depends(get_current_user),
+	db: Session = Depends(get_db),
+):
+	run, assistant_message = _generation_scope(
+		db,
+		user_id=user.id,
+		conversation_id=conversation_id,
+		run_id=run_id,
+		assistant_message_id=assistant_message_id,
+	)
+	if generation_task_manager.has_task(run.id):
+		queue, snapshot_event = generation_task_manager.subscribe_with_snapshot(run.id)
+		return _generation_streaming_response(run_id=run.id, queue=queue, meta_event=snapshot_event)
+	state = _generation_state_payload(run, assistant_message)
+	snapshot_event = _event(
+		"snapshot",
+		generationRunId=run.id,
+		assistantMessageId=assistant_message.id,
+		sequence=state["sequence"],
+		status=state["status"],
+		content=state["content"],
+		errorCode=state["errorCode"],
+		requestId=state["requestId"],
+		message=state["message"],
+	)
+
+	async def terminal_snapshot() -> AsyncIterator[bytes]:
+		yield snapshot_event
+
+	return StreamingResponse(
+		terminal_snapshot(),
+		media_type="application/x-ndjson",
+		headers={"Cache-Control": "no-cache", "X-Accel-Buffering": "no"},
+	)
 
 
 @app.post(f"{settings.api_prefix}/conversations/{{conversation_id}}/stream", tags=["chat"])
@@ -4442,6 +4678,7 @@ async def stream_chat(
 	queue = generation_task_manager.start(
 		generation_run.id,
 		lambda publish, cancel_status: _execute_chat_generation(spec, publish, cancel_status),
+		assistant_message_id=assistant_id,
 	)
 	meta = _event(
 		"meta",
@@ -4449,6 +4686,7 @@ async def stream_chat(
 		conversationTitle=conversation.title,
 		userMessage=user_payload,
 		assistantMessageId=assistant_id,
+		generationRunId=generation_run.id,
 		requestId=request_id,
 	)
 	return _generation_streaming_response(run_id=generation_run.id, queue=queue, meta_event=meta)
@@ -4460,10 +4698,7 @@ async def stop_message_generation(
 	user: User = Depends(get_current_user),
 	db: Session = Depends(get_db),
 ):
-	run = db.scalar(select(GenerationRun).where(
-		GenerationRun.assistant_message_id == message_id,
-		GenerationRun.user_id == user.id,
-	))
+	run = get_generation_run_by_assistant_message(user_id=user.id, assistant_message_id=message_id)
 	if run is None:
 		raise AppError(404, "GENERATION_NOT_FOUND", "Активная генерация не найдена")
 	if run.status in {
