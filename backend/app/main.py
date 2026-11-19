@@ -141,9 +141,35 @@ class ChatModelSpec:
 	badge: str | None = None
 
 
+@dataclass
+class ProviderUsageState:
+	cancelled_status: AIInteractionStatus = "cancelled"
+
+
 GenerationEvent = bytes | None
 GenerationPublisher = Callable[[bytes], None]
 GenerationWorker = Callable[[GenerationPublisher, Callable[[], GenerationRunStatus]], Awaitable[None]]
+
+
+def _log_interrupted_generation_runs(run_ids: list[str]) -> None:
+	if not run_ids:
+		return
+	with SessionLocal() as db:
+		runs = list(db.scalars(select(GenerationRun).where(GenerationRun.id.in_(run_ids))))
+	for run in runs:
+		started_at = run.started_at or run.created_at
+		finished_at = run.finished_at or run.updated_at
+		latency_ms = max(0.0, (finished_at - started_at).total_seconds() * 1000)
+		log_technical_event(
+			"warning",
+			"GENERATION_INTERRUPTED",
+			correlation_id=run.correlation_id,
+			run_id=run.id,
+			provider=run.provider,
+			model=run.model,
+			status=run.status.value,
+			latency_ms=round(latency_ms, 2),
+		)
 
 
 @dataclass
@@ -332,7 +358,7 @@ class GenerationTaskManager:
 					task.result()
 			if pending:
 				logger.warning("Generation tasks still pending during shutdown: count=%s", len(pending))
-				interrupt_orphaned_generation_runs()
+				_log_interrupted_generation_runs(interrupt_orphaned_generation_runs())
 		self._active.clear()
 
 
@@ -2484,6 +2510,7 @@ async def lifespan(_app: FastAPI):
 	init_database()
 	interrupted_run_ids = interrupt_orphaned_generation_runs()
 	if interrupted_run_ids:
+		_log_interrupted_generation_runs(interrupted_run_ids)
 		logger.warning(
 			"Recovered unfinished generations from the previous process: count=%s",
 			len(interrupted_run_ids),
@@ -3562,6 +3589,7 @@ async def _stream_groq_deltas(
 	prompt_version: str,
 	correlation_id: str | None = None,
 	attempt: str = "full",
+	usage_state: ProviderUsageState | None = None,
 ) -> AsyncIterator[str]:
 	kwargs = _chat_completion_options(messages, user_id, web_search, model)
 	started = time.perf_counter()
@@ -3588,7 +3616,7 @@ async def _stream_groq_deltas(
 				yield delta
 		status = "success"
 	except (asyncio.CancelledError, GeneratorExit):
-		status = "cancelled"
+		status = usage_state.cancelled_status if usage_state is not None else "cancelled"
 		raise
 	except (APIStatusError, APIConnectionError, APITimeoutError) as error:
 		latency_ms = (time.perf_counter() - started) * 1000
@@ -3696,6 +3724,7 @@ async def _stream_gemini_deltas(
 	task_type: AITaskType,
 	prompt_version: str,
 	correlation_id: str | None = None,
+	usage_state: ProviderUsageState | None = None,
 ) -> AsyncIterator[str]:
 	if gemini_client is None:
 		raise AppError(503, "AI_MODEL_UNAVAILABLE", "Gemini не настроена на сервере")
@@ -3719,7 +3748,7 @@ async def _stream_gemini_deltas(
 				yield content
 		status = "success"
 	except (asyncio.CancelledError, GeneratorExit):
-		status = "cancelled"
+		status = usage_state.cancelled_status if usage_state is not None else "cancelled"
 		raise
 	finally:
 		_log_ai_usage(
@@ -3751,6 +3780,7 @@ async def _stream_ai_deltas(
 	prompt_version: str,
 	correlation_id: str | None = None,
 	attempt: str = "full",
+	usage_state: ProviderUsageState | None = None,
 ) -> AsyncIterator[str]:
 	if model.provider == "gemini":
 		async for delta in _stream_gemini_deltas(
@@ -3762,6 +3792,7 @@ async def _stream_ai_deltas(
 			task_type=task_type,
 			prompt_version=prompt_version,
 			correlation_id=correlation_id,
+			usage_state=usage_state,
 		):
 			yield delta
 		return
@@ -3775,6 +3806,7 @@ async def _stream_ai_deltas(
 		prompt_version=prompt_version,
 		correlation_id=correlation_id,
 		attempt=attempt,
+		usage_state=usage_state,
 	):
 		yield delta
 
@@ -3846,6 +3878,18 @@ def _finalize_generation_safely(
 		if db is not None:
 			db.rollback()
 		return get_generation_run(user_id=user_id, run_id=run_id), False
+	except Exception as error:
+		if db is not None:
+			db.rollback()
+		log_technical_event(
+			"error",
+			"GENERATION_FINALIZATION_FAILED",
+			correlation_id=request_id,
+			run_id=run_id,
+			status=status.value,
+			error_code=type(error).__name__,
+		)
+		raise
 
 
 def _completed_message_payload(assistant_message_id: str) -> dict | None:
@@ -3904,6 +3948,8 @@ async def _stream_with_generation_timeouts(
 	stream: AsyncIterator[str],
 	*,
 	deadline: float,
+	usage_state: ProviderUsageState,
+	cancel_status: Callable[[], GenerationRunStatus],
 ) -> AsyncIterator[str]:
 	iterator = stream.__aiter__()
 	first_chunk = True
@@ -3924,10 +3970,14 @@ async def _stream_with_generation_timeouts(
 				timeout=min(remaining_total, phase_timeout),
 			)
 		except asyncio.CancelledError:
+			usage_state.cancelled_status = (
+				"cancelled" if cancel_status() == GenerationRunStatus.STOPPED else "error"
+			)
 			next_chunk.cancel()
 			next_chunk.add_done_callback(_consume_finished_task)
 			raise
 		if not done:
+			usage_state.cancelled_status = "error"
 			next_chunk.cancel()
 			next_chunk.add_done_callback(_consume_finished_task)
 			if timed_by_total:
@@ -3955,8 +4005,19 @@ async def _execute_chat_generation(
 	started = time.perf_counter()
 	completion_committed = False
 	try:
-		start_generation_run(user_id=spec.user_id, run_id=spec.run_id)
+		running_run, started_changed = start_generation_run(user_id=spec.user_id, run_id=spec.run_id)
+		if started_changed:
+			log_technical_event(
+				"info",
+				"GENERATION_STARTED",
+				correlation_id=spec.request_id,
+				run_id=spec.run_id,
+				provider=spec.model.provider,
+				model=spec.model.provider_model,
+				status=running_run.status.value,
+			)
 		generation_deadline = asyncio.get_running_loop().time() + GENERATION_TOTAL_TIMEOUT_SECONDS
+		full_usage_state = ProviderUsageState()
 		try:
 			async for delta in _stream_with_generation_timeouts(
 				_stream_ai_deltas(
@@ -3969,8 +4030,11 @@ async def _execute_chat_generation(
 					prompt_version=spec.prompt_version,
 					correlation_id=spec.request_id,
 					attempt="full",
+					usage_state=full_usage_state,
 				),
 				deadline=generation_deadline,
+				usage_state=full_usage_state,
+				cancel_status=cancel_status,
 			):
 				answer_parts.append(delta)
 				answer_chars += len(delta)
@@ -4008,6 +4072,7 @@ async def _execute_chat_generation(
 				reason="retryable_provider_status_without_partial_output",
 			)
 			AI_CONTEXT_RETRIES_TOTAL.labels("started").inc()
+			compact_usage_state = ProviderUsageState()
 			try:
 				async for delta in _stream_with_generation_timeouts(
 					_stream_ai_deltas(
@@ -4020,8 +4085,11 @@ async def _execute_chat_generation(
 						prompt_version=spec.prompt_version,
 						correlation_id=spec.request_id,
 						attempt="compact",
+						usage_state=compact_usage_state,
 					),
 					deadline=generation_deadline,
+					usage_state=compact_usage_state,
+					cancel_status=cancel_status,
 				):
 					answer_parts.append(delta)
 					answer_chars += len(delta)
@@ -4091,6 +4159,16 @@ async def _execute_chat_generation(
 			)
 			return
 		completion_committed = True
+		log_technical_event(
+			"info",
+			"GENERATION_COMPLETED",
+			correlation_id=spec.request_id,
+			run_id=spec.run_id,
+			provider=spec.model.provider,
+			model=spec.model.provider_model,
+			status=final_run.status.value,
+			latency_ms=round((time.perf_counter() - started) * 1000, 2),
+		)
 		with SessionLocal() as memory_db:
 			await _extract_and_store_memory(
 				memory_db,
@@ -4119,19 +4197,30 @@ async def _execute_chat_generation(
 		if terminal_status not in {GenerationRunStatus.STOPPED, GenerationRunStatus.INTERRUPTED}:
 			terminal_status = GenerationRunStatus.INTERRUPTED
 		partial = "".join(answer_parts)
-		final_run, _changed = _finalize_generation_safely(
+		final_run, changed = _finalize_generation_safely(
 			user_id=spec.user_id,
 			run_id=spec.run_id,
 			status=terminal_status,
 			assistant_content=partial,
 			request_id=spec.request_id,
 		)
+		if changed:
+			log_technical_event(
+				"info" if final_run.status == GenerationRunStatus.STOPPED else "warning",
+				"GENERATION_STOPPED" if final_run.status == GenerationRunStatus.STOPPED else "GENERATION_INTERRUPTED",
+				correlation_id=spec.request_id,
+				run_id=spec.run_id,
+				provider=spec.model.provider,
+				model=spec.model.provider_model,
+				status=final_run.status.value,
+				latency_ms=round((time.perf_counter() - started) * 1000, 2),
+			)
 		AI_REQUESTS_TOTAL.labels(_generation_metric_status(final_run), str(spec.web_search).lower()).inc()
 		_publish_persisted_generation_terminal(spec, final_run, publish, fallback_message="Генерация остановлена")
 	except AppError as error:
 		logger.warning("AI application error: code=%s request_id=%s message=%s", error.code, spec.request_id, error.message)
 		partial = "".join(answer_parts)
-		final_run, _changed = _finalize_generation_safely(
+		final_run, changed = _finalize_generation_safely(
 			user_id=spec.user_id,
 			run_id=spec.run_id,
 			status=GenerationRunStatus.FAILED,
@@ -4139,6 +4228,21 @@ async def _execute_chat_generation(
 			error_code=error.code,
 			request_id=spec.request_id,
 		)
+		if changed:
+			is_timeout = error.code in {
+				"AI_FIRST_CHUNK_TIMEOUT", "AI_STREAM_IDLE_TIMEOUT", "AI_GENERATION_TIMEOUT", "AI_TIMEOUT",
+			}
+			log_technical_event(
+				"warning",
+				"GENERATION_TIMEOUT" if is_timeout else "GENERATION_FAILED",
+				correlation_id=spec.request_id,
+				run_id=spec.run_id,
+				provider=spec.model.provider,
+				model=spec.model.provider_model,
+				status=final_run.status.value,
+				error_code=error.code,
+				latency_ms=round((time.perf_counter() - started) * 1000, 2),
+			)
 		AI_REQUESTS_TOTAL.labels(_generation_metric_status(final_run), str(spec.web_search).lower()).inc()
 		_publish_persisted_generation_terminal(spec, final_run, publish, fallback_message=error.message)
 	except Exception as error:
@@ -4162,9 +4266,10 @@ async def _execute_chat_generation(
 		else:
 			logger.exception(failure_diagnostic)
 		log_technical_event(
-			"error",
-			"AI_REQUEST_FAILED",
+			"warning" if code == "AI_TIMEOUT" else "error",
+			"GENERATION_TIMEOUT" if code == "AI_TIMEOUT" else "AI_REQUEST_FAILED",
 			correlation_id=spec.request_id,
+			run_id=spec.run_id,
 			user_id=spec.user_id,
 			purpose="chat",
 			provider=spec.model.provider,
@@ -4814,7 +4919,7 @@ async def stop_message_generation(
 	await generation_task_manager.cancel(run.id, GenerationRunStatus.STOPPED)
 	assistant_message = db.get(Message, message_id)
 	managed_content = managed_snapshot.get("content") if managed_snapshot is not None else None
-	_finalize_generation_safely(
+	final_run, changed = _finalize_generation_safely(
 		user_id=user.id,
 		run_id=run.id,
 		status=GenerationRunStatus.STOPPED,
@@ -4825,6 +4930,16 @@ async def stop_message_generation(
 		),
 		request_id=run.correlation_id,
 	)
+	if changed:
+		log_technical_event(
+			"info",
+			"GENERATION_STOPPED",
+			correlation_id=run.correlation_id,
+			run_id=run.id,
+			provider=run.provider,
+			model=run.model,
+			status=final_run.status.value,
+		)
 	final_run = get_generation_run(user_id=user.id, run_id=run.id)
 	return {"generation": {"id": final_run.id, "status": final_run.status.value, "messageId": message_id}}
 

@@ -103,6 +103,18 @@ def _run_worker(main_module, ids: dict[str, str]) -> list[dict]:
 	return events
 
 
+def _technical_events(caplog) -> list[dict]:
+	events: list[dict] = []
+	for record in caplog.records:
+		if record.name != "velorian.observability":
+			continue
+		try:
+			events.append(json.loads(record.getMessage()))
+		except json.JSONDecodeError:
+			continue
+	return events
+
+
 def test_sse_disconnect_does_not_cancel_generation_and_partial_result_is_saved(
 	authenticated_client,
 	monkeypatch,
@@ -162,9 +174,10 @@ def test_sse_disconnect_does_not_cancel_generation_and_partial_result_is_saved(
 	assert get_generation_run(user_id=ids["user_id"], run_id=ids["run_id"]).status == GenerationRunStatus.COMPLETED
 
 
-def test_explicit_stop_cancels_task_and_preserves_partial_text(authenticated_client, monkeypatch):
+def test_explicit_stop_cancels_task_and_preserves_partial_text(authenticated_client, monkeypatch, caplog):
 	import app.main as main_module
 
+	caplog.set_level("INFO", logger="velorian.observability")
 	ids = _seed_generation(authenticated_client)
 	provider_waiting = asyncio.Event()
 	partial = "S" * (main_module.GENERATION_PARTIAL_SAVE_CHARS + 1)
@@ -193,6 +206,10 @@ def test_explicit_stop_cancels_task_and_preserves_partial_text(authenticated_cli
 		assert message.status == "cancelled"
 		assert message.content == partial
 	assert get_generation_run(user_id=ids["user_id"], run_id=ids["run_id"]).status == GenerationRunStatus.STOPPED
+	lifecycle = [event for event in _technical_events(caplog) if event.get("run_id") == ids["run_id"]]
+	assert [event["event"] for event in lifecycle if event["event"].startswith("GENERATION_")] == [
+		"GENERATION_STARTED", "GENERATION_STOPPED",
+	]
 
 
 def test_completed_state_wins_stop_race_after_response_commit(authenticated_client, monkeypatch):
@@ -275,6 +292,18 @@ def test_repeated_request_id_reuses_message_run_usage_and_provider_call(authenti
 	assert '"type": "done"' in first.text
 	assert '"type": "done"' in second.text
 	assert completions.calls == 1
+	with SessionLocal() as db:
+		run = db.scalar(select(GenerationRun).where(GenerationRun.conversation_id == conversation_id))
+		assert run is not None and run.assistant_message_id is not None
+		run_id = run.id
+		assistant_message_id = run.assistant_message_id
+	reconnected = authenticated_client.get(
+		f"/api/generation-runs/{run_id}/stream",
+		params={"conversation_id": conversation_id, "assistant_message_id": assistant_message_id},
+	)
+	assert reconnected.status_code == 200
+	assert '"type": "snapshot"' in reconnected.text
+	assert completions.calls == 1
 	authenticated_client.portal.call(drain_observability_writes)
 	with SessionLocal() as db:
 		assert db.scalar(select(func.count(Message.id)).where(Message.conversation_id == conversation_id)) == 2
@@ -320,9 +349,10 @@ def test_provider_error_fails_generation_run(authenticated_client, monkeypatch):
 		assert assistant is not None and assistant.status == "error"
 
 
-def test_first_chunk_timeout_fails_run_without_dangling_state(authenticated_client, monkeypatch):
+def test_first_chunk_timeout_fails_run_without_dangling_state(authenticated_client, monkeypatch, caplog):
 	import app.main as main_module
 
+	caplog.set_level("INFO", logger="velorian.observability")
 	ids = _seed_generation(authenticated_client, title="First chunk timeout")
 
 	async def no_first_chunk(*_args, **_kwargs):
@@ -344,6 +374,12 @@ def test_first_chunk_timeout_fails_run_without_dangling_state(authenticated_clie
 		assert run.error_code == "AI_FIRST_CHUNK_TIMEOUT"
 		assert message is not None and message.status == "error"
 		assert message.error_code == "AI_FIRST_CHUNK_TIMEOUT"
+	lifecycle = [event for event in _technical_events(caplog) if event.get("run_id") == ids["run_id"]]
+	assert [event["event"] for event in lifecycle if event["event"].startswith("GENERATION_")] == [
+		"GENERATION_STARTED", "GENERATION_TIMEOUT",
+	]
+	assert lifecycle[-1]["error_code"] == "AI_FIRST_CHUNK_TIMEOUT"
+	assert "Continue independently" not in "\n".join(record.getMessage() for record in caplog.records)
 
 
 def test_stream_idle_timeout_preserves_partial_response(authenticated_client, monkeypatch):
@@ -494,6 +530,35 @@ def test_competing_terminal_finalizations_have_one_winner(
 		assert message.status == expected_message_status
 		assert message.content == "Winner content"
 		assert message.request_id == "winner-request"
+
+
+def test_finalization_failure_is_logged_safely(authenticated_client, monkeypatch, caplog):
+	import app.main as main_module
+
+	ids = _seed_generation(authenticated_client, title="Finalization diagnostics")
+	caplog.set_level("INFO", logger="velorian.observability")
+
+	def fail_finalization(**_kwargs):
+		raise RuntimeError("database details must not be logged")
+
+	monkeypatch.setattr(main_module, "finalize_generation_run", fail_finalization)
+	with pytest.raises(RuntimeError):
+		main_module._finalize_generation_safely(
+			user_id=ids["user_id"],
+			run_id=ids["run_id"],
+			status=GenerationRunStatus.FAILED,
+			assistant_content="private assistant content",
+			error_code="AI_ERROR",
+			request_id="finalization-correlation",
+		)
+	events = _technical_events(caplog)
+	failure = next(event for event in events if event.get("event") == "GENERATION_FINALIZATION_FAILED")
+	assert failure["run_id"] == ids["run_id"]
+	assert failure["correlation_id"] == "finalization-correlation"
+	assert failure["error_code"] == "RuntimeError"
+	combined = "\n".join(record.getMessage() for record in caplog.records)
+	assert "private assistant content" not in combined
+	assert "database details must not be logged" not in combined
 
 
 def test_conflicting_active_generation_is_rejected_for_same_branch(authenticated_client):
@@ -664,9 +729,10 @@ def test_independent_chats_generate_in_parallel(authenticated_client, monkeypatc
 		assert {run.status for run in runs} == {GenerationRunStatus.COMPLETED}
 
 
-def test_graceful_shutdown_interrupts_managed_task(authenticated_client, monkeypatch):
+def test_graceful_shutdown_interrupts_managed_task(authenticated_client, monkeypatch, caplog):
 	import app.main as main_module
 
+	caplog.set_level("INFO", logger="velorian.observability")
 	ids = _seed_generation(authenticated_client)
 	provider_waiting = asyncio.Event()
 
@@ -693,6 +759,10 @@ def test_graceful_shutdown_interrupts_managed_task(authenticated_client, monkeyp
 		assert message.status == "cancelled"
 		assert message.content == "Shutdown partial"
 	assert get_generation_run(user_id=ids["user_id"], run_id=ids["run_id"]).status == GenerationRunStatus.INTERRUPTED
+	lifecycle = [event for event in _technical_events(caplog) if event.get("run_id") == ids["run_id"]]
+	assert [event["event"] for event in lifecycle if event["event"].startswith("GENERATION_")] == [
+		"GENERATION_STARTED", "GENERATION_INTERRUPTED",
+	]
 
 
 def test_stop_endpoint_is_user_scoped_and_stops_unattached_queued_run(authenticated_client, client):

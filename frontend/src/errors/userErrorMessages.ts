@@ -8,6 +8,12 @@ function formatLimit(bytes: number): string {
 	return formatFileSize(bytes).replace('.0 ', ' ');
 }
 
+const GENERATION_TIMEOUT_ERROR: ErrorDefinition = {
+	title: 'Превышено время ожидания ответа',
+	description: 'AI-сервис не успел завершить ответ. Попробуйте повторить запрос',
+	retryable: true,
+};
+
 const ERROR_MESSAGES: Record<string, ErrorDefinition> = {
 	AUTH_REQUIRED: { title: 'Требуется вход', description: 'Войдите в аккаунт, чтобы продолжить', retryable: false },
 	INVALID_SESSION: { title: 'Сессия завершилась', description: 'Войдите в аккаунт снова', retryable: false },
@@ -74,16 +80,11 @@ const ERROR_MESSAGES: Record<string, ErrorDefinition> = {
 		description: 'AI-сервис перегружен. Подождите немного и попробуйте снова',
 		retryable: true,
 	},
-	AI_TIMEOUT: {
-		title: 'Ответ занял слишком много времени',
-		description: 'Сервер не успел завершить запрос. Попробуйте повторить его',
-		retryable: true,
-	},
-	REQUEST_TIMEOUT: {
-		title: 'Ответ занял слишком много времени',
-		description: 'Сервер не успел завершить запрос. Попробуйте повторить его',
-		retryable: true,
-	},
+	AI_TIMEOUT: GENERATION_TIMEOUT_ERROR,
+	REQUEST_TIMEOUT: GENERATION_TIMEOUT_ERROR,
+	AI_FIRST_CHUNK_TIMEOUT: GENERATION_TIMEOUT_ERROR,
+	AI_STREAM_IDLE_TIMEOUT: GENERATION_TIMEOUT_ERROR,
+	AI_GENERATION_TIMEOUT: GENERATION_TIMEOUT_ERROR,
 	AI_UNAVAILABLE: {
 		title: 'Не удалось получить ответ',
 		description: 'Сервис генерации временно недоступен. Попробуйте повторить запрос через несколько секунд',

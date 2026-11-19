@@ -37,6 +37,16 @@ describe('getUserErrorMessage', () => {
 		expect(getUserFacingError('AI_SERVICE_ERROR', 413).title).not.toBe('Файл слишком большой');
 	});
 
+	it.each(['AI_FIRST_CHUNK_TIMEOUT', 'AI_STREAM_IDLE_TIMEOUT', 'AI_GENERATION_TIMEOUT'])(
+		'maps %s to the retryable generation timeout state',
+		(code) => {
+			expect(getUserFacingError(code, 504)).toMatchObject({
+				title: 'Превышено время ожидания ответа',
+				retryable: true,
+			});
+		},
+	);
+
 	it('normalizes title, description and retry policy independently', () => {
 		expect(getUserFacingError('AI_PROVIDER_UNAVAILABLE', 502, 'request-1')).toEqual({
 			code: 'AI_PROVIDER_UNAVAILABLE',

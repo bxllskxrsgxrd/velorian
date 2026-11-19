@@ -235,19 +235,20 @@ describe('ChatPage retry', () => {
 				requestId: 'stream-request',
 			});
 			onEvent({ type: 'delta', content: 'Начало ответа' });
-			onEvent({ type: 'error', code: 'AI_TIMEOUT', message: 'internal', requestId: 'timeout-request' });
-			throw new ApiError('AI_TIMEOUT', 200, 'timeout-request');
+			onEvent({ type: 'error', code: 'AI_GENERATION_TIMEOUT', message: 'internal', requestId: 'timeout-request' });
+			throw new ApiError('AI_GENERATION_TIMEOUT', 200, 'timeout-request');
 		});
 		const { container } = renderChatPage();
 		fireEvent.change(await screen.findByRole('textbox', { name: /введите запрос/i }), {
 			target: { value: 'Потоковая ошибка' },
 		});
 		fireEvent.click(screen.getByRole('button', { name: 'Отправить сообщение' }));
-		const errorText = await screen.findByText(/Сервер не успел завершить запрос/i);
+		const errorText = await screen.findByText('Превышено время ожидания ответа');
 		const alert = errorText.closest('[role="alert"]');
 		expect(alert).not.toBeNull();
 		expect(alert?.closest('.message')).toHaveClass('message--error');
 		expect(container.querySelector('.message__content--pending')).not.toBeInTheDocument();
+		expect(screen.getByRole('button', { name: 'Повторить' })).toBeVisible();
 	});
 });
 
@@ -556,6 +557,7 @@ describe('ChatPage resumable generations', () => {
 
 		renderChatPage();
 
+		expect(await screen.findByText('Восстанавливаем подключение…')).toBeVisible();
 		expect(await screen.findByText('Частичный ответ')).toBeVisible();
 		expect(screen.queryByText(/ДУБЛЬ/)).not.toBeInTheDocument();
 		expect(api.resumeGeneration).toHaveBeenCalledTimes(2);
@@ -617,6 +619,44 @@ describe('ChatPage resumable generations', () => {
 
 		fireEvent.click(await screen.findByRole('button', { name: conversation.title }));
 		await waitFor(() => expect(api.resumeGeneration).toHaveBeenCalledTimes(2));
+		expect(api.stopGeneration).not.toHaveBeenCalled();
+	});
+
+	it('ignores late deltas from an aborted initial stream after switching chats', async () => {
+		const secondConversation = { ...conversation, id: 'conversation-late-delta', title: 'Другой чат' };
+		api.listConversations.mockResolvedValue([conversation, secondConversation]);
+		api.getConversation.mockImplementation(async (id: string) => ({
+			...(id === conversation.id ? conversation : secondConversation),
+			messages: [],
+		}));
+		api.getConversationGeneration.mockResolvedValue(null);
+		let emit!: (event: StreamEvent) => void;
+		let streamSignal!: AbortSignal;
+		api.streamChat.mockImplementation(({ onEvent, signal }: { onEvent: (event: StreamEvent) => void; signal: AbortSignal }) => {
+			emit = onEvent;
+			streamSignal = signal;
+			return new Promise<void>((_resolve, reject) => {
+				signal.addEventListener('abort', () => reject(new DOMException('aborted', 'AbortError')), { once: true });
+			});
+		});
+		renderChatPage();
+		fireEvent.change(await screen.findByRole('textbox', { name: /введите запрос/i }), {
+			target: { value: 'Начать поток' },
+		});
+		fireEvent.click(screen.getByRole('button', { name: 'Отправить сообщение' }));
+		await waitFor(() => expect(api.streamChat).toHaveBeenCalled());
+		emit({
+			type: 'meta', conversationId: conversation.id, conversationTitle: conversation.title,
+			userMessage: { id: 'late-user', role: 'user', content: 'Начать поток', status: 'done', attachments: [] },
+			assistantMessageId: 'late-assistant', generationRunId: 'late-run', requestId: 'late-request',
+		});
+
+		fireEvent.click(await screen.findByRole('button', { name: secondConversation.title }));
+		await waitFor(() => expect(streamSignal.aborted).toBe(true));
+		emit({ type: 'delta', generationRunId: 'late-run', sequence: 1, content: 'ПОЗДНИЙ ФРАГМЕНТ' });
+
+		const oldMessages = useChatStore.getState().messagesByConversation[conversation.id] ?? [];
+		expect(oldMessages.find((message) => message.id === 'late-assistant')?.content).toBe('');
 		expect(api.stopGeneration).not.toHaveBeenCalled();
 	});
 });

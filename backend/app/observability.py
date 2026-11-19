@@ -26,6 +26,7 @@ _HANDLER_MARKER = "_velorian_observability_handler"
 _pending_writes: set[asyncio.Task[Any]] = set()
 _SAFE_TECHNICAL_FIELDS = {
 	"correlation_id", "user_id", "endpoint", "purpose", "provider", "model", "status",
+	"run_id",
 	"error_code", "provider_status", "latency_ms", "task_type", "prompt_version", "attempt", "phase", "result",
 	"input_tokens", "output_tokens", "cached_tokens", "total_tokens", "message_count",
 	"summary_tokens", "memory_tokens", "history_tokens", "system_tokens", "user_tokens",

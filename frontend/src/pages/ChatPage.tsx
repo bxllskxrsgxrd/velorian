@@ -535,6 +535,10 @@ export function ChatPage() {
 				editMessageId,
 				signal: controller.signal,
 				onEvent: (event) => {
+					if (
+						!isMountedRef.current || controller.signal.aborted ||
+						requestControllersRef.current.get(conversationId) !== controller
+					) return;
 					if (event.type === 'meta') {
 						receivedMeta = true;
 						currentRunId = event.generationRunId;
@@ -738,7 +742,7 @@ export function ChatPage() {
 			const status = await stopGeneration(current.assistantMessageId);
 			requestControllersRef.current.get(conversationId)?.abort();
 			reconnectSequenceRef.current.set(conversationId, (reconnectSequenceRef.current.get(conversationId) ?? 0) + 1);
-			if (status === 'completed') {
+			if (status === 'completed' || status === 'failed') {
 				const loaded = await getConversation(conversationId);
 				setConversationMessages(conversationId, loaded.messages);
 			} else {

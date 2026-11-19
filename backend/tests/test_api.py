@@ -510,6 +510,10 @@ def test_normalizes_broken_history():
 def test_retries_rejected_history_with_compact_context(authenticated_client, monkeypatch, caplog):
 	import app.main as main_module
 	from app import groq_diagnostics
+	from app.database import SessionLocal
+	from app.models import AIUsageEvent
+	from app.observability import drain_observability_writes
+	from sqlalchemy import select
 
 	completions = ContextRejectingCompletions()
 	monkeypatch.setattr(main_module, "client", FakeGroq(completions))
@@ -555,6 +559,14 @@ def test_retries_rejected_history_with_compact_context(authenticated_client, mon
 	assert fallback_result["correlation_id"] == meta["requestId"]
 	assert fallback_result["result"] == "success"
 	assert fallback_result["provider_request_id"] == "provider-compact-success"
+	authenticated_client.portal.call(drain_observability_writes)
+	with SessionLocal() as db:
+		usage_events = list(db.scalars(select(AIUsageEvent).where(
+			AIUsageEvent.correlation_id == meta["requestId"],
+			AIUsageEvent.purpose == "chat",
+		).order_by(AIUsageEvent.created_at, AIUsageEvent.id)))
+	assert sorted(event.status for event in usage_events) == ["error", "success"]
+	assert all(event.input_tokens is None and event.output_tokens is None for event in usage_events)
 	assert "Первый вопрос" not in "\n".join(record.getMessage() for record in caplog.records)
 	assert "Продолжи" not in "\n".join(record.getMessage() for record in caplog.records)
 

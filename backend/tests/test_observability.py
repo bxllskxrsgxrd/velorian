@@ -1,5 +1,6 @@
 import asyncio
 import json
+from contextlib import suppress
 from decimal import Decimal
 from types import SimpleNamespace
 from uuid import uuid4
@@ -7,6 +8,7 @@ from uuid import uuid4
 import httpx
 from google.genai import errors as genai_errors
 from groq import RateLimitError
+import pytest
 from sqlalchemy import select
 
 import app.main as main_module
@@ -171,6 +173,76 @@ class _FakeGroq:
 		self.chat = SimpleNamespace(completions=completions)
 
 
+def test_cancelled_provider_usage_distinguishes_stop_timeout_and_interruption(client, monkeypatch):
+	user, conversation = _identity()
+	model = main_module.ChatModelSpec(
+		id="usage-status", name="Usage", description="Usage", provider="groq", provider_model="usage-model",
+	)
+
+	async def cancel_provider_call(correlation_id: str, terminal_status, *, timeout: bool = False) -> int:
+		started = asyncio.Event()
+
+		class BlockingStream:
+			def __aiter__(self):
+				return self
+
+			async def __anext__(self):
+				started.set()
+				await asyncio.Event().wait()
+				raise StopAsyncIteration
+
+		completions = _Completions(BlockingStream())
+		monkeypatch.setattr(main_module, "client", _FakeGroq(completions))
+		usage_state = main_module.ProviderUsageState()
+
+		async def consume():
+			stream = main_module._stream_groq_deltas(
+				[{"role": "user", "content": "not logged"}], user.id, conversation.id, False, model,
+				task_type="chat", prompt_version="chat:test", correlation_id=correlation_id,
+				usage_state=usage_state,
+			)
+			deadline = asyncio.get_running_loop().time() + (0.01 if timeout else 1)
+			return [part async for part in main_module._stream_with_generation_timeouts(
+				stream,
+				deadline=deadline,
+				usage_state=usage_state,
+				cancel_status=lambda: terminal_status,
+			)]
+
+		task = asyncio.create_task(consume())
+		await asyncio.wait_for(started.wait(), timeout=1)
+		if timeout:
+			with pytest.raises(main_module.AppError, match="общее время|начал отвечать"):
+				await task
+		else:
+			task.cancel()
+			with suppress(asyncio.CancelledError):
+				await task
+		await drain_observability_writes()
+		return completions.calls
+
+	async def scenario():
+		assert await cancel_provider_call("usage-stop", main_module.GenerationRunStatus.STOPPED) == 1
+		assert await cancel_provider_call(
+			"usage-timeout", main_module.GenerationRunStatus.INTERRUPTED, timeout=True,
+		) == 1
+		assert await cancel_provider_call("usage-interrupted", main_module.GenerationRunStatus.INTERRUPTED) == 1
+
+	asyncio.run(scenario())
+	with SessionLocal() as db:
+		events = list(db.scalars(select(AIUsageEvent).where(
+			AIUsageEvent.correlation_id.in_({"usage-stop", "usage-timeout", "usage-interrupted"}),
+		)))
+	by_correlation = {event.correlation_id: event for event in events}
+	assert {key: event.status for key, event in by_correlation.items()} == {
+		"usage-stop": "cancelled",
+		"usage-timeout": "error",
+		"usage-interrupted": "error",
+	}
+	assert all(event.input_tokens is None and event.output_tokens is None for event in events)
+	assert all(event.estimated_cost_usd is None for event in events)
+
+
 def test_successful_title_usage_persists_once_after_request_transaction(client, monkeypatch):
 	user, conversation = _identity()
 	completion = SimpleNamespace(
@@ -304,6 +376,7 @@ def test_chat_and_each_branch_summary_call_store_separate_actual_usage(client, m
 		chat_events = list(db.scalars(select(AIUsageEvent).where(AIUsageEvent.correlation_id == "chat-usage")))
 		summary_events = list(db.scalars(select(AIUsageEvent).where(AIUsageEvent.correlation_id == "summary-usage")))
 	assert len(chat_events) == 1
+	assert chat_events[0].status == "success"
 	assert (chat_events[0].input_tokens, chat_events[0].output_tokens) == (120, 30)
 	assert len(summary_events) == 2
 	assert branch_completions.calls == 2
@@ -452,6 +525,7 @@ def test_jsonl_logging_rotates_and_excludes_sensitive_fields(tmp_path):
 				"error",
 				"TEST_TECHNICAL_EVENT",
 				correlation_id="rotation-correlation",
+				run_id="safe-run-id",
 				provider="groq",
 				model="test-model",
 				status="error",
@@ -475,8 +549,10 @@ def test_jsonl_logging_rotates_and_excludes_sensitive_fields(tmp_path):
 				continue
 			payload = json.loads(line)
 			assert {"timestamp", "level", "event"} <= set(payload)
-		assert technical_events_by_correlation_id(
+		events = technical_events_by_correlation_id(
 			"rotation-correlation", path=path, backup_count=2,
 		)
+		assert events
+		assert all(event.get("run_id") == "safe-run-id" for event in events)
 	finally:
 		configure_observability_logging()
